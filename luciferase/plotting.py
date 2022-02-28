@@ -100,8 +100,9 @@ def plot_1d_spectra(
     offset=0,
     label="",
     path="plots",
-    leg_ncol=8,
-    leg_bbox_to_anchor=(0.5,2)):
+    leg_ncol=9,
+    leg_bbox_to_anchor=(0.5,1.2),
+    y_axis_pad=20,):
     """
     """
     # Grab filenames and sort
@@ -114,6 +115,8 @@ def plot_1d_spectra(
 
     # Plot sequence of spectra
     plt.close("all")
+    fig, axis = plt.subplots()
+
     for si, sf in enumerate(spec_seq_files):
         # Read wl, spectrum, and err
         wl = fits.open(sf)[1].data["SPLICED_1D_WL"]
@@ -125,7 +128,7 @@ def plot_1d_spectra(
         obj = fits.getval(sf, "OBJECT")
 
         # Mask out bad regions
-        bad_px_mask = np.logical_or(spec > 10, spec < 0)
+        bad_px_mask = np.logical_or(spec > 3, spec < 0)
 
         # Plot spectra in chunks
         delta_wl = np.abs(wl[:-1] - wl[1:])
@@ -136,7 +139,7 @@ def plot_1d_spectra(
         gap_px = np.concatenate((gap_px, [len(wl)]))
 
         for gap_i in gap_px:
-            plt.plot(
+            axis.plot(
                 wl[gap_i0:gap_i][~bad_px_mask[gap_i0:gap_i]],
                 spec[gap_i0:gap_i][~bad_px_mask[gap_i0:gap_i]] + offset*si,
                 color=cmap(colour_steps[si]),
@@ -154,21 +157,27 @@ def plot_1d_spectra(
     handles, labels = plt.gca().get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
 
-    leg = plt.legend(
+    # Shrink current axis by 20%
+    #box = axis.get_position()
+    #axis.set_position([box.x0, box.y0, box.width, box.height * 0.8])
+
+    leg = axis.legend(
         by_label.values(),
         by_label.keys(),
-        fontsize="small",
+        fontsize="x-small",
         loc="upper center",
-        bbox_to_anchor=leg_bbox_to_anchor,
+        #bbox_to_anchor=leg_bbox_to_anchor,
         ncol=leg_ncol)
 
     for legobj in leg.legendHandles:
         legobj.set_linewidth(1.5)
 
-    plt.xlabel("Wavelength (nm)")
-    plt.ylabel("Flux (normalised)")
-    plt.xlim([wl[0]-10, wl[-1]+10])
-    plt.gcf().set_size_inches(18, 3)
+    axis.set_xlabel("Wavelength (nm)")
+    axis.set_ylabel("Flux (normalised)")
+    axis.set_xlim([wl[0]-10, wl[-1]+10])
+    axis.set_ylim([-1, si*offset+y_axis_pad])
+    axis.set_yticks([])
+    plt.gcf().set_size_inches(18, 4)
     plt.tight_layout()
     
     # Save
@@ -178,6 +187,116 @@ def plot_1d_spectra(
         save_fn = save_fn + "_" + label
 
     save_path_pdf = os.path.join(path, "{}.pdf".format(save_fn))
-    save_path_png = os.path.join(path, "{}.pdf".format(save_fn))
+    save_path_png = os.path.join(path, "{}.png".format(save_fn))
+    plt.savefig(save_path_pdf)
+    plt.savefig(save_path_png, dpi=300)
+
+
+def plot_molecfit_performance(
+    molecfit_path,
+    sci_spec_file="SCIENCE.fits",
+    model_spec_file="MODEL/BEST_FIT_MODEL.fits",
+    corr_spec_file="CORRECT/SCIENCE_TELLURIC_CORR_SCIENCE.fits",
+    ignore_px=20,
+    linewidth=0.1,):
+    """Function to plot a comparison of Molecfit's performance of correcting
+    for telluric features.
+    """
+    # Setup file paths
+    sci_spec_file = os.path.join(molecfit_path, sci_spec_file)
+    model_spec_file = os.path.join(molecfit_path, model_spec_file)
+    corr_spec_file = os.path.join(molecfit_path, corr_spec_file)
+
+    # Open files
+    sci_spec = fits.open(sci_spec_file)
+    model_spec = fits.open(model_spec_file)
+    corr_spec = fits.open(corr_spec_file)
+
+    # Initialise plots
+    plt.close("all")
+    fig, (ax1, ax2) = plt.subplots(2, sharex=True, sharey=True)
+
+    # Plot science spectrum before and after correction
+    for spec_i in range(1,len(corr_spec)):
+        # Plot original science spectrum
+        ax1.plot(
+            sci_spec[spec_i].data['WAVE'][ignore_px:-ignore_px],
+            sci_spec[spec_i].data['SPEC'][ignore_px:-ignore_px],
+            label="Science",
+            color="C0",
+            alpha=0.8,
+            linewidth=linewidth,)
+
+        # Plot corrected science spectrum
+        ax2.plot(
+            corr_spec[spec_i].data['WAVE'][ignore_px:-ignore_px],
+            corr_spec[spec_i].data['SPEC'][ignore_px:-ignore_px],
+            label="Science (Corrected)",
+            color="C0",
+            alpha=0.8,
+            linewidth=linewidth,)
+
+    # Overplot telluric model (first just points, then lines)
+    ax1.plot(
+        1000.*model_spec[1].data['lambda'],
+        model_spec[1].data['mflux'],
+        label='Telluric Model',
+        color="C1",
+        marker='.',
+        markersize=linewidth*3,
+        markeredgewidth=0,
+        alpha=0.8,
+        linewidth=0)
+     
+    for chip_i in range(max(model_spec[1].data['chip'])):
+        chip_indices = np.where(model_spec[1].data['chip'] == chip_i+1)
+        ax1.plot(
+            1000.*model_spec[1].data['mlambda'][chip_indices],
+            model_spec[1].data['mflux'][chip_indices],
+            color="C1",
+            linewidth=linewidth)
+
+    # Plot (unique) legend and adjust linewidths
+    for axis in (ax1, ax2):
+        handles, labels = axis.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+
+        leg = axis.legend(
+            by_label.values(),
+            by_label.keys(),
+            fontsize="small",
+            loc="upper center",
+            ncol=2,)
+
+        for legobj in leg.legendHandles:
+            legobj.set_linewidth(1.5)
+
+    ax2.set_xlabel("Wavelength (nm)")
+    ax1.set_ylabel("Flux (normalised)")
+    ax2.set_ylabel("Flux (normalised)")
+
+    # Set x limits
+    wls = 1000.*model_spec[1].data['lambda']
+
+    ax1.set_xlim([np.min(wls)-10, np.max(wls)+10])
+    ax2.set_xlim([np.min(wls)-10, np.max(wls)+10])
+    #ax1.set_xticks([])
+
+    # Set y limits
+    med_flux = np.nanmedian(model_spec[1].data['mflux'])
+
+    ax1.set_ylim([0, 2*med_flux])
+    ax2.set_ylim([0, 2*med_flux])
+    
+    plt.gcf().set_size_inches(18, 4)
+    plt.tight_layout()
+    
+    # Save
+    obj = sci_spec[0].header["OBJECT"]
+    save_loc = os.path.join(
+        molecfit_path, "plots", "molec_fit_results_{}".format(obj))
+
+    save_path_pdf = os.path.join("{}.pdf".format(save_loc))
+    save_path_png = os.path.join("{}.png".format(save_loc))
     plt.savefig(save_path_pdf)
     plt.savefig(save_path_png, dpi=300)
