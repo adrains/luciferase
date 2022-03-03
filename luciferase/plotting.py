@@ -18,7 +18,7 @@ def plot_2d_time_series_spectra(
     spectra_path_with_wildcard,
     label="",
     path="plots"):
-    """Function to plot a 2D image of a series of CRIRES+ spliced spectra
+    """Function to plot a 2D image of a series of CRIRES+ spliced spectra.
     """
     # Grab filenames and sort
     spec_seq_files = glob.glob(spectra_path_with_wildcard)
@@ -103,7 +103,8 @@ def plot_1d_spectra(
     leg_ncol=9,
     leg_bbox_to_anchor=(0.5,1.2),
     y_axis_pad=20,):
-    """
+    """Function to plot 1D extracted CRIRES+ spectra that have been blaze
+    corrected and spliced.
     """
     # Grab filenames and sort
     spec_seq_files = glob.glob(spectra_path_with_wildcard)
@@ -200,7 +201,23 @@ def plot_molecfit_performance(
     ignore_px=20,
     linewidth=0.1,):
     """Function to plot a comparison of Molecfit's performance of correcting
-    for telluric features.
+    for telluric features. Saved as a pdf and png in <molecfit_path>/plots/.
+
+    Parameters
+    ----------
+    molecfit_path: string
+        Filepath to the base molecfit directory.
+
+    sci_spec_file, model_spec_file, corr_spec_file: string
+        Relative filepaths to the science, best fitting telluric model, and
+        telluric corrected science fits files stored within the base molecfit
+        directory.
+    
+    ignore_px: int, default: 20
+        How many pixels to ignore from each side of the detector when plotting.
+
+    linewidth: float, default: 0.1
+        Linewidth for plotted spectra.
     """
     # Setup file paths
     sci_spec_file = os.path.join(molecfit_path, sci_spec_file)
@@ -288,13 +305,19 @@ def plot_molecfit_performance(
     ax1.set_ylim([0, 2*med_flux])
     ax2.set_ylim([0, 2*med_flux])
     
+    # Set title with object and date
+    obj = sci_spec[0].header["OBJECT"]
+    date = sci_spec[0].header["DATE-OBS"].split("T")[0].split(".")[0]
+
+    fig.suptitle("{} ({})".format(obj, date))
+
     plt.gcf().set_size_inches(18, 4)
     plt.tight_layout()
     
     # Save
-    obj = sci_spec[0].header["OBJECT"]
     save_loc = os.path.join(
-        molecfit_path, "plots", "molec_fit_results_{}".format(obj))
+        molecfit_path, "plots", "molec_fit_results_{}".format(
+            obj.replace(" ", "_")))
 
     save_path_pdf = os.path.join("{}.pdf".format(save_loc))
     save_path_png = os.path.join("{}.png".format(save_loc))
