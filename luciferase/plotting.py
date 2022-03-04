@@ -99,12 +99,41 @@ def plot_1d_spectra(
     spectra_path_with_wildcard,
     offset=0,
     label="",
+    alt_name="",
     path="plots",
-    leg_ncol=9,
-    leg_bbox_to_anchor=(0.5,1.2),
-    y_axis_pad=20,):
+    leg_ncol=10,
+    y_axis_pad=20,
+    n_edge_px_to_mask=5,):
     """Function to plot 1D extracted CRIRES+ spectra that have been blaze
-    corrected and spliced.
+    corrected and spliced. Saved as a pdf and png in <molecfit_path>/plots/.
+
+    Parameters
+    ----------
+    spectra_path_with_wildcard: string
+        Path to spectra fits files to glob, use * as a wildcard to select all
+        time series observations.
+
+    offset: float, default: 0
+        Y offset to apply to each spectrum. A value of 0 means the spectra are
+        overplotted.
+
+    label: string, default: ""
+        Additional label to apply to end of saved plots.
+
+    alt_name: string, default: ""
+        Alternate star name to use in plot and filename.
+    
+    path: string, default "plots"
+        Directory to save plots. Defaults to luciferase/plots/.
+
+    leg_ncol: int, default: 10
+        The number of columns to display in the legend.
+
+    y_axis_pad: float, default: 20
+        Padding to apply to ymax so that legend fits inside bounds.
+
+    n_edge_px_to_mask: int, default: 5
+        Number of pixels to not plot from edge of each spectral segment.
     """
     # Grab filenames and sort
     spec_seq_files = glob.glob(spectra_path_with_wildcard)
@@ -120,16 +149,29 @@ def plot_1d_spectra(
 
     for si, sf in enumerate(spec_seq_files):
         # Read wl, spectrum, and err
-        wl = fits.open(sf)[1].data["SPLICED_1D_WL"]
-        spec = fits.open(sf)[1].data["SPLICED_1D_SPEC"]
-        e_spec = fits.open(sf)[1].data["SPLICED_1D_ERR"]
+        with fits.open(sf) as sci_fits:
+            wl = sci_fits[1].data["SPLICED_1D_WL"]
+            spec = sci_fits[1].data["SPLICED_1D_SPEC"]
+            e_spec = sci_fits[1].data["SPLICED_1D_ERR"]
 
-        # Grab observation times and the object name from the headers
-        obsdate = fits.getval(sf, "DATE-OBS").split("T")[-1].split(".")[0]
-        obj = fits.getval(sf, "OBJECT")
+            # Grab observation times and the object name from the headers
+            date = sci_fits[0].header["DATE-OBS"].split("T")[0]
+            time = sci_fits[0].header["DATE-OBS"].split("T")[-1].split(".")[0]
+            obj = sci_fits[0].header["OBJECT"]
 
-        # Mask out bad regions
+            # Get nodding position. Note that we have to this from the file
+            # name, as the fits headers are the same for the A and B extracted
+            # nods.
+            if "extractedA" in sf:
+                nod_pos = "A"
+            elif "extractedB" in sf:
+                nod_pos = "B"
+            else:
+                raise NameError("Unexpected filename - must be either A or B.")
+
+        # Mask out bad regions, including any edge pixels
         bad_px_mask = np.logical_or(spec > 3, spec < 0)
+        bad_px_mask
 
         # Plot spectra in chunks
         delta_wl = np.abs(wl[:-1] - wl[1:])
@@ -140,12 +182,16 @@ def plot_1d_spectra(
         gap_px = np.concatenate((gap_px, [len(wl)]))
 
         for gap_i in gap_px:
+            # Isolate spectral segments
+            wave_segment = wl[gap_i0:gap_i][~bad_px_mask[gap_i0:gap_i]]
+            spec_segment = spec[gap_i0:gap_i][~bad_px_mask[gap_i0:gap_i]]
+
             axis.plot(
-                wl[gap_i0:gap_i][~bad_px_mask[gap_i0:gap_i]],
-                spec[gap_i0:gap_i][~bad_px_mask[gap_i0:gap_i]] + offset*si,
+                wave_segment[n_edge_px_to_mask:-n_edge_px_to_mask],
+                spec_segment[n_edge_px_to_mask:-n_edge_px_to_mask] + offset*si,
                 color=cmap(colour_steps[si]),
                 linewidth=0.1,
-                label="Spec #{}, {}".format(si, obsdate),
+                label="Spec {} ({}), {}".format(si, nod_pos, time),
                 alpha=0.8)
 
             # Update the lower bound
@@ -158,16 +204,11 @@ def plot_1d_spectra(
     handles, labels = plt.gca().get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
 
-    # Shrink current axis by 20%
-    #box = axis.get_position()
-    #axis.set_position([box.x0, box.y0, box.width, box.height * 0.8])
-
     leg = axis.legend(
         by_label.values(),
         by_label.keys(),
         fontsize="x-small",
         loc="upper center",
-        #bbox_to_anchor=leg_bbox_to_anchor,
         ncol=leg_ncol)
 
     for legobj in leg.legendHandles:
@@ -178,12 +219,19 @@ def plot_1d_spectra(
     axis.set_xlim([wl[0]-10, wl[-1]+10])
     axis.set_ylim([-1, si*offset+y_axis_pad])
     axis.set_yticks([])
+
+    # Set title with object and date
+    if alt_name == "":
+        fig.suptitle("{} ({})".format(obj, date))
+        save_fn = "1d_spectra_{}".format(obj.replace(" ","_"))
+    else:
+        fig.suptitle("{} / {} ({})".format(alt_name, obj, date))
+        save_fn = "1d_spectra_{}".format(alt_name.replace(" ","_"))
+
     plt.gcf().set_size_inches(18, 4)
     plt.tight_layout()
     
     # Save
-    save_fn = "1d_spectra_{}".format(obj.replace(" ","_"))
-
     if label != "":
         save_fn = save_fn + "_" + label
 
