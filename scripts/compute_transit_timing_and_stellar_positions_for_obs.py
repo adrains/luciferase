@@ -47,9 +47,13 @@ for obs_i, filename in enumerate(fits_filenames):
         # Import exposure time and convert to days
         exp_time_days = fits_file[0].header["EXPTIME"] / 3600 / 24
 
-        # Import observation time and convert to JD
+        # Import observation time and convert to JD.
+        # Note: probably easier to just use MJD header keyword, but upon
+        # checking these are consistent to < 1 msec.
         obs_start_jd = Time.strptime(
             fits_file[0].header["DATE-OBS"], "%Y-%m-%dT%H:%M:%S.%f").jd
+
+        #obs_start_jd = fits_file[0].header["MJD-OBS"] + 2400000.5
 
         # Calculate centre and end point
         obs_mid_jd = obs_start_jd + exp_time_days/2
@@ -63,7 +67,8 @@ for obs_i, filename in enumerate(fits_filenames):
         obs_df.loc[obs_i, "obs_end_jd"] = obs_end_jd
 
 
-# Calculate the times the transit begins and ends
+# Calculate the times the transit begins and ends by predicting transits into
+# future. We want the second last prediction.
 tc_future = np.arange(tc, obs_end_jd+period, period)
 
 t_start = tc_future[-2] - t_dur / 2
@@ -75,16 +80,15 @@ t_end = tc_future[-2] + t_dur / 2
 y = b_impact
 
 # Calculate the total projected horizontal distance travelled by the planet
-# This is simply Pythagoras - we know the radius (R=1) and the height (b),
-# meaning that we can solve for the total distance.
+# This is simply Pythagoras for a triangle with side R=1, height=b, and x=d/2,
+# where d is the total projected distance travelled by the planet across the
+# star.
 d_total = 2 * np.sqrt(1**2 - y**2)
 
 # Loop over all timesteps and calculate x, the fraction of the exposure during
-# transit, and the fractional completion of the transit at the centre-point.
+# transit, fractional completion of the transit at the centre-point, and mu.
 # Note that we're working in normalised units here, so we're working in units 
 # of R_star, thus R = 1.
-# - Calculate position on stellar disk (using b, t_dur, t_elapsed)
-# - Calculate mu, other angles
 for obs_i in range(len(fits_filenames)):
     # Only meaningful to compute if we're at least partially during the transit
     if (obs_df.loc[obs_i, "obs_end_jd"] < t_start 
