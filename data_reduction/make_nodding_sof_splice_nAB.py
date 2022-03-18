@@ -1,6 +1,13 @@
 """
 Script to generate SOFs and a reduction shell script to splice reduced nodded 
-spectra together.
+spectra together for time series data.
+
+Run as
+------
+
+python make_nodding_sof_splice_nAB.py [nAB]
+
+where [nAB] is the number of A/B pairs combined.
 """
 import sys
 import numpy as np

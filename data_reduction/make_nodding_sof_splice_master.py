@@ -3,8 +3,10 @@ Script to generate SOFs and a reduction shell script to splice the A and B
 master reduced nodded spectra together.
 
 Run as:
-    python make_nodding_sof_splice_master.py
-from the main directory.
+    python make_nodding_sof_splice_master.py [folder]
+
+where [folder] is the directory of the master observations, and the script is
+called from the main directory.
 """
 import sys
 import numpy as np

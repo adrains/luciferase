@@ -4,7 +4,7 @@ Script to generate a series of SOF files for CRIRES+ reductions in nodding mode
 for time-series observations.
 
 Run as:
-    python3 nodding-make_sofs.py [nAB]
+    python3 nodding-make_sofs.py [nAB] [master_sof]
 
 Where you replace [nAB] with the number of nodding observations you would like
 to reduce together. E.G. nAB=1 will combine the nearest AB/BA pair in time, 
@@ -31,6 +31,9 @@ cwd = os.getcwd()
 # Get the number of frames to combine
 nAB = int(sys.argv[1])
 
+# Get the SOF file used to reduce the master observations
+master_sof = sys.argv[2]
+
 # Get the list of science fits files
 files_all = np.sort(glob.glob('CR*fits'))
 
@@ -49,10 +52,15 @@ if nAB < 1:
 elif (n_sci // 2) % nAB != 0:
     raise ValueError("Warning, n_sci/2 frames must be divisible by nAB.")
 
-# Check calibration file exists
-calib_file = "calib.sof"
-if not os.path.isfile(calib_file):
-    raise FileNotFoundError("No calib.sof file, aborting.")
+# We'll take the calibration file information directly from the SOF used to
+# reduce the master observations
+if not os.path.isfile(master_sof):
+    raise FileNotFoundError("No master SOF file, aborting.")
+else:
+    # Open the master SOF and grab last three lines which will be the 
+    # calibration files
+    with open(master_sof, "r") as cal:
+        cal_lines = cal.readlines()[-3:]
 
 # Sort the science observations into either A or B frames
 sci_A, sci_B = [], []
@@ -104,9 +112,6 @@ for nod_set_i in range(n_sci//nAB//2):
         cwd, dir, "{}xAB_{:02.0f}.sof".format(nAB, nod_set_i))
     print(sof_file)
 
-    # Write the SOF file along with calibration files at the end
-    cal = open(calib_file, "r")
-    
     with open(sof_file, 'w') as sof:
         # Step through and write every nodding pair up to nAB
         for file_i in range(nAB):
@@ -117,8 +122,7 @@ for nod_set_i in range(n_sci//nAB//2):
                 os.path.join(cwd, sci_B[nod_set_i])))
 
         # Now append the calibration details
-        sof.writelines(cal.readlines())
-        cal.close()
+        sof.writelines(cal_lines)
 
     # And finally write the a file containing esorex reduction commands
     with open(reduce_script, 'a') as ww:

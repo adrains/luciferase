@@ -1,119 +1,112 @@
-"""Originally written by Alexis Lavail, modified by Adam Rains.
+"""Script to prepare SOF files for reducing master nodding reductions. Files
+are saved to a subdirectory with the grating setting name.
 
-Script to generate SOF files for CRIRES+ reductions in nodding mode.
+Note that currently this script assumes that all files in the directory were
+taken with the same instrument settings (i.e. grating).
 
-Run as:
-    python3 nodding-make_sofs.py [RAW2MASTER.XML]
+Run as
+------
+python make_nodding_sof_master.py [setting] [NDIT]
 
-Where you replace [RAW2MASTER.XML] with the actual CRIRES..._raw2master.xml 
-filename, or pass in multiple XML files using a wildcard.
+Where [setting] is the grating setting as listed in the fits headers.
 
-Creates a nod.sof SOF file and a reduce.sh script that reduces your nodding 
-observations for each XML file, and places each in a separate subfolder for
-each grating/wavelength setting (e.g. K2148).
+Output
+------
+1x sof for darks
+1x sofs for flats
+1x reduce_raw_cals.sh shell script
 """
-import numpy as np
-import xml.etree.ElementTree as ET
-import glob
 import sys
-from astropy.io import fits
+import numpy as np
+import os
+import glob
 import subprocess
-import sys,os
+from astropy.io import fits
 
-# Get list of XML file names
-xml_files = glob.glob(sys.argv[1])
-print(xml_files)
-nf = len(xml_files)
-print(nf)
+# Get grating setting
+wl_setting = sys.argv[1]
+
+# Get NDIT if provided, otherwise assume NDIT=1
+if len(sys.argv) > 2:
+    ndit = sys.argv[2]
+else:
+    ndit = 1
+
+# Get current working directory
+cwd = os.getcwd()
+
+bpm_file = "cr2res_cal_dark_{}_1.42705x{}_bpm.fits".format(
+    wl_setting, ndit)
+
+DARK_BPM = os.path.join(cwd, bpm_file)
+MASTER_FLAT = os.path.join(cwd, "cr2res_cal_flat_Open_master_flat.fits")
+TRACE_WAVE = "/home/tom/pCOMM/cr2re-calib/{}_tw.fits".format(wl_setting)
+
+# No point continuing if our calibration files don't exist
+if (not os.path.isfile(DARK_BPM) or not os.path.isfile(MASTER_FLAT)
+    or not os.path.isfile(TRACE_WAVE)):
+    raise Exception("Calibration files not found.")
+
+# Get a list of just the observations at our grating 
+fits_fns = glob.glob("CRIRE.*.fits")
+fits_fns.sort()
+
+obs_fns = []
+
+for fn in fits_fns:
+    obs_cat = fits.getval(fn, "HIERARCH ESO DPR CATG")
+
+    if obs_cat == "SCIENCE":
+        obs_setting = fits.getval(fn, "HIERARCH ESO INS WLEN ID")
+
+        if obs_setting == wl_setting:
+            obs_fns.append(fn)
+
+# Raise an exception if we don't have any files
+if len(obs_fns) < 1:
+    raise Exception("No files found!")
+
+# TODO raise error if we don't have an even number of raw frames
+pass
+
+# Check the new subdirector exists
+if not os.path.isdir(wl_setting):
+    os.mkdir(wl_setting)
 
 # Before we start looping, archive the old reduce.sh script if it exists
-reduce_script = "reduce.sh"
+shell_script = os.path.join(
+    cwd, wl_setting, "reduce_master_{}.sh".format(wl_setting))
 
-if os.path.isfile(reduce_script):
-    bashCommand = "mv {} {}.old".format(reduce_script, reduce_script)
+if os.path.isfile(shell_script):
+    bashCommand = "mv {} {}.old".format(shell_script, shell_script)
     process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
     output, error = process.communicate()
 
-# And make a new reduction script
-with open(reduce_script, "w") as rs:
+# And make a new script
+with open(shell_script, "w") as rs:
     rs.write("#!/bin/bash\n")
 
-cmd = "chmod +x {}".format(reduce_script)
+cmd = "chmod +x {}".format(shell_script)
 process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
 output, error = process.communicate()
 
-# For each XML file write a pair of <wl_setting>.sof and reduce.sh files in a
-# subfolder for each grating setting (e.g. K2148).
-for xml_file in xml_files:
-    print(xml_file)
-    sof = 'nod.sof'
-    with open(sof, 'w') as wri: 
-        # Parse XML file
-        tree = ET.parse(xml_file)
-        root = tree.getroot()
+obs_sof = os.path.join(cwd, wl_setting, "{}.sof".format(wl_setting))
 
-        # Loop on XML elements
-        for elem in root:
-            for subelem in elem:
-                # Science observations
-                if subelem.attrib['category'] == 'OBS_NODDING_OTHER':
-                    # Print update, write line to SOF file
-                    print("{:s} \t {:s}".format(
-                        subelem.attrib['category'],
-                        subelem.attrib['name']))
+with open(obs_sof, 'w') as sof:
+    # First write all science files
+    for obs_fn in obs_fns:
+        obs_fn_path = os.path.join(cwd, obs_fn)
+        sof.writelines("{}\tOBS_NODDING_OTHER\n".format(obs_fn_path))
 
-                    file_path = os.path.join(
-                        os.getcwd(),
-                        "{}.fits".format(subelem.attrib['name'],))
+    # Then write bad pixel mask, master flat, and wave trace wave
+    sof.writelines("{}\tCAL_DARK_BPM\n".format(DARK_BPM))
+    sof.writelines("{}\tCAL_FLAT_MASTER\n".format(MASTER_FLAT))
+    sof.writelines("{}\tUTIL_WAVE_TW\n".format(TRACE_WAVE))
 
-                    wri.write("{}\t{}\n".format(
-                        file_path, subelem.attrib['category']))
-
-                    ffi = subelem.attrib['name'] + '.fits'
-
-                # Dark or flat
-                else:
-                    print("{:s} \t {:s}".format(
-                        subelem.attrib['category'],
-                        subelem[0][0].attrib['name']))
-                    
-                    if (subelem.attrib['category'] == 'CAL_DARK_BPM' 
-                        or subelem.attrib['category'] == 'CAL_FLAT_MASTER'):
-                        # Write line to SOF file
-                        file_path = os.path.join(
-                            os.getcwd(),
-                            "{}.fits".format(subelem[0][0].attrib['name'],))
-
-                        wri.write("{}\t{}\n".format(
-                            file_path, subelem.attrib['category']))
-        
-        # Grab the grating/wavelength setting from a science frame, then get 
-        # an appropritate precomputed trace wave file (from the most up-to-date
-        # version of the pipeline) 
-        sci = fits.open(ffi)
-        wl_setting = sci[0].header['HIERARCH ESO INS WLEN ID']
-        wri.write(
-            '/home/tom/pCOMM/cr2re-calib/{}_tw.fits\t UTIL_WAVE_TW'.format(
-                wl_setting))
-    
-    # Make a folder for this wavelength setting if it doesn't already exist
-    print(wl_setting)
-    try:
-        os.mkdir(wl_setting)
-    except FileExistsError:
-        pass
-    
-    # Move the new SOF file into this subdirectory and rename
-    cwd = os.getcwd()
-    new_sof_path = os.path.join(cwd, wl_setting, "{}.sof".format(wl_setting))
-    bashCommand = "mv nod.sof {}".format(new_sof_path)
-    process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
-    output, error = process.communicate()
-
-    # And finally write the a file containing esorex reduction commands
-    with open("reduce.sh", 'a') as ww:
-        ww.write("cd {}\n".format(os.path.join(cwd, wl_setting)))
-        esorex_cmd = ('esorex cr2res_obs_nodding --extract_swath_width=800'
-                      + ' --extract_oversample=12 --extract_height=30 '
-                      + new_sof_path + '\n')
-        ww.write(esorex_cmd)
+# And finally write the a file containing esorex reduction commands
+with open(shell_script, 'a') as ww:
+    ww.write("cd {}\n".format(os.path.join(cwd, wl_setting)))
+    esorex_cmd = ('esorex cr2res_obs_nodding --extract_swath_width=800'
+                    + ' --extract_oversample=12 --extract_height=30 '
+                    + obs_sof + '\n')
+    ww.write(esorex_cmd)
