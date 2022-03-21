@@ -4,7 +4,7 @@ Script to generate a series of SOF files for CRIRES+ reductions in nodding mode
 for time-series observations.
 
 Run as:
-    python3 nodding-make_sofs.py [nAB] [master_sof]
+    python3 nodding_make_sof_split_nAB.py [nAB] [master_sof]
 
 Where you replace [nAB] with the number of nodding observations you would like
 to reduce together. E.G. nAB=1 will combine the nearest AB/BA pair in time, 
@@ -33,6 +33,10 @@ nAB = int(sys.argv[1])
 
 # Get the SOF file used to reduce the master observations
 master_sof = sys.argv[2]
+
+# Sanity check print
+if ".sof" not in master_sof:
+    print("Are you sure {} is a .sof file?".format(master_sof))
 
 # Get the list of science fits files
 files_all = np.sort(glob.glob('CR*fits'))
