@@ -8,7 +8,9 @@ taken with the same instrument settings (i.e. grating).
 
 Run as
 ------
-python make_calibration_sofs.py
+python make_calibration_sofs.py [wl_setting]
+
+where [wl_setting] is the grating setting, e.g. K2148.
 
 Output
 ------
@@ -16,13 +18,17 @@ Output
 1x sofs for flats
 1x reduce_raw_cals.sh shell script
 """
+import sys
 import numpy as np
 import os
 import glob
 import subprocess
 from astropy.io import fits
 
-TRACE_WAVE = "/home/tom/pCOMM/cr2re-calib/K2148_tw.fits"
+# Get grating setting
+wl_setting = sys.argv[1]
+
+TRACE_WAVE = "/home/tom/pCOMM/cr2re-calib/{}_tw.fits".format(wl_setting)
 DETLIN_COEFF = "/home/tom/pCOMM/cr2res_cal_detlin_coeffs.fits"
 
 # Currently an issue with detlin adding noise due to quality of data, so 

@@ -62,12 +62,12 @@ for fn in fits_fns:
         if obs_setting == wl_setting:
             obs_fns.append(fn)
 
-# Raise an exception if we don't have any files
+# Raise an exception if we don't have any files, or if we have an unmatched set
+# of AB pairs
 if len(obs_fns) < 1:
     raise Exception("No files found!")
-
-# TODO raise error if we don't have an even number of raw frames
-pass
+elif len(obs_fns) % 2 != 0:
+    raise Exception("Unmatched/uneven set of AB pairs!")
 
 # Check the new subdirector exists
 if not os.path.isdir(wl_setting):
