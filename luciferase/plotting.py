@@ -103,7 +103,9 @@ def plot_1d_spectra(
     path="plots",
     leg_ncol=10,
     y_axis_pad=20,
-    n_edge_px_to_mask=5,):
+    n_edge_px_to_mask=5,
+    fig_size=(18,4),
+    leg_fontsize="x-small",):
     """Function to plot 1D extracted CRIRES+ spectra that have been blaze
     corrected and spliced. Saved as a pdf and png in <molecfit_path>/plots/.
 
@@ -207,7 +209,7 @@ def plot_1d_spectra(
     leg = axis.legend(
         by_label.values(),
         by_label.keys(),
-        fontsize="x-small",
+        fontsize=leg_fontsize,
         loc="upper center",
         ncol=leg_ncol)
 
@@ -228,7 +230,7 @@ def plot_1d_spectra(
         fig.suptitle("{} / {} ({})".format(alt_name, obj, date))
         save_fn = "1d_spectra_{}".format(alt_name.replace(" ","_"))
 
-    plt.gcf().set_size_inches(18, 4)
+    plt.gcf().set_size_inches(fig_size[0], fig_size[1])
     plt.tight_layout()
     
     # Save
