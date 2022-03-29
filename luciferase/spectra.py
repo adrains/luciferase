@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
+VALID_NOD_POS = ["A", "B", None,]
+
 
 def load_time_series_spectra(spectra_path_with_wildcard):
     """Imports time series spectra from globbed fits files given a filepath 
@@ -38,3 +40,364 @@ def load_time_series_spectra(spectra_path_with_wildcard):
     #masked_spec = np.ma.masked_array(spectra, ~mask)
 
     return wave, spectra, e_spectra, bad_px_mask
+
+
+class Spectrum1D(object):
+    """Base class to represent a single spectral segment.
+    """
+
+    def __init__(
+        self,
+        wave,
+        flux,
+        sigma,
+        bad_px_mask,
+        detector_i,
+        order_i,):
+        """
+        """
+        # Do initial checking of array lengths. After this initial check, we
+        # reference everything to n_px.
+        if (len(wave) != len(flux) and len(wave) != len(sigma) 
+            and len(wave) != len(bad_px_mask)):
+            raise ValueError(
+                ("Error, wave, spectrum, e_spectrum, and bad_px_mask must"
+                 "have the same length."))
+
+        self.n_px = len(wave)
+        self.wave = wave
+        self.flux = flux
+        self.sigma = sigma
+        self.bad_px_mask = bad_px_mask
+        self.detector_i = detector_i
+        self.order_i = order_i
+        
+        # Comnpute median SNR
+        self.snr = np.nanmedian(flux) / np.sqrt(np.nanmedian(flux))
+
+    @property
+    def n_px(self):
+        return self._n_px
+
+    @n_px.setter
+    def n_px(self, value):
+        self._n_px = int(value)
+
+    @property
+    def wave(self):
+        return self._wave
+
+    @wave.setter
+    def wave(self, value):
+        # Check dimensions
+        if len(value) != self.n_px:
+            raise ValueError("Error, length of array != n_px.")
+        else:
+            self._wave = np.array(value)
+
+    @property
+    def flux(self):
+        return self._flux
+
+    @flux.setter
+    def flux(self, value):
+        # Check dimensions
+        if len(value) != self.n_px:
+            raise ValueError("Error, length of array != n_px.")
+        else:
+            self._flux = np.array(value)
+
+    @property
+    def sigma(self):
+        return self._sigma
+
+    @sigma.setter
+    def sigma(self, value):
+        # Check dimensions
+        if len(value) != self.n_px:
+            raise ValueError("Error, length of array != n_px.")
+        else:
+            self._sigma = np.array(value)
+
+    @property
+    def bad_px_mask(self):
+        return self._bad_px_mask
+
+    @bad_px_mask.setter
+    def bad_px_mask(self, value):
+        # Check dimensions
+        if len(value) != self.n_px:
+            raise ValueError("Error, length of array != n_px.")
+        else:
+            self._bad_px_mask = np.array(value).astype(bool)
+
+    @property
+    def detector_i(self):
+        return self._detector_i
+
+    @detector_i.setter
+    def detector_i(self, value):
+        self._detector_i = int(value)
+
+    @property
+    def order_i(self):
+        return self._order_i
+
+    @order_i.setter
+    def order_i(self, value):
+        self._order_i = int(value)
+
+    @property
+    def snr(self):
+        return self._snr
+
+    @snr.setter
+    def snr(self, value):
+        self._snr = int(value)
+
+    def __str__(self):
+        """Print out spectrum details."""
+        info_str = (
+            "Detector {:0.0f}, ".format(self.detector_i),
+            "Order {:0.0f}, ".format(self.order_i),
+            "npx {:0.0f}, ".format(self.n_px),
+            "lambda mid {:0.1f} um, ".format(np.nanmean(self.wave)),
+            "snr {:0.0f}".format(self.snr),
+        )
+        return "".join(info_str)
+    
+class Observation(object):
+    """Class to represent a single observation being composed of at least one
+    spectral segment, but possiby more depending on spectral orders.
+    """
+    def __init__(
+        self,
+        spectra_1d,
+        t_exp_sec,
+        t_start_str,
+        t_start_jd,
+        nod_pos,
+        object_name,
+        grating_setting,
+        spectra_1d_blaze_corr=None,
+        spectra_1d_telluric_corr=None,):
+        """
+        """
+        self.spectra_1d = spectra_1d
+        self.t_exp_sec = t_exp_sec
+        self.t_start_str = t_start_str
+        self.t_start_jd = t_start_jd
+        self.nod_pos = nod_pos
+        self.object_name = object_name
+        self.grating_setting = grating_setting
+        #self.spectra_1d_blaze_corr = spectra_1d_blaze_corr
+        #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
+
+        # Calculate t_mid_jd and t_end_jd. TODO: make this automatic.
+        self.update_t_mid_and_end()
+
+    @property
+    def spectra_1d(self):
+        return self._spectra_1d
+
+    @spectra_1d.setter
+    def spectra_1d(self, value):
+        # Make sure the result is a list of Spectrum1D objects
+        if type(value) != list:
+            raise ValueError("spectra_1d should be a list of spectra.")
+        
+        for spec_i, spectrum in enumerate(value):
+            if (type(spectrum) != Spectrum1D 
+            and issubclass(type(spectrum), Spectrum1D)):
+                raise ValueError((
+                    "Spectrum #{:0.0f} in spectrum_1d is not of type "
+                    "Spectrum1D or inherited from it.").format(spec_i))
+
+        # Otherwise all good
+        self._spectra_1d = value
+
+    @property
+    def t_exp_sec(self):
+        return self._t_exp_sec
+
+    @t_exp_sec.setter
+    def t_exp_sec(self, value):
+        self._t_exp_sec = float(value)
+
+    @property
+    def t_start_str(self):
+        return self._t_start_str
+
+    @t_start_str.setter
+    def t_start_str(self, value):
+        self._t_start_str = str(value)
+
+    @property
+    def t_start_jd(self):
+        return self._t_start_jd
+
+    @t_start_jd.setter
+    def t_start_jd(self, value):
+        self._t_start_jd = float(value)
+
+    @property
+    def nod_pos(self):
+        return self._nod_pos
+
+    @nod_pos.setter
+    def nod_pos(self, value):
+        if value not in VALID_NOD_POS:
+            raise ValueError(
+                "Invalid nod_pos, must be in {}".format(VALID_NOD_POS))
+        self._nod_pos = value
+
+    @property
+    def object_name(self):
+        return self._object_name
+
+    @object_name.setter
+    def object_name(self, value):
+        self._object_name = str(value)
+
+    @property
+    def grating_setting(self):
+        return self._grating_setting
+
+    @grating_setting.setter
+    def grating_setting(self, value):
+        self._grating_setting = str(value)
+
+    @property
+    def t_mid_jd(self):
+        return self._t_mid_jd
+
+    @t_mid_jd.setter
+    def t_mid_jd(self, value):
+        self._t_mid_jd = float(value)
+
+    @property
+    def t_end_jd(self):
+        return self._t_end_jd
+
+    @t_end_jd.setter
+    def t_end_jd(self, value):
+        self._t_end_jd = float(value)
+
+
+    def update_t_mid_and_end(self,):
+        """Called to update the mid and end JD time of the observation."""
+        self.t_mid_jd = self.t_start_jd + (self.t_exp_sec / 3600 / 24)/2
+        self.t_end_jd = self.t_start_jd + (self.t_exp_sec / 3600 / 24)
+
+
+    def save_to_fits(self):
+        """
+        """
+        pass
+
+    
+    def __str__(self):
+        """"""
+        info_str = (
+            "n spectra: {:0.0f}, ".format(len(self.spectra_1d)),
+            "grating: {}, ".format(self.grating_setting),
+            "object: {}, ".format(self.object_name),
+            "date: {}, ".format(self.t_start_str),
+            "exp: {} sec, ".format(self.t_exp_sec),
+            "nod pos: {}".format(self.nod_pos),
+        )
+
+        return "".join(info_str)
+
+
+    def info(self):
+        """Gives an overview of the observation."""
+        print(str(self))
+
+        # Print out spectral segments in wavelength order
+        wl_starts = [spec.wave[0] for spec in self.spectra_1d]
+        wl_indices = np.argsort(wl_starts)
+
+        for seg_i in wl_indices:
+            print("\t", str(self.spectra_1d[seg_i]))
+
+
+def initialise_observation_from_crires_nodding_fits(
+    fits_file_nodding_extracted,
+    #fits_file_blaze_corrected,
+    #fits_file_telluric_corrected,
+    fits_ext_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),
+    initialise_empty_bad_px_mask=True,):
+    """Takes a CRIRES+ 1D extracted nodding fits file, and initialises an
+    Observation object containing a set of Spectra1D objects.
+
+    Parameters
+    ----------
+    fits_file_nodding_extracted: string
+        Filepath to CRIRES+ 1D extracted nodding fits file.
+
+    Returns
+    -------
+    """
+    with fits.open(fits_file_nodding_extracted) as fits_file:
+        # Intialise our list of spectra
+        spectra_list = []
+        
+        # Determine the spectral orders to consider. TODO: get this from fits
+        # headers in a neater way.
+        columns = fits_file[fits_ext_names[0]].data.columns.names
+        orders = list(set([int(cc.split("_")[0]) for cc in columns]))
+        orders.sort()
+
+        # Create a Spectrum1D object for each spectral order/detector combo
+        for det_i, fits_ext in enumerate(fits_ext_names):
+            hdu_data = fits_file[fits_ext].data
+
+            for order in orders:
+                wave = hdu_data["{:02.0f}_01_WL".format(order)]
+                spec = hdu_data["{:02.0f}_01_SPEC".format(order)]
+                e_spec = hdu_data["{:02.0f}_01_ERR".format(order)]
+
+                if initialise_empty_bad_px_mask:
+                    bad_px_mask = np.full(len(wave), False)
+                else:
+                    raise NotImplementedError(
+                        "Error: currently can only use default bad px mask")
+
+                spec_obj = Spectrum1D(
+                    wave=wave,
+                    flux=spec,
+                    sigma=e_spec,
+                    bad_px_mask=bad_px_mask,
+                    detector_i=det_i+1,
+                    order_i=order,
+                )
+
+                spectra_list.append(spec_obj)
+
+        # Extract header keywords. TODO: properly get exptime
+        exp_time_sec = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
+        t_start_str = fits_file[0].header["DATE-OBS"]
+        t_start_jd = fits_file[0].header["MJD-OBS"] + 2400000.5
+        nod_pos = fits_file[0].header["HIERARCH ESO SEQ NODPOS"]
+        object_name = fits_file[0].header["OBJECT"]
+        grating_setting = fits_file[0].header["HIERARCH ESO INS WLEN ID"]
+
+        # Create Observation object
+        observation = Observation(
+            spectra_1d=spectra_list,
+            t_exp_sec=exp_time_sec,
+            t_start_str=t_start_str,
+            t_start_jd=t_start_jd,
+            nod_pos=nod_pos,
+            object_name=object_name,
+            grating_setting=grating_setting,
+        )
+            
+    return observation
+
+
+def load_saved_observation_obj():
+    """
+    """
+    pass
