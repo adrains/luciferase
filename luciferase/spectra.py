@@ -4,6 +4,7 @@ import glob
 import numpy as np
 import pandas as pd
 from astropy.io import fits
+import matplotlib.pyplot as plt
 
 VALID_NOD_POS = ["A", "B", None,]
 
@@ -45,7 +46,6 @@ def load_time_series_spectra(spectra_path_with_wildcard):
 class Spectrum1D(object):
     """Base class to represent a single spectral segment.
     """
-
     def __init__(
         self,
         wave,
@@ -71,9 +71,6 @@ class Spectrum1D(object):
         self.bad_px_mask = bad_px_mask
         self.detector_i = detector_i
         self.order_i = order_i
-        
-        # Comnpute median SNR
-        self.snr = np.nanmedian(flux) / np.sqrt(np.nanmedian(flux))
 
     @property
     def n_px(self):
@@ -106,6 +103,9 @@ class Spectrum1D(object):
             raise ValueError("Error, length of array != n_px.")
         else:
             self._flux = np.array(value)
+
+            # Also update SNR
+            self.update_snr()
 
     @property
     def sigma(self):
@@ -155,8 +155,12 @@ class Spectrum1D(object):
     def snr(self, value):
         self._snr = int(value)
 
+    def update_snr(self):
+        """Simple function to recompute SNR assuming Poisson uncertainties."""
+        self.snr = np.nanmedian(self.flux) / np.sqrt(np.nanmedian(self.flux))
+
     def __str__(self):
-        """Print out spectrum details."""
+        """String representation of Spectrum1D details."""
         info_str = (
             "Detector {:0.0f}, ".format(self.detector_i),
             "Order {:0.0f}, ".format(self.order_i),
@@ -165,7 +169,8 @@ class Spectrum1D(object):
             "snr {:0.0f}".format(self.snr),
         )
         return "".join(info_str)
-    
+
+
 class Observation(object):
     """Class to represent a single observation being composed of at least one
     spectral segment, but possiby more depending on spectral orders.
@@ -297,7 +302,7 @@ class Observation(object):
 
     
     def __str__(self):
-        """"""
+        """String representation of Observation details."""
         info_str = (
             "n spectra: {:0.0f}, ".format(len(self.spectra_1d)),
             "grating: {}, ".format(self.grating_setting),
@@ -320,6 +325,28 @@ class Observation(object):
 
         for seg_i in wl_indices:
             print("\t", str(self.spectra_1d[seg_i]))
+
+
+    def plot_spectra(self, do_close_plots=True):
+        """Quickly plot spectra as a function of wavelength for inspection.
+        """
+        # Plot sequence of spectra
+        if do_close_plots:
+            plt.close("all")
+            
+        fig, axis = plt.subplots(figsize=(12,4))
+
+        # Loop over spectra array and plot each spectral segment
+        for spectrum in self.spectra_1d:
+            axis.plot(
+                spectrum.wave,
+                spectrum.flux,
+                linewidth=0.5,)
+
+        axis.set_xlabel(r"Wavelength ($\mu$m)")
+        axis.set_ylabel("Flux")
+
+        fig.tight_layout()
 
 
 def initialise_observation_from_crires_nodding_fits(
@@ -379,9 +406,14 @@ def initialise_observation_from_crires_nodding_fits(
         exp_time_sec = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
         t_start_str = fits_file[0].header["DATE-OBS"]
         t_start_jd = fits_file[0].header["MJD-OBS"] + 2400000.5
-        nod_pos = fits_file[0].header["HIERARCH ESO SEQ NODPOS"]
         object_name = fits_file[0].header["OBJECT"]
         grating_setting = fits_file[0].header["HIERARCH ESO INS WLEN ID"]
+
+        # Only get nodpos if it exists
+        if "HIERARCH ESO SEQ NODPOS" in fits_file[0].header:
+            nod_pos = fits_file[0].header["HIERARCH ESO SEQ NODPOS"]
+        else:
+            nod_pos = None
 
         # Create Observation object
         observation = Observation(
