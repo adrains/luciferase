@@ -327,20 +327,33 @@ class Observation(object):
             print("\t", str(self.spectra_1d[seg_i]))
 
 
-    def plot_spectra(self, do_close_plots=True):
+    def plot_spectra(
+        self,
+        do_close_plots=True,
+        do_normalise=False,
+        fig=None,
+        axis=None,):
         """Quickly plot spectra as a function of wavelength for inspection.
         """
         # Plot sequence of spectra
         if do_close_plots:
             plt.close("all")
-            
-        fig, axis = plt.subplots(figsize=(12,4))
+
+        # Make a new subplot if we haven't been given a set of axes
+        if fig is None and axis is None:
+            fig, axis = plt.subplots(figsize=(12,4))
 
         # Loop over spectra array and plot each spectral segment
         for spectrum in self.spectra_1d:
+            # Plot normalised spectra if requested
+            if do_normalise:
+                norm_fac = np.nanmedian(spectrum.flux)
+            else:
+                norm_fac = 1
+
             axis.plot(
                 spectrum.wave,
-                spectrum.flux,
+                spectrum.flux / norm_fac,
                 linewidth=0.5,)
 
         axis.set_xlabel(r"Wavelength ($\mu$m)")
