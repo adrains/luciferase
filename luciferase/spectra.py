@@ -185,7 +185,8 @@ class Observation(object):
         object_name,
         grating_setting,
         spectra_1d_blaze_corr=None,
-        spectra_1d_telluric_corr=None,):
+        spectra_1d_telluric_corr=None,
+        n_detectors=3,):
         """
         """
         self.spectra_1d = spectra_1d
@@ -200,6 +201,10 @@ class Observation(object):
 
         # Calculate t_mid_jd and t_end_jd. TODO: make this automatic.
         self.update_t_mid_and_end()
+
+        # Add the number of orders for ease of use, assuming 3 detectors
+        self.n_detectors = n_detectors
+        self.n_orders = len(spectra_1d) // n_detectors
 
     @property
     def spectra_1d(self):
@@ -287,6 +292,22 @@ class Observation(object):
     @t_end_jd.setter
     def t_end_jd(self, value):
         self._t_end_jd = float(value)
+
+    @property
+    def n_detectors(self):
+        return self._n_detectors
+
+    @n_detectors.setter
+    def n_detectors(self, value):
+        self._n_detectors = int(value)
+
+    @property
+    def n_orders(self):
+        return self._n_orders
+
+    @n_orders.setter
+    def n_orders(self, value):
+        self._n_orders = int(value)
 
 
     def update_t_mid_and_end(self,):
@@ -415,12 +436,17 @@ def initialise_observation_from_crires_nodding_fits(
 
                 spectra_list.append(spec_obj)
 
+        # Sort in wavelength order
+        wave_sort_i = np.argsort([spec.wave[0] for spec in spectra_list])
+        sorted_spec_list = list(np.array(spectra_list)[wave_sort_i])
+
         # Extract header keywords. TODO: properly get exptime
         exp_time_sec = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
         t_start_str = fits_file[0].header["DATE-OBS"]
         t_start_jd = fits_file[0].header["MJD-OBS"] + 2400000.5
         object_name = fits_file[0].header["OBJECT"]
         grating_setting = fits_file[0].header["HIERARCH ESO INS WLEN ID"]
+        n_detectors = len(fits_file) - 1
 
         # Only get nodpos if it exists
         if "HIERARCH ESO SEQ NODPOS" in fits_file[0].header:
@@ -430,13 +456,14 @@ def initialise_observation_from_crires_nodding_fits(
 
         # Create Observation object
         observation = Observation(
-            spectra_1d=spectra_list,
+            spectra_1d=sorted_spec_list,
             t_exp_sec=exp_time_sec,
             t_start_str=t_start_str,
             t_start_jd=t_start_jd,
             nod_pos=nod_pos,
             object_name=object_name,
             grating_setting=grating_setting,
+            n_detectors=n_detectors,
         )
             
     return observation

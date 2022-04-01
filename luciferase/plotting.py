@@ -373,3 +373,111 @@ def plot_molecfit_performance(
     save_path_png = os.path.join("{}.png".format(save_loc))
     plt.savefig(save_path_pdf)
     plt.savefig(save_path_png, dpi=300)
+
+
+def plot_trace_vs_reduced_frame(
+    fits_trace,
+    fits_image,
+    fig=None,
+    axes=None,):
+    """Diagnostic plotting function to check CRIRES+ extraction by plotting
+    trace waves on top of the reduced 2D frame/image.
+
+    Adapted from a script originally written by Dr Thomas Marquart. 
+
+    Parameters
+    ----------
+    fits_trace: string
+        Filepath to trace wave fits file.
+
+    fits_image: string
+        Filepath to corresponding fits image.
+
+    fig: matplotlib.figure.Figure, default: None
+        Figure object if incorporating this diagnostic into a larger plot.
+    
+    axes: array of matplotlib.axes._subplots.AxesSubplot, default: None
+        Array of axes objects if incorporating this diagnostic into larger 
+        plot.
+    """
+    with fits.open(fits_trace) as tw_hdu, fits.open(fits_image) as img_hdu:
+        # Setup axes if we haven't been provided with any
+        if fig is None and axes is None:
+            plt.close("all")
+            fig, axes = plt.subplots(1, 3, figsize=(10, 3.5))
+            
+            # Make a note to do final adjustment and save figure
+            do_save_and_adjust = True
+
+        # Otherwise don't save as these axes will be part of a larger plot
+        else:
+            do_save_and_adjust = False
+
+        # Initialise X axis pixel array
+        px_x = np.arange(2048)
+
+        # Loop over the three detectors
+        for det_i in range(3):
+            # Turn off axis ticks
+            axes[det_i].set_xticks([])
+            axes[det_i].set_yticks([])
+
+            # Load in trace wave data for this detector
+            try: 
+                tw_data = tw_hdu[det_i+1].data
+            except:
+                print('extension {:0.0f} is missing, skipping.'.format(
+                    det_i+1))
+                continue
+
+            if tw_data is None:
+                print('Data for CHIP{:0.0f} is empty, skipping.'.format(
+                    det_i+1))
+                continue
+            
+            # Load image data for this detector and plot
+            img_data = img_hdu['CHIP{:0.0f}.INT1'.format(det_i+1)].data
+            #img_data = np.ma.masked_where(np.isnan(img_data),img_data)
+            img_data = np.nan_to_num(img_data)
+
+            axes[det_i].imshow(
+                img_data,
+                origin='lower',
+                cmap='plasma',
+                vmin=np.percentile(img_data,5),
+                vmax=np.percentile(img_data,98))
+
+            # Loop over each individual trace and plot
+            for tw in tw_data:
+                # Plot extraction upper/lower bounds + trace after fitting poly
+                pol = np.polyval(tw['Upper'][::-1], px_x)
+                axes[det_i].plot(px_x, pol, ':w')
+
+                pol = np.polyval(tw['Lower'][::-1], px_x)
+                axes[det_i].plot(px_x, pol, ':w')
+
+                pol = np.polyval(tw['All'][::-1], px_x)
+                axes[det_i].plot(px_x, pol, '--w')
+
+                if np.isnan(pol[1024]):
+                    continue
+                
+                # Label the orders
+                text = 'order: {:0.0f}     trace: {}'.format(
+                    tw['order'], tw['TraceNb'])
+
+                axes[det_i].text(
+                    x=1024, 
+                    y=pol[1024],
+                    s=text,
+                    color="w", 
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    size=8)
+
+            axes[det_i].axis((1,2048,1,2048))
+
+        if do_save_and_adjust:
+            fig.tight_layout(pad=0.02)
+            figname = fits_trace.replace('.fits','.png')
+            plt.savefig(figname, dpi=240)
