@@ -1,4 +1,21 @@
-"""Script to plot a diagnostic 
+"""Script to plot a diagnostic plot to easily inspect how a CRIRES reduction
+went. The diagnostic plot consists of the trace waves from the A and B frames
+overplotted on their respective images; as well as the overplotted A, B, and
+combined spectra for each detector/order. This is saved as a single PDF in the
+same directory as the reduced data. This script can be called on multiple 
+directories at once using wildcard characters, and if so it will attempt to
+stitch each individual PDF together into a single master PDF for ease of
+inspection.
+
+Run as
+------
+python make_diagnostic_reduction_plots.py [data_path]
+
+where [data_path] is the path to the data (which can include wildcards for
+globbing). Make sure to wrap any wildcard filepaths in quotes to prevent 
+globbing happening on the command line (versus in python). Note that this 
+script requires objects and functions from luciferase to run, so the 
+appropriate path should be inserted as below.
 """
 import os
 import sys
@@ -10,6 +27,13 @@ sys.path.insert(1, "/home/arains/code/luciferase/")
 
 import luciferase.spectra as lspec
 import luciferase.plotting as lplt
+
+try:
+    from PyPDF2 import PdfFileMerger
+    do_pdf_merge = True
+except:
+    print("PyPDF2 is not installed, cannot merge PDFs\n")
+    do_pdf_merge = False
 
 cwd = os.getcwd()
 
@@ -55,6 +79,9 @@ folders.sort()
 print("Found {:0.0f} folders to create diagnostic plots for.".format(
     len(folders)))
 
+# Make a list of all newly created PDFs
+all_diagnostic_pdfs = []
+
 # Loop over the contents of each folder
 for folder in folders:
     # Check that all our files actually exist
@@ -69,6 +96,8 @@ for folder in folders:
         print("Skipping {} due to missing files: {}".format(
             folder, missing_files))
         continue
+
+    print("Creating diagnostic plot for: {}".format(folder))
 
     # All files accounted for, load in spectra
     observations = []
@@ -129,9 +158,9 @@ for folder in folders:
         for det_i in range(3):
             # Plot each of A, B, and combined data
             for obs_i, (obs, label) in enumerate(zip(observations, labels)):
-                # Normalise
+                # Normalise, avoiding edges
                 flux = obs.spectra_1d[spec_i].flux
-                flux_norm = flux / np.nanmedian(flux)
+                flux_norm = flux / np.nanmedian(flux[20:-20])
 
                 # Determine SNR
                 snr = int(np.nanmedian(flux) / np.sqrt(np.nanmedian(flux)))
@@ -189,11 +218,33 @@ for folder in folders:
             # Finally index our spectral count
             spec_i += 1
 
-    # Save plot
+    # Add title to current folder
     plt.suptitle(os.path.join(cwd, folder))
-    plt.show()
-    plt.savefig(os.path.join(folder, "reduction_diagnostic.pdf"))
 
+    # Only show if we're plotting a single PDF
+    if len(folders) == 1:
+        plt.show()
 
+    # Save plot
+    pdf_name = os.path.join(folder, "reduction_diagnostic.pdf")
+    all_diagnostic_pdfs.append(pdf_name)
+
+    plt.savefig(pdf_name)
+
+# All plots are made, if we made more than one stitch them together
+# https://stackoverflow.com/questions/3444645/merge-pdf-files
+if do_pdf_merge and len(all_diagnostic_pdfs) > 1:
+    merger = PdfFileMerger()
+
+    root_path = os.path.dirname(os.path.dirname(pdf_name))
+    night_name = os.path.split(root_path)[-1]
+    merged_pdf = os.path.join(
+        root_path, "reduction_diagnostic_{}.pdf".format(night_name))
+
+    for pdf in all_diagnostic_pdfs:
+        merger.append(open(pdf, 'rb'))
+
+    with open(merged_pdf, 'wb') as fout:
+        merger.write(fout)
 
 
