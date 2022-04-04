@@ -1,4 +1,4 @@
-"""
+"""Plotting functions for luciferase.
 """
 import os
 import glob
@@ -379,7 +379,9 @@ def plot_trace_vs_reduced_frame(
     fits_trace,
     fits_image,
     fig=None,
-    axes=None,):
+    axes=None,
+    aspect="auto",
+    plot_title=False,):
     """Diagnostic plotting function to check CRIRES+ extraction by plotting
     trace waves on top of the reduced 2D frame/image.
 
@@ -399,6 +401,12 @@ def plot_trace_vs_reduced_frame(
     axes: array of matplotlib.axes._subplots.AxesSubplot, default: None
         Array of axes objects if incorporating this diagnostic into larger 
         plot.
+
+    aspect: string, default: "auto"
+        Aspect keyword to pass to plt.imshow().
+    
+    plot_title: boolean, default: False
+        Whether to label each image with the detector number and nod position.
     """
     with fits.open(fits_trace) as tw_hdu, fits.open(fits_image) as img_hdu:
         # Setup axes if we haven't been provided with any
@@ -412,6 +420,14 @@ def plot_trace_vs_reduced_frame(
         # Otherwise don't save as these axes will be part of a larger plot
         else:
             do_save_and_adjust = False
+
+        # Determine which nod this is
+        if "trace_wave_A" in fits_trace:
+            nod_pos = "A"
+        elif "trace_wave_B" in fits_trace:
+            nod_pos = "B"
+
+        # nod_pos = tw_hdu[0].header['HIERARCH ESO SEQ NODPOS']
 
         # Initialise X axis pixel array
         px_x = np.arange(2048)
@@ -445,7 +461,9 @@ def plot_trace_vs_reduced_frame(
                 origin='lower',
                 cmap='plasma',
                 vmin=np.percentile(img_data,5),
-                vmax=np.percentile(img_data,98))
+                vmax=np.percentile(img_data,98),
+                aspect=aspect,
+                interpolation="none",)
 
             # Loop over each individual trace and plot
             for tw in tw_data:
@@ -476,6 +494,12 @@ def plot_trace_vs_reduced_frame(
                     size=8)
 
             axes[det_i].axis((1,2048,1,2048))
+
+            # Set title
+            if plot_title:
+                axes[det_i].set_title(
+                    label="Detector {:0.0f} ({})".format(det_i+1, nod_pos),
+                    fontsize="xx-small",)
 
         if do_save_and_adjust:
             fig.tight_layout(pad=0.02)

@@ -45,6 +45,17 @@ def load_time_series_spectra(spectra_path_with_wildcard):
 
 class Spectrum1D(object):
     """Base class to represent a single spectral segment.
+
+    Parameters
+    ----------
+    wave, flux, sigma: float array
+        Wavelength, flux, and uncertainty vectors for the spectrum.
+
+    bad_px_mask: boolean array
+        Bad pixel mask for the spectrum. True corresponds to bad pixels.
+
+    detector_i, order_i: int
+        Integer label for the detector and order assocated with the spectrum.
     """
     def __init__(
         self,
@@ -174,6 +185,39 @@ class Spectrum1D(object):
 class Observation(object):
     """Class to represent a single observation being composed of at least one
     spectral segment, but possiby more depending on spectral orders.
+
+    Parameters
+    ----------
+    spectra_1d: luciferase.spectra.Spectra1D array
+        Array of luciferase.spectra.Spectra1D objects, one for each discrete
+        spectral segment making up the exposure (e.g. order, detector)
+
+    t_exp_sec: float
+        Duration of the exposure in seconds.
+
+    t_start_str: string
+        Start time of observation in human readable string.
+
+    t_start_jd: float
+        Observation start time in JD.
+
+    nod_pos: string
+        Nodding position for nodding observations.
+
+    object_name: string
+        Name of the object.
+
+    grating_setting: string
+        Grating setting for the observation.
+
+    min_order, max_order: int
+        Minimum and maximum echelle order.
+
+    spectra_1d_blaze_corr, spectra_1d_telluric_corr: TODO, default: None,
+        Currently unused.
+
+    n_detectors: int, default: 3
+        Number of detectors.
     """
     def __init__(
         self,
@@ -184,6 +228,8 @@ class Observation(object):
         nod_pos,
         object_name,
         grating_setting,
+        min_order,
+        max_order,
         spectra_1d_blaze_corr=None,
         spectra_1d_telluric_corr=None,
         n_detectors=3,):
@@ -196,6 +242,8 @@ class Observation(object):
         self.nod_pos = nod_pos
         self.object_name = object_name
         self.grating_setting = grating_setting
+        self.min_order = min_order
+        self.max_order = max_order
         #self.spectra_1d_blaze_corr = spectra_1d_blaze_corr
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
@@ -309,6 +357,22 @@ class Observation(object):
     def n_orders(self, value):
         self._n_orders = int(value)
 
+    @property
+    def min_order(self):
+        return self._min_order
+
+    @min_order.setter
+    def min_order(self, value):
+        self._min_order = int(value)
+
+    @property
+    def max_order(self):
+        return self._max_order
+
+    @max_order.setter
+    def max_order(self, value):
+        self._max_order = int(value)
+
 
     def update_t_mid_and_end(self,):
         """Called to update the mid and end JD time of the observation."""
@@ -397,8 +461,17 @@ def initialise_observation_from_crires_nodding_fits(
     fits_file_nodding_extracted: string
         Filepath to CRIRES+ 1D extracted nodding fits file.
 
+    fits_ext_names: string array, 
+        default: ("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1")
+        HDU names for each chip. Defaults to CRIRES+ standard.
+
+    initialise_empty_bad_px_mask: boolean, default: True
+        Whether to initialise empty/uniniformative bad px masks.
+
     Returns
     -------
+    observation: luciferase.spectra.Observation object
+        An Observation object containing Spectra1D objects and associated info.
     """
     with fits.open(fits_file_nodding_extracted) as fits_file:
         # Intialise our list of spectra
@@ -447,6 +520,8 @@ def initialise_observation_from_crires_nodding_fits(
         object_name = fits_file[0].header["OBJECT"]
         grating_setting = fits_file[0].header["HIERARCH ESO INS WLEN ID"]
         n_detectors = len(fits_file) - 1
+        min_order = np.min(orders)
+        max_order = np.max(order)
 
         # Only get nodpos if it exists
         if "HIERARCH ESO SEQ NODPOS" in fits_file[0].header:
@@ -463,8 +538,9 @@ def initialise_observation_from_crires_nodding_fits(
             nod_pos=nod_pos,
             object_name=object_name,
             grating_setting=grating_setting,
-            n_detectors=n_detectors,
-        )
+            min_order=min_order,
+            max_order=max_order,
+            n_detectors=n_detectors,)
             
     return observation
 
