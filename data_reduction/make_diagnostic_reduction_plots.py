@@ -44,6 +44,13 @@ ASPECT = "auto"
 Y_BOUND_LOW = -0.1
 Y_BOUND_HIGH = 2.0
 
+# Determines whether to annotate each order with its median SNR or median
+# percentage uncertainty. This is important because SNR as determined from
+# Poisson statistics is only valid if the units of flux are in raw counts, vs
+# the result of a median/mean/weighted average combination of frames. Percent
+# uncertainty should be used for visualising CRIRES+ master reductions.
+USE_PC_UNCERTAINTY_INSTEAD_OF_SNR = True
+
 # This is the default list of files within the provided directory to work with
 EXTRACTED_FILES = [
     "cr2res_obs_nodding_extractedA.fits",
@@ -162,15 +169,21 @@ for folder in folders:
                 flux = obs.spectra_1d[spec_i].flux
                 flux_norm = flux / np.nanmedian(flux[20:-20])
 
-                # Determine SNR
-                snr = int(np.nanmedian(flux) / np.sqrt(np.nanmedian(flux)))
+                # Determine our data quality measure: either SNR or % err
+                if USE_PC_UNCERTAINTY_INSTEAD_OF_SNR:
+                    e_flux = obs.spectra_1d[spec_i].sigma
+                    pc_err = np.nanmedian(e_flux) / np.nanmedian(flux) * 100
+                    leg_label = r"{} ($\sigma$~{:0.2f}%)".format(label, pc_err)
+                else:
+                    snr = int(np.nanmedian(flux) / np.sqrt(np.nanmedian(flux)))
+                    leg_label = "{} (S/N~{:0.0f})".format(label, snr)
 
                 # Plot with label having SNR in brackets
                 axes[2+order_i, det_i].plot(
                     obs.spectra_1d[spec_i].wave,
                     flux_norm,
                     linewidth=0.1,
-                    label="{} (S/N~{:0.0f})".format(label, snr),
+                    label=leg_label,
                     color=colours[obs_i],
                     alpha=0.8,)
             
