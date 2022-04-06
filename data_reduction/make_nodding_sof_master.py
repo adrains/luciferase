@@ -52,6 +52,8 @@ fits_fns = glob.glob("CRIRE.*.fits")
 fits_fns.sort()
 
 obs_fns = []
+n_a_frames = 0
+n_b_frames = 0
 
 for fn in fits_fns:
     obs_cat = fits.getval(fn, "HIERARCH ESO DPR CATG")
@@ -62,12 +64,19 @@ for fn in fits_fns:
         if obs_setting == wl_setting:
             obs_fns.append(fn)
 
+            # Count nod positions
+            if fits.getval(fn, 'HIERARCH ESO SEQ NODPOS') == "A":
+                n_a_frames += 1
+            elif fits.getval(fn, 'HIERARCH ESO SEQ NODPOS') == "B":
+                n_b_frames += 1
+
 # Raise an exception if we don't have any files, or if we have an unmatched set
 # of AB pairs
 if len(obs_fns) < 1:
     raise Exception("No files found!")
-elif len(obs_fns) % 2 != 0:
-    raise Exception("Unmatched/uneven set of AB pairs!")
+elif n_a_frames != n_b_frames:
+    raise Exception("Unmatched set of AB pairs, #A = {}, #B = {}".format(
+        n_a_frames, n_b_frames))
 
 # Check the new subdirector exists
 if not os.path.isdir(wl_setting):

@@ -22,6 +22,14 @@ cwd = os.getcwd()
 # Get which nAB set we want to reduce
 nAB = int(sys.argv[1])
 
+# Set trace wave
+wl_setting = sys.argv[2]
+
+TRACE_WAVE = "/home/tom/pCOMM/cr2re-calib/{}_tw.fits".format(wl_setting)
+
+if not os.path.isfile(TRACE_WAVE):
+    raise FileNotFoundError("No trace wave file, aborting.")
+
 # Check to see if we have a blaze file
 blaze_file = os.path.join(cwd, "cr2res_cal_flat_Open_blaze.fits")
 
@@ -90,8 +98,7 @@ for nod_set_i, nod_folder in enumerate(nodding_folders):
             sof.writelines("{}\tCAL_FLAT_EXTRACT_1D\n".format(blaze_file))
 
             # Write the trace wave file
-            sof.writelines(
-                "/home/tom/pCOMM/cr2re-calib/K2148_tw.fits\tUTIL_WAVE_TW\n")
+            sof.writelines("{}\tUTIL_WAVE_TW\n".format(TRACE_WAVE))
 
         # And finally write the a file containing esorex reduction commands
         with open(splice_script, 'a') as ww:
