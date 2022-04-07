@@ -83,6 +83,9 @@ data_dir = sys.argv[1]
 folders = glob.glob(data_dir)
 folders.sort()
 
+# Convert to absolute paths
+folders = [os.path.abspath(folder) for folder in folders]
+
 print("Found {:0.0f} folders to create diagnostic plots for.".format(
     len(folders)))
 
@@ -217,11 +220,13 @@ for folder in folders:
             wave = obs.spectra_1d[spec_i].wave
             w_mid = (wave[-1] - wave[0])/2 + wave[0]
 
+            # Note that order_i is better thought of as the plot index, which
+            # is why we're sourcing the actual order_i from the spectum itself.
             axes[2+order_i, det_i].text(
                 x=w_mid,
                 y=0,
                 s="Order: {:0.0f}, Detector: {:0.0f}".format(
-                    min_order+order_i, det_i+1),
+                    obs.spectra_1d[spec_i].order_i, det_i+1),
                 horizontalalignment="center",
                 fontsize="xx-small",)
 
