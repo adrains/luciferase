@@ -9,13 +9,18 @@ inspection.
 
 Run as
 ------
-python make_diagnostic_reduction_plots.py [data_path]
+python make_diagnostic_reduction_plots.py [data_path] [run_on_blaze_corr_spec]
 
 where [data_path] is the path to the data (which can include wildcards for
 globbing). Make sure to wrap any wildcard filepaths in quotes to prevent 
 globbing happening on the command line (versus in python). Note that this 
 script requires objects and functions from luciferase to run, so the 
-appropriate path should be inserted as below.
+appropriate path should be inserted as below. 
+
+[run_on_blaze_corr_spec] is a boolean indicating whether to instead generate
+the diagnostic PDF plot for blaze corrected spectra, that is those with the
+label "*_blaze_corr.fits" on the end. This parameter is optional, and if not
+provided [run_on_blaze_corr_spec] = False.
 """
 import os
 import sys
@@ -44,6 +49,9 @@ ASPECT = "auto"
 Y_BOUND_LOW = -0.1
 Y_BOUND_HIGH = 2.0
 
+# Edge pixels to avoid when normalising by median
+EDGE_PX = 200
+
 # Determines whether to annotate each order with its median SNR or median
 # percentage uncertainty. This is important because SNR as determined from
 # Poisson statistics is only valid if the units of flux are in raw counts, vs
@@ -69,7 +77,7 @@ TRACE_WAVES = [
 ]
 
 # Double check we haven't been given too many inputs
-if len(sys.argv) > 2:
+if len(sys.argv) > 3:
     exception_text = (
         "Warning, too many inputs ({})! "
         "Make sure to wrap paths with wildcard characters in quotes.")
@@ -79,14 +87,29 @@ if len(sys.argv) > 2:
 # Take as input the folder/s to consider
 data_dir = sys.argv[1]
 
-# And figure out just how many folder's we're working with
+# Consider the optional parameter of whether to run on blaze corrected spectra.
+# If so, modify our base EXTRACTED_FILES to have '_blaze_corr' on the end.
+if len(sys.argv) > 2:
+    run_on_blaze_corr_spec = bool(sys.argv[2])
+
+    if run_on_blaze_corr_spec:
+        print("Running on blaze corrected spectra.")
+        pdf_base = "reduction_diagnostic_blaze_corr"
+
+        # Update our list of extracted files
+        EXTRACTED_FILES = [fn.replace(".fits", "_blaze_corr.fits")
+                        for fn in EXTRACTED_FILES]
+    else:
+        pdf_base = "reduction_diagnostic"
+
+# Figure out just how many folder's we're working with
 folders = glob.glob(data_dir)
 folders.sort()
 
 # Convert to absolute paths
 folders = [os.path.abspath(folder) for folder in folders]
 
-print("Found {:0.0f} folders to create diagnostic plots for.".format(
+print("Found {:0.0f} folder/s to create diagnostic plots for.".format(
     len(folders)))
 
 # Make a list of all newly created PDFs
@@ -166,11 +189,21 @@ for folder in folders:
     # Plot each order
     for order_i in range(n_orders):
         for det_i in range(3):
+            # Not all orders are available for all detectors. Abort if either:
+            #  1) We're out of spectra objects.
+            #  2) Our current det_i counter =/= det_i for the next spectra obj.
+            if (spec_i+1 > len(observations[0].spectra_1d) 
+                or observations[0].spectra_1d[spec_i].detector_i != det_i + 1):
+                # Delete the axis, index counter, but don't do anything else.
+                fig.delaxes(axes[2+order_i, det_i])
+                spec_i += 1
+                continue
+
             # Plot each of A, B, and combined data
             for obs_i, (obs, label) in enumerate(zip(observations, labels)):
                 # Normalise, avoiding edges
                 flux = obs.spectra_1d[spec_i].flux
-                flux_norm = flux / np.nanmedian(flux[20:-20])
+                flux_norm = flux / np.nanmedian(flux[EDGE_PX:-EDGE_PX])
 
                 # Determine our data quality measure: either SNR or % err
                 if USE_PC_UNCERTAINTY_INSTEAD_OF_SNR:
@@ -237,7 +270,12 @@ for folder in folders:
             spec_i += 1
 
     # Add title to current folder
-    plt.suptitle(os.path.join(cwd, folder))
+    if run_on_blaze_corr_spec:
+        title = "{} (blaze corrected)".format(os.path.join(cwd, folder))
+    else:
+        title = os.path.join(cwd, folder)
+
+    plt.suptitle(title)
 
     # Only show if we're plotting a single PDF
     if len(folders) == 1:
@@ -257,7 +295,7 @@ if do_pdf_merge and len(all_diagnostic_pdfs) > 1:
     root_path = os.path.dirname(os.path.dirname(pdf_name))
     night_name = os.path.split(root_path)[-1]
     merged_pdf = os.path.join(
-        root_path, "reduction_diagnostic_{}.pdf".format(night_name))
+        root_path, "{}_{}.pdf".format(pdf_base, night_name))
 
     for pdf in all_diagnostic_pdfs:
         merger.append(open(pdf, 'rb'))

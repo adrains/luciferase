@@ -230,9 +230,10 @@ class Observation(object):
         grating_setting,
         min_order,
         max_order,
+        n_detectors,
+        n_orders,
         spectra_1d_blaze_corr=None,
-        spectra_1d_telluric_corr=None,
-        n_detectors=3,):
+        spectra_1d_telluric_corr=None,):
         """
         """
         self.spectra_1d = spectra_1d
@@ -244,15 +245,13 @@ class Observation(object):
         self.grating_setting = grating_setting
         self.min_order = min_order
         self.max_order = max_order
+        self.n_detectors = n_detectors
+        self.n_orders = n_orders
         #self.spectra_1d_blaze_corr = spectra_1d_blaze_corr
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
         # Calculate t_mid_jd and t_end_jd. TODO: make this automatic.
         self.update_t_mid_and_end()
-
-        # Add the number of orders for ease of use, assuming 3 detectors
-        self.n_detectors = n_detectors
-        self.n_orders = len(spectra_1d) // n_detectors
 
     @property
     def spectra_1d(self):
@@ -390,6 +389,7 @@ class Observation(object):
         """String representation of Observation details."""
         info_str = (
             "n spectra: {:0.0f}, ".format(len(self.spectra_1d)),
+            "n orders: {:0.0f}, ".format(self.n_orders),
             "grating: {}, ".format(self.grating_setting),
             "object: {}, ".format(self.object_name),
             "date: {}, ".format(self.t_start_str),
@@ -477,9 +477,15 @@ def initialise_observation_from_crires_nodding_fits(
         # Intialise our list of spectra
         spectra_list = []
         
-        # Determine the spectral orders to consider. TODO: get this from fits
-        # headers in a neater way.
-        columns = fits_file[fits_ext_names[0]].data.columns.names
+        # Determine the spectral orders to consider. Note that not all 
+        # detectors will necessarily have all orders, so we should pool the 
+        # orders from all detectors, and then check before pulling from each.
+        # TODO: get this from fits headers in a neater way. 
+        columns = []
+
+        for fits_ext_name in fits_ext_names:
+            columns += fits_file[fits_ext_name].data.columns.names
+
         orders = list(set([int(cc.split("_")[0]) for cc in columns]))
         orders.sort()
 
@@ -488,6 +494,11 @@ def initialise_observation_from_crires_nodding_fits(
             hdu_data = fits_file[fits_ext].data
 
             for order in orders:
+                # First check this order exists for this detector
+                if ("{:02.0f}_01_WL".format(order) 
+                    not in hdu_data.columns.names):
+                    continue
+
                 wave = hdu_data["{:02.0f}_01_WL".format(order)]
                 spec = hdu_data["{:02.0f}_01_SPEC".format(order)]
                 e_spec = hdu_data["{:02.0f}_01_ERR".format(order)]
@@ -521,7 +532,7 @@ def initialise_observation_from_crires_nodding_fits(
         grating_setting = fits_file[0].header["HIERARCH ESO INS WLEN ID"]
         n_detectors = len(fits_file) - 1
         min_order = np.min(orders)
-        max_order = np.max(order)
+        max_order = np.max(orders)
 
         # Only get nodpos if it exists
         if "HIERARCH ESO SEQ NODPOS" in fits_file[0].header:
@@ -540,7 +551,8 @@ def initialise_observation_from_crires_nodding_fits(
             grating_setting=grating_setting,
             min_order=min_order,
             max_order=max_order,
-            n_detectors=n_detectors,)
+            n_detectors=n_detectors,
+            n_orders=len(orders),)
             
     return observation
 
