@@ -168,7 +168,16 @@ class Spectrum1D(object):
 
     def update_snr(self):
         """Simple function to recompute SNR assuming Poisson uncertainties."""
-        self.snr = np.nanmedian(self.flux) / np.sqrt(np.nanmedian(self.flux))
+        try:
+            bad_px_mask = ~np.isfinite(self.flux)
+            self.snr = np.nanmedian(
+                (self.flux[bad_px_mask] 
+                / np.sqrt(np.nanmedian(self.flux[bad_px_mask])))
+            )
+
+        # In case this fails, just set the SNR to zero
+        except:
+            self.snr = 0
 
     def __str__(self):
         """String representation of Spectrum1D details."""

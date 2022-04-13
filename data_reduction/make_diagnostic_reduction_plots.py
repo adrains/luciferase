@@ -90,7 +90,10 @@ data_dir = sys.argv[1]
 # Consider the optional parameter of whether to run on blaze corrected spectra.
 # If so, modify our base EXTRACTED_FILES to have '_blaze_corr' on the end.
 if len(sys.argv) > 2:
-    run_on_blaze_corr_spec = bool(sys.argv[2])
+    if sys.argv[2].upper() == "TRUE":
+        run_on_blaze_corr_spec = True
+    else:
+        run_on_blaze_corr_spec = False
 
     if run_on_blaze_corr_spec:
         print("Running on blaze corrected spectra.")
