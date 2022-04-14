@@ -60,6 +60,8 @@ EDGE_PX = 200
 
 # Seeing FWHM fflag value. Seeing values above this will be noted as concerning
 FWHM_GOOD_TRESHOLD = 0.2
+ARCSEC_PER_PX = 0.059
+RESAMPLING_FAC = 12
 
 # Determines whether to annotate each order with its median SNR or median
 # percentage uncertainty. This is important because SNR as determined from
@@ -175,9 +177,10 @@ for folder in folders:
     # Format of plot will be the first two rows being the A and B images + TW
     # Then every subsequent row will be a given order.
 
-    # Number of rows is 2 + number of orders, one column for each detector
+    # Number of rows is 3 + number of orders, one column for each detector
     n_col = 3
-    n_rows = 2 + n_orders
+    n_ax_base = 3
+    n_rows = n_ax_base + n_orders
 
     plt.close("all")
     fig, axes = plt.subplots(
@@ -213,6 +216,7 @@ for folder in folders:
 
     labels = ["A", "B", "Comb",]
     colours = ["r", "g", "b",]
+    fmts = ["-", "--"]
 
     spec_i = 0
 
@@ -225,7 +229,7 @@ for folder in folders:
             if (spec_i+1 > len(observations[0].spectra_1d) 
                 or observations[0].spectra_1d[spec_i].detector_i != det_i + 1):
                 # Delete the axis, index counter, but don't do anything else.
-                fig.delaxes(axes[2+order_i, det_i])
+                fig.delaxes(axes[n_ax_base+order_i, det_i])
                 spec_i += 1
                 continue
             
@@ -254,8 +258,39 @@ for folder in folders:
                     snr = int(np.nanmedian(flux) / np.sqrt(np.nanmedian(flux)))
                     leg_label = "{} (S/N~{:0.0f})".format(label, snr)
 
+                # Plot the slit function for A and B frames
+                if label in ["A", "B"]:
+                    # Get x axis for slit func
+                    n_px = len(obs.spectra_1d[spec_i].slit_func)
+                    xx = ((np.arange(n_px) - n_px/2) * ARCSEC_PER_PX 
+                          / (RESAMPLING_FAC-1))
+
+                    label = "{}:{:0.0f}".format(
+                                label, obs.spectra_1d[spec_i].order_i)
+                    
+                    sf_line, = axes[n_ax_base-1, det_i].plot(
+                        xx,
+                        obs.spectra_1d[spec_i].slit_func,
+                        linestyle=fmts[obs_i],
+                        linewidth=0.2,
+                        label=label,
+                        alpha=0.8,)
+
+                    # Label
+                    y_max = np.max(obs.spectra_1d[spec_i].slit_func)
+                    y_max_i = np.argmax(obs.spectra_1d[spec_i].slit_func)
+
+                    axes[n_ax_base-1, det_i].text(
+                        x=xx[y_max_i],
+                        y=y_max,
+                        s=label,
+                        color=sf_line.get_color(),
+                        horizontalalignment="center",
+                        fontsize=4,
+                    )
+
                 # Plot with label having SNR in brackets
-                axes[2+order_i, det_i].plot(
+                axes[n_ax_base+order_i, det_i].plot(
                     obs.spectra_1d[spec_i].wave,
                     flux_norm,
                     linewidth=0.2,
@@ -265,23 +300,51 @@ for folder in folders:
             
             # Label Y axes and ticks only on left
             if det_i == 0:
-                axes[2+order_i, det_i].set_ylabel("Flux")
+                axes[n_ax_base+order_i, det_i].set_ylabel("Flux")
             else:
-                axes[2+order_i, det_i].set_yticks([])
+                axes[n_ax_base+order_i, det_i].set_yticks([])
+                axes[n_ax_base-1, det_i].set_yticks([])
             
-            # And X axes only on bottom
-            if order_i == n_orders-1:
-                axes[2+order_i, det_i].set_xlabel(r"Wavelength ($\mu$m)")
-            
-            # Set tick font size
-            axes[2+order_i, det_i].tick_params(
-                axis='y', which='major', labelsize="xx-small")
+            # X label for slit func
+            axes[n_ax_base-1, det_i].set_xlabel(
+                "Seeing (arcsec)",
+                fontsize="xx-small",)
 
-            axes[2+order_i, det_i].tick_params(
+            # But X label only on bottom for spectra
+            if order_i == n_orders-1:
+                axes[n_ax_base+order_i, det_i].set_xlabel(
+                    r"Wavelength ($\mu$m)")
+            
+            # Set tick font size for slit func axis
+            axes[n_ax_base-1, det_i].tick_params(
+                axis='y', which='major', labelsize="xx-small")
+            
+            axes[n_ax_base-1, det_i].tick_params(
                 axis='x', which='major', labelsize="xx-small")
 
-            # Add legend
-            leg = axes[2+order_i, det_i].legend(
+            # And spectra axis
+            axes[n_ax_base+order_i, det_i].tick_params(
+                axis='y', which='major', labelsize="xx-small")
+
+            axes[n_ax_base+order_i, det_i].tick_params(
+                axis='x', which='major', labelsize="xx-small")
+
+            # Add title to slit func plots
+            axes[n_ax_base-1, det_i].set_title(
+                "slit_func, detector {}".format(det_i+1),
+                fontsize="xx-small",)
+
+            # Add legend to slit func plot
+            leg_sf = axes[n_ax_base-1, det_i].legend(
+                fontsize="xx-small",
+                loc="right",
+                ncol=2,)
+
+            for legobj in leg_sf.legendHandles:
+                legobj.set_linewidth(1.5)
+
+            # Add legend to spectra plot
+            leg = axes[n_ax_base+order_i, det_i].legend(
                 fontsize="xx-small",
                 loc="upper center",
                 ncol=3,)
@@ -295,7 +358,7 @@ for folder in folders:
 
             # Note that order_i is better thought of as the plot index, which
             # is why we're sourcing the actual order_i from the spectum itself.
-            axes[2+order_i, det_i].text(
+            axes[n_ax_base+order_i, det_i].text(
                 x=w_mid,
                 y=0,
                 s="Order: {:0.0f}, Detector: {:0.0f}".format(
@@ -312,7 +375,7 @@ for folder in folders:
             seeing_label = "Seeing: A~{:0.3f}\", B~{:0.3f}\"".format(
                 fwhms[0], fwhms[1])
 
-            axes[2+order_i, det_i].text(
+            axes[n_ax_base+order_i, det_i].text(
                 x=w_mid,
                 y=0.1,
                 s=seeing_label,
@@ -321,7 +384,7 @@ for folder in folders:
                 color=fwhm_text_colour,)
 
             # Set appropriate y limits
-            axes[2+order_i, det_i].set_ylim(Y_BOUND_LOW, Y_BOUND_HIGH)
+            axes[n_ax_base+order_i, det_i].set_ylim(Y_BOUND_LOW, Y_BOUND_HIGH)
 
             # Finally index our spectral count
             spec_i += 1
@@ -359,5 +422,3 @@ if do_pdf_merge and len(all_diagnostic_pdfs) > 1:
 
     with open(merged_pdf, 'wb') as fout:
         merger.write(fout)
-
-
