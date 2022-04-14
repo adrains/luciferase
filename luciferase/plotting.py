@@ -5,6 +5,7 @@ import glob
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
 from astropy.io import fits
 
 # Ensure the plotting folder exists to save to
@@ -381,7 +382,12 @@ def plot_trace_vs_reduced_frame(
     fig=None,
     axes=None,
     aspect="auto",
-    plot_title=False,):
+    plot_title=False,
+    vmin_pc=5,
+    vmax_pc=98,
+    text_colour="w",
+    text_shadow_width=0.5,
+    line_shadow_width=1.75,):
     """Diagnostic plotting function to check CRIRES+ extraction by plotting
     trace waves on top of the reduced 2D frame/image.
 
@@ -407,6 +413,17 @@ def plot_trace_vs_reduced_frame(
     
     plot_title: boolean, default: False
         Whether to label each image with the detector number and nod position.
+
+    vmin, vmax: float, default: 5, 95
+        Minimum and maximum percentage values to clip when plotting trace wave.
+        Set to None for no clipping.
+
+    text_colour: string, default: 'w'
+        Colour to use when plotting labels on trace wave plot.
+
+    text_shadow_width, line_shadow_width: float, default: 0.5, 1.75
+        Shadow widths to plot underneat text and lines overplotted on trace 
+        wave plot for added visibility.
     """
     with fits.open(fits_trace) as tw_hdu, fits.open(fits_image) as img_hdu:
         # Setup axes if we haven't been provided with any
@@ -460,22 +477,34 @@ def plot_trace_vs_reduced_frame(
                 img_data,
                 origin='lower',
                 cmap='plasma',
-                vmin=np.percentile(img_data,5),
-                vmax=np.percentile(img_data,98),
                 aspect=aspect,
-                interpolation="none",)
+                interpolation="none",
+                vmin=np.percentile(img_data, vmin_pc),
+                vmax=np.percentile(img_data, vmax_pc),)
 
             # Loop over each individual trace and plot
             for tw in tw_data:
+                # Setup shadow
+                line_shadow = [
+                    pe.withStroke(
+                        offset=(-0.1,0),
+                        linewidth=line_shadow_width,
+                        foreground="black"),
+                    pe.withStroke(
+                        offset=(+0.1,0),
+                        linewidth=line_shadow_width,
+                        foreground="black"),
+                    pe.Normal(),]
+
                 # Plot extraction upper/lower bounds + trace after fitting poly
                 pol = np.polyval(tw['Upper'][::-1], px_x)
-                axes[det_i].plot(px_x, pol, ':w')
+                axes[det_i].plot(px_x, pol, ':w', path_effects=line_shadow,)
 
                 pol = np.polyval(tw['Lower'][::-1], px_x)
-                axes[det_i].plot(px_x, pol, ':w')
+                axes[det_i].plot(px_x, pol, ':w', path_effects=line_shadow,)
 
                 pol = np.polyval(tw['All'][::-1], px_x)
-                axes[det_i].plot(px_x, pol, '--w')
+                axes[det_i].plot(px_x, pol, '--w', path_effects=line_shadow,)
 
                 if np.isnan(pol[1024]):
                     continue
@@ -484,14 +513,21 @@ def plot_trace_vs_reduced_frame(
                 text = 'order: {:0.0f}     trace: {}'.format(
                     tw['order'], tw['TraceNb'])
 
+                # Setup shadow
+                text_shadow = [
+                    pe.withStroke(
+                        linewidth=text_shadow_width,
+                        foreground="black")]
+
                 axes[det_i].text(
                     x=1024, 
                     y=pol[1024],
                     s=text,
-                    color="w", 
+                    color=text_colour, 
                     horizontalalignment='center',
                     verticalalignment='center',
-                    size=8)
+                    size=8,
+                    path_effects=text_shadow,)
 
             axes[det_i].axis((1,2048,1,2048))
 

@@ -25,6 +25,7 @@ provided [run_on_blaze_corr_spec] = False.
 import os
 import sys
 import glob
+from matplotlib.style import use
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -32,6 +33,7 @@ sys.path.insert(1, "/home/arains/code/luciferase/")
 
 import luciferase.spectra as lspec
 import luciferase.plotting as lplt
+import luciferase.reduction as lred
 
 try:
     from PyPDF2 import PdfFileMerger
@@ -45,12 +47,19 @@ cwd = os.getcwd()
 # Aspect ratio for imshow
 ASPECT = "auto"
 
+# Values used to clip extremes of trace wave plot
+VMIN_PC = 15
+VMAX_PC = 85
+
 # Y Bounds to plot
 Y_BOUND_LOW = -0.1
 Y_BOUND_HIGH = 2.0
 
 # Edge pixels to avoid when normalising by median
 EDGE_PX = 200
+
+# Seeing FWHM fflag value. Seeing values above this will be noted as concerning
+FWHM_GOOD_TRESHOLD = 0.2
 
 # Determines whether to annotate each order with its median SNR or median
 # percentage uncertainty. This is important because SNR as determined from
@@ -74,6 +83,11 @@ EXTRACTED_IMAGES = [
 TRACE_WAVES = [
     "cr2res_obs_nodding_trace_wave_A.fits",
     "cr2res_obs_nodding_trace_wave_B.fits"
+]
+
+SLIT_FUNCS = [
+    "cr2res_obs_nodding_slitfuncA.fits",
+    "cr2res_obs_nodding_slitfuncB.fits"
 ]
 
 # Double check we haven't been given too many inputs
@@ -138,10 +152,19 @@ for folder in folders:
     # All files accounted for, load in spectra
     observations = []
 
-    for fits_file in EXTRACTED_FILES:
-        file_path = os.path.join(folder, fits_file)
+    for file_i, extr_file in enumerate(EXTRACTED_FILES):
+        extr_path = os.path.join(folder, extr_file)
+
+        # Only A and B frames have a slit function
+        if "combined" in extr_file:
+            sf_path = None
+        else:
+            sf_path = os.path.join(folder, SLIT_FUNCS[file_i])
+
         observations.append(
-            lspec.initialise_observation_from_crires_nodding_fits(file_path))
+            lspec.initialise_observation_from_crires_nodding_fits(
+                fits_file_nodding_extracted=extr_path,
+                fits_file_slit_func=sf_path,))
 
     # Get information about orders and detectors
     n_orders = observations[0].n_orders
@@ -173,7 +196,9 @@ for folder in folders:
         fig=fig,
         axes=axes[0],
         aspect=ASPECT,
-        plot_title=True,)
+        plot_title=True,
+        vmin_pc=VMIN_PC,
+        vmax_pc=VMAX_PC,)
 
     # Plot B frame tracewave
     lplt.plot_trace_vs_reduced_frame(
@@ -182,7 +207,9 @@ for folder in folders:
         fig=fig,
         axes=axes[1],
         aspect=ASPECT,
-        plot_title=True,)
+        plot_title=True,
+        vmin_pc=VMIN_PC,
+        vmax_pc=VMAX_PC,)
 
     labels = ["A", "B", "Comb",]
     colours = ["r", "g", "b",]
@@ -201,12 +228,22 @@ for folder in folders:
                 fig.delaxes(axes[2+order_i, det_i])
                 spec_i += 1
                 continue
+            
+            # Initialise array of FWHMs
+            fwhms = []
+            fwhm_above_threshold = False
 
             # Plot each of A, B, and combined data
             for obs_i, (obs, label) in enumerate(zip(observations, labels)):
                 # Normalise, avoiding edges
                 flux = obs.spectra_1d[spec_i].flux
                 flux_norm = flux / np.nanmedian(flux[EDGE_PX:-EDGE_PX])
+
+                # Record seeing and flaf if concerning
+                fwhms.append(obs.spectra_1d[spec_i].seeing_arcsec)
+
+                if obs.spectra_1d[spec_i].seeing_arcsec > FWHM_GOOD_TRESHOLD:
+                    fwhm_above_threshold = True
 
                 # Determine our data quality measure: either SNR or % err
                 if USE_PC_UNCERTAINTY_INSTEAD_OF_SNR:
@@ -221,7 +258,7 @@ for folder in folders:
                 axes[2+order_i, det_i].plot(
                     obs.spectra_1d[spec_i].wave,
                     flux_norm,
-                    linewidth=0.1,
+                    linewidth=0.2,
                     label=leg_label,
                     color=colours[obs_i],
                     alpha=0.8,)
@@ -265,6 +302,23 @@ for folder in folders:
                     obs.spectra_1d[spec_i].order_i, det_i+1),
                 horizontalalignment="center",
                 fontsize="xx-small",)
+
+            # Add text identifying the seeing
+            if fwhm_above_threshold:
+                fwhm_text_colour = "r"
+            else:
+                fwhm_text_colour = "k"
+
+            seeing_label = "Seeing: A~{:0.3f}\", B~{:0.3f}\"".format(
+                fwhms[0], fwhms[1])
+
+            axes[2+order_i, det_i].text(
+                x=w_mid,
+                y=0.1,
+                s=seeing_label,
+                horizontalalignment="center",
+                fontsize="xx-small",
+                color=fwhm_text_colour,)
 
             # Set appropriate y limits
             axes[2+order_i, det_i].set_ylim(Y_BOUND_LOW, Y_BOUND_HIGH)

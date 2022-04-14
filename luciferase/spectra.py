@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 import matplotlib.pyplot as plt
+import luciferase.reduction as lred
 
 VALID_NOD_POS = ["A", "B", None,]
 
@@ -64,7 +65,8 @@ class Spectrum1D(object):
         sigma,
         bad_px_mask,
         detector_i,
-        order_i,):
+        order_i,
+        seeing_arcsec,):
         """
         """
         # Do initial checking of array lengths. After this initial check, we
@@ -82,6 +84,7 @@ class Spectrum1D(object):
         self.bad_px_mask = bad_px_mask
         self.detector_i = detector_i
         self.order_i = order_i
+        self.seeing_arcsec = seeing_arcsec
 
     @property
     def n_px(self):
@@ -166,14 +169,23 @@ class Spectrum1D(object):
     def snr(self, value):
         self._snr = int(value)
 
+    @property
+    def seeing_arcsec(self):
+        return self._seeing_arcsec
+
+    @seeing_arcsec.setter
+    def seeing_arcsec(self, value):
+        self._seeing_arcsec = float(value)
+
     def update_snr(self):
         """Simple function to recompute SNR assuming Poisson uncertainties."""
         try:
-            bad_px_mask = ~np.isfinite(self.flux)
-            self.snr = np.nanmedian(
-                (self.flux[bad_px_mask] 
-                / np.sqrt(np.nanmedian(self.flux[bad_px_mask])))
-            )
+            with np.seterr(all="ignore"):
+                bad_px_mask = ~np.isfinite(self.flux)
+                self.snr = np.nanmedian(
+                    (self.flux[bad_px_mask] 
+                    / np.sqrt(np.nanmedian(self.flux[bad_px_mask])))
+                )
 
         # In case this fails, just set the SNR to zero
         except:
@@ -458,6 +470,7 @@ class Observation(object):
 
 def initialise_observation_from_crires_nodding_fits(
     fits_file_nodding_extracted,
+    fits_file_slit_func=None,
     #fits_file_blaze_corrected,
     #fits_file_telluric_corrected,
     fits_ext_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),
@@ -469,6 +482,9 @@ def initialise_observation_from_crires_nodding_fits(
     ----------
     fits_file_nodding_extracted: string
         Filepath to CRIRES+ 1D extracted nodding fits file.
+
+    fits_file_slit_func: string, default: None
+        Filepath to CRIRES+ slit function for reduced data. Optional.
 
     fits_ext_names: string array, 
         default: ("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1")
@@ -518,6 +534,18 @@ def initialise_observation_from_crires_nodding_fits(
                     raise NotImplementedError(
                         "Error: currently can only use default bad px mask")
 
+                # Check if we have been given the slit function file, and if
+                # so use it to compute the seeing for our current order
+                if fits_file_slit_func is not None:
+                    with fits.open(fits_file_slit_func) as slit_func_fits: 
+                        sf_hdu = slit_func_fits[fits_ext].data
+                        sf_ext_name = "{:02.0f}_01_SLIT_FUNC".format(order)
+                        slit_func = sf_hdu[sf_ext_name]
+                    fwhm = lred.fit_seeing_to_slit_func(
+                        slit_func=slit_func,)
+                else:
+                    fwhm = np.nan
+
                 spec_obj = Spectrum1D(
                     wave=wave,
                     flux=spec,
@@ -525,6 +553,7 @@ def initialise_observation_from_crires_nodding_fits(
                     bad_px_mask=bad_px_mask,
                     detector_i=det_i+1,
                     order_i=order,
+                    seeing_arcsec=fwhm,
                 )
 
                 spectra_list.append(spec_obj)
