@@ -66,7 +66,8 @@ class Spectrum1D(object):
         bad_px_mask,
         detector_i,
         order_i,
-        seeing_arcsec,):
+        seeing_arcsec,
+        slit_func):
         """
         """
         # Do initial checking of array lengths. After this initial check, we
@@ -85,6 +86,7 @@ class Spectrum1D(object):
         self.detector_i = detector_i
         self.order_i = order_i
         self.seeing_arcsec = seeing_arcsec
+        self.slit_func = slit_func
 
     @property
     def n_px(self):
@@ -176,6 +178,14 @@ class Spectrum1D(object):
     @seeing_arcsec.setter
     def seeing_arcsec(self, value):
         self._seeing_arcsec = float(value)
+
+    @property
+    def slit_func(self):
+        return self._slit_func
+
+    @slit_func.setter
+    def slit_func(self, value):
+        self._slit_func = np.array(value)
 
     def update_snr(self):
         """Simple function to recompute SNR assuming Poisson uncertainties."""
@@ -499,7 +509,7 @@ def initialise_observation_from_crires_nodding_fits(
         An Observation object containing Spectra1D objects and associated info.
     """
     with fits.open(fits_file_nodding_extracted) as fits_file:
-        # Intialise our list of spectra
+        # Intialise our list of spectra and slit_funcs
         spectra_list = []
         
         # Determine the spectral orders to consider. Note that not all 
@@ -545,6 +555,7 @@ def initialise_observation_from_crires_nodding_fits(
                         slit_func=slit_func,)
                 else:
                     fwhm = np.nan
+                    slit_func = np.nan
 
                 spec_obj = Spectrum1D(
                     wave=wave,
@@ -554,6 +565,7 @@ def initialise_observation_from_crires_nodding_fits(
                     detector_i=det_i+1,
                     order_i=order,
                     seeing_arcsec=fwhm,
+                    slit_func=slit_func,
                 )
 
                 spectra_list.append(spec_obj)
