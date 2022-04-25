@@ -1,11 +1,13 @@
+"""Objects and functions for working with spectra.
 """
-"""
+import os
 import glob
 import numpy as np
 import pandas as pd
 from astropy.io import fits
 import matplotlib.pyplot as plt
 import luciferase.reduction as lred
+from numpy.polynomial.polynomial import Polynomial, polyfit
 
 VALID_NOD_POS = ["A", "B", None,]
 
@@ -57,6 +59,19 @@ class Spectrum1D(object):
 
     detector_i, order_i: int
         Integer label for the detector and order assocated with the spectrum.
+
+    seeing_arcsec: float
+        The measured seeing for this observation ('seeing' here being inclusive
+        of AO).
+    
+    slit_func: float array
+        1D slit function across the slit for the observation. For CRIRES 
+        observations, it is from this that the seeing is measured.
+
+    continuum_wavelengths: float array
+        Wavelength values that have been identified as continuum points for
+        doing a continuum normalisation. Note that these wavelength values
+        should be in the reference frame of the star.
     """
     def __init__(
         self,
@@ -67,7 +82,9 @@ class Spectrum1D(object):
         detector_i,
         order_i,
         seeing_arcsec,
-        slit_func):
+        slit_func,
+        continuum_wls,
+        is_continuum_normalised=False,):
         """
         """
         # Do initial checking of array lengths. After this initial check, we
@@ -87,6 +104,8 @@ class Spectrum1D(object):
         self.order_i = order_i
         self.seeing_arcsec = seeing_arcsec
         self.slit_func = slit_func
+        self.continuum_wls = continuum_wls
+        self.is_continuum_normalised = is_continuum_normalised
 
     @property
     def n_px(self):
@@ -187,6 +206,41 @@ class Spectrum1D(object):
     def slit_func(self, value):
         self._slit_func = np.array(value)
 
+    @property
+    def continuum_wls(self):
+        return self._continuum_wls
+
+    @continuum_wls.setter
+    def continuum_wls(self, value):
+        self._continuum_wls = np.array(value)
+
+    @property
+    def is_continuum_normalised(self):
+        return self._is_continuum_normalised
+
+    @is_continuum_normalised.setter
+    def is_continuum_normalised(self, value):
+        self._is_continuum_normalised =bool(value)
+
+    @property
+    def continuum_poly(self):
+        return self._continuum_poly
+
+    @continuum_poly.setter
+    def continuum_poly(self, value):
+        if type(value) == np.polynomial.polynomial.Polynomial:
+            self._continuum_poly = value
+        else:
+            raise ValueError("Expecting np.polynomial.polynomial.Polynomial.")
+
+    @property
+    def continuum_pixels(self):
+        return self._continuum_pixels
+
+    @continuum_pixels.setter
+    def continuum_pixels(self, value):
+        self._continuum_pixels = np.array(value)
+
     def update_snr(self):
         """Simple function to recompute SNR assuming Poisson uncertainties."""
         try:
@@ -211,6 +265,148 @@ class Spectrum1D(object):
             "snr {:0.0f}".format(self.snr),
         )
         return "".join(info_str)
+
+
+    def do_continuum_normalise(
+        self,
+        region_width_px=2,
+        poly_order=1,
+        continuum_region_func="MEDIAN",):
+        """Continuum normalise this spectrum (in place) using a polynomial and 
+        the continuum points specified. Updates the is_continuum_normalised
+        flag afterwards.
+
+        Parameters
+        ----------
+        region_width_px: int,  default: 2
+            A given continuum point is specified as the median value in the 
+            +/-region_width_px range either side of the wavelength specified.
+
+        poly_order: int, default: 1
+            Order of the polynomial to fit to the continuum. 
+
+        continuum_region_func: string, default: 'median'
+            Function to use to determine flux for continuum region, valid 
+            options are: [MEDIAN, MEAN, MAX]
+        """
+        VALID_OPTIONS = ["MEDIAN", "MEAN", "MAX",]
+
+        if continuum_region_func.upper() not in VALID_OPTIONS:
+            raise ValueError("Option must be in {}".format(VALID_OPTIONS))
+        
+        if continuum_region_func.upper() == "MEDIAN":
+            cont_func = np.nanmedian
+        elif continuum_region_func.upper() == "MEAN":
+            cont_func = np.nanmean
+        elif continuum_region_func.upper() == "MAX":
+            cont_func = np.nanmax
+
+        # Initialise a handy descriptor for this spectrum for printing
+        print_label = "(order:{:0.0f}, det:{:0.0f})".format(
+            self.order_i, self.detector_i)
+
+        # First check that we haven't already continuum normalised the data
+        if self.is_continuum_normalised:
+            print("Spectrum ({}) is already continuum normalised!".format(
+                print_label))
+            return
+
+        # Only do this if we have continuum wavelengths appropriate for our
+        # polynomial order
+        if len(self.continuum_wls) < (poly_order + 1):
+            print("Insufficient continuum points for spectrum ({}).".format(
+                print_label))
+            return
+
+        # Find the closest pixel for each continuum wavelength, and then find
+        # the median flux value within +/-region_width_px of this pixel.
+        cont_region_wavelengths = []
+        cont_region_fluxes = []
+        continuum_pixels = []
+
+        for cont_wl in self.continuum_wls:
+            # Find closest pixel
+            px_i = np.argmin(np.abs(self.wave - cont_wl))
+
+            # Save continuum pixels for reference
+            continuum_pixels.append(px_i)
+
+            # Save the wavelength of this pixel
+            cont_region_wavelengths.append(self.wave[px_i])
+
+            # Find median flux for the region around this pixel
+            reg_min = px_i - region_width_px
+            reg_max = px_i + region_width_px
+
+            cont_px_flux = cont_func(self.flux[reg_min:reg_max])
+
+            cont_region_fluxes.append(cont_px_flux)
+
+        # Now dow polynomial fit to just these flux values
+        # TODO: include flux uncertainties
+        coef = polyfit(
+            x=cont_region_wavelengths,
+            y=cont_region_fluxes,
+            deg=poly_order,)
+
+        # Save the polynomial and continuum pixels
+        self.continuum_poly = Polynomial(coef)
+        self.continuum_pixels = continuum_pixels
+
+        # Normalise by continuum and update our flux and uncertainties
+        continuum = self.continuum_poly(self.wave)
+
+        self.flux = self.flux / continuum
+        self.sigma = self.sigma / continuum
+
+        # Update flag
+        self.is_continuum_normalised = True
+    
+
+    def plot_spectrum(
+        self,
+        do_close_plots=True,
+        fig=None,
+        axis=None,):
+        """Quickly plot spectra as a function of wavelength for inspection.
+
+        Parameters
+        ----------
+        do_close_plots: boolean, default: True
+            Whether to close previously open plots. Set to False if passing in
+            figure and axes objects.
+
+        fig: matplotlib.figure.Figure, default: None
+            Matplotlib figure object.
+
+        axis: matplotlib.axes._subplots.AxesSubplot, default: None
+            Matplotlib axis object.
+        """
+        # Plot sequence of spectra
+        if do_close_plots:
+            plt.close("all")
+
+        # Make a new subplot if we haven't been given a set of axes
+        if fig is None and axis is None:
+            fig, axis = plt.subplots(figsize=(12,4))
+
+        # Plot normalised spectra
+        axis.plot(
+            self.wave,
+            self.flux / np.nanmedian(self.flux),
+            linewidth=0.5,)
+
+        # Plot segment details
+        axis.text(
+            x=self.wave[self.n_px//2],
+            y=0.1,
+            s="Order: {:0.0f}, Detector: {:0.0f}".format(
+                self.order_i, self.detector_i),
+            horizontalalignment="center",
+            fontsize="small",)
+
+        axis.set_xlabel(r"Wavelength ($\mu$m)")
+        axis.set_ylabel("Flux")
 
 
 class Observation(object):
@@ -448,8 +644,29 @@ class Observation(object):
         do_close_plots=True,
         do_normalise=False,
         fig=None,
-        axis=None,):
-        """Quickly plot spectra as a function of wavelength for inspection.
+        axis=None,
+        plot_continuum_poly=False,):
+        """Quickly plot all spectra in spectra_1d as a function of wavelength
+        for inspection.
+
+        Parameters
+        ----------
+        do_close_plots: boolean, default: True
+            Whether to close previously open plots. Set to False if passing in
+            figure and axes objects.
+
+        do_normalise: boolean, default: False
+            Whether to normalise each spectrum object by its median value 
+            before plotting.
+
+        fig: matplotlib.figure.Figure, default: None
+            Matplotlib figure object.
+
+        axis: matplotlib.axes._subplots.AxesSubplot, default: None
+            Matplotlib axis object.
+        
+        plot_continuum_poly: boolean, default: False
+            Whether to plot our polynomial fit to the spectral continuum.
         """
         # Plot sequence of spectra
         if do_close_plots:
@@ -467,15 +684,223 @@ class Observation(object):
             else:
                 norm_fac = 1
 
-            axis.plot(
-                spectrum.wave,
-                spectrum.flux / norm_fac,
-                linewidth=0.5,)
+            # If we're plotting the continuum polynomial fit, make sure to
+            # undo the continuum normalisation before plotting
+            if plot_continuum_poly:
+                # Get continuum fit
+                continuum = spectrum.continuum_poly(spectrum.wave)
+
+                # Plot spectra
+                axis.plot(
+                    spectrum.wave,
+                    spectrum.flux * continuum,
+                    linewidth=0.5,)
+
+                # Plot continuum fit
+                axis.plot(
+                    spectrum.wave,
+                    continuum,
+                    linewidth=0.5,
+                    color="r",)
+
+                # Plot continuum points used for fit
+                # TODO: use actual flux values here.
+                axis.plot(
+                    spectrum.wave[spectrum.continuum_pixels],
+                    continuum[spectrum.continuum_pixels],
+                    marker="x",
+                    markeredgecolor="k",
+                    linestyle="",)
+
+            # Otherwise just plot spectra as is
+            else:
+                axis.plot(
+                    spectrum.wave,
+                    spectrum.flux / norm_fac,
+                    linewidth=0.5,)
 
         axis.set_xlabel(r"Wavelength ($\mu$m)")
         axis.set_ylabel("Flux")
 
         fig.tight_layout()
+
+    
+    def continuum_normalise_spectra(
+        self,
+        region_width_px=2,
+        poly_order=1,
+        continuum_region_func="MEDIAN",
+        do_plot=False,):
+        """Continuum normalise all spectra in spectra_1d.
+
+        Parameters
+        ----------
+        region_width_px: int,  default: 2
+            A given continuum point is specified as the median value in the 
+            +/-region_width_px range either side of the wavelength specified.
+
+        poly_order: int, default: 1
+            Order of the polynomial to fit to the continuum. 
+
+        continuum_region_func: string, default: 'median'
+            Function to use to determine flux for continuum region, valid 
+            options are: [MEDIAN, MEAN, MAX]
+
+        do_plot: boolean, default: False
+            Whether to plot a diagnostic plot after fitting the continuum.
+        """
+        for spectrum in self.spectra_1d:
+            spectrum.do_continuum_normalise(
+                region_width_px=region_width_px,
+                poly_order=poly_order,
+                continuum_region_func=continuum_region_func,)
+
+        # TODO: plot a more detail diagnostic plot
+        if do_plot:
+            self.plot_spectra(plot_continuum_poly=True)
+    
+
+    def plot_continuum_diagnostic(self,):
+        """
+        """
+        pass
+
+
+    def identify_continuum_regions(
+        self,
+        n_cont_region_per_spec=7,
+        timeout_sec=10,
+        return_wls=False):
+        """For every spectral segment, take user input for the continuum 
+        region locations. We prompt the user for *up to* n_cont_region_per_spec
+        continuum points. If there are fewer continuum points than this, the 
+        user can simply let timeout_sec pass to use fewer than this and move
+        onto the next plot.
+
+        Parameters
+        ----------
+        n_cont_region_per_spec: int, default: 7
+            Maximum number of continuum points to prompt the user for.
+
+        timeout_sec: int, default: 10
+            How long to give the user in seconds to select the next point.
+
+        return_wls: bool, default: False
+            Whether to return the continuum wavelengths as an array.
+
+        Returns
+        -------
+        cont_regions: numpy array [optional]
+            A sorted 1D array of the selected continuum wavelengths.
+        """
+        cont_regions = []
+
+        title_text = ("Click to select up to {:0.0f} continuum regions. If "
+                      "less than this are to be selected, wait {:0.0f} sec for"
+                      " timeout.")
+        title_text = title_text.format(n_cont_region_per_spec, timeout_sec)
+
+        # For each spectrum segment, ask for user input for the continuum
+        # regions.
+        for spec_i, spectrum in enumerate(self.spectra_1d):
+            spectrum.plot_spectrum()
+            plt.title(title_text)
+            user_coords = plt.ginput(
+                n=n_cont_region_per_spec,
+                timeout=timeout_sec,)
+
+            # We only care about the X values of these coordinates
+            continuum_wavelengths = np.array(user_coords)[:,0]
+
+            # Save the continuum regions for the spectrum
+            spectrum.continuum_wls = continuum_wavelengths
+
+            cont_regions.append(continuum_wavelengths)
+
+        plt.close()
+
+        if return_wls:
+            # Convert to 1D numpy array and sort
+            cont_regions = np.concatenate(np.array(cont_regions))
+            sorted_i = np.argsort(cont_regions)
+            cont_regions = cont_regions[sorted_i]
+
+            return cont_regions
+
+
+    def save_continuum_wavelengths_to_file(
+        self,
+        save_path="data/",):
+        """Get continuum wavelengths from spectra opjects, combine, and save to
+        file. Counterpart to load_continuum_wavelengths_from_file. File is 
+        saved as continuum_wavelengths_[date]_[object].txt.
+
+        Parameters
+        ----------
+        save_path: string, default: 'data/'
+            Default relative filepath to save the continuum wavelengths to.
+        """
+        # Get the stored continuum wavelengths for each spectrum in spectrum_1d
+        # and sort.
+        continuum_wavelengths = []
+
+        for spectrum in self.spectra_1d:
+            continuum_wavelengths.append(spectrum.continuum_wls)
+
+        continuum_wavelengths = np.concatenate(continuum_wavelengths)
+        sorted_i = np.argsort(continuum_wavelengths)
+        continuum_wavelengths = continuum_wavelengths[sorted_i]
+        
+        if len(continuum_wavelengths) < 1:
+            print("No continuum wavelengths!")
+            return
+        
+        # Save this list to disk
+        cont_wavelengths_fn = "continuum_wavelengths_{}_{}.txt".format(
+            self.t_start_str.split("T")[0], self.object_name.replace(" ", "_"))
+        
+        np.savetxt(
+            fname=os.path.join(save_path, cont_wavelengths_fn),
+            X=continuum_wavelengths,
+            delimiter=",",)
+
+
+    def load_continuum_wavelengths_from_file(
+        self,
+        load_path="data/",
+        cont_wavelengths_fn=None,):
+        """Load a previously saved set of continuum wavelengths and save to 
+        spectra objects. Counterpart to save_continuum_wavelengths_to_file.
+
+        Parameters
+        ----------
+        load_path: string, default: 'data/'
+            Default relative filepath to load the continuum wavelengths from.
+
+        cont_wavelengths_fn: string, default: None
+            Specific filename to import. If None will use:
+            continuum_wavelengths_[date]_[object].txt.
+        """
+        # If we've not been provided a filename construct the standard filename
+        # from the object and date
+        if cont_wavelengths_fn is None:
+            cont_wavelengths_fn = "continuum_wavelengths_{}_{}.txt".format(
+                self.t_start_str.split("T")[0], 
+                self.object_name.replace(" ", "_"))
+            
+        cont_wavelengths_path = os.path.join(
+                load_path, cont_wavelengths_fn)
+
+        # Load in continuum wavelengths from file
+        continuum_wavelengths = np.loadtxt(cont_wavelengths_path)
+
+        # Assign the appropriate wavelengths to each spectral segment
+        for spectrum in self.spectra_1d:
+            valid_wls = np.logical_and(
+                continuum_wavelengths > spectrum.wave.min(),
+                continuum_wavelengths < spectrum.wave.max(),)
+
+            spectrum.continuum_wls = continuum_wavelengths[valid_wls]
 
 
 def initialise_observation_from_crires_nodding_fits(
@@ -557,6 +982,9 @@ def initialise_observation_from_crires_nodding_fits(
                     fwhm = np.nan
                     slit_func = np.nan
 
+                # TODO allow importing continuum points
+                continuum_wls = []
+
                 spec_obj = Spectrum1D(
                     wave=wave,
                     flux=spec,
@@ -566,6 +994,7 @@ def initialise_observation_from_crires_nodding_fits(
                     order_i=order,
                     seeing_arcsec=fwhm,
                     slit_func=slit_func,
+                    continuum_wls=continuum_wls,
                 )
 
                 spectra_list.append(spec_obj)
