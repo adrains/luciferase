@@ -359,6 +359,11 @@ class Spectrum1D(object):
         self.flux = self.flux / continuum
         self.sigma = self.sigma / continuum
 
+        # Set infs to nan
+        inf_mask = np.logical_or(np.isinf(self.flux), np.isinf(self.sigma))
+        self.flux[inf_mask] = np.nan
+        self.sigma[inf_mask] = np.nan
+
         # Update flag
         self.is_continuum_normalised = True
     
@@ -388,7 +393,8 @@ class Spectrum1D(object):
 
         # Make a new subplot if we haven't been given a set of axes
         if fig is None and axis is None:
-            fig, axis = plt.subplots(figsize=(12,4))
+            fig, axis = plt.subplots(figsize=(16,5))
+            plt.subplots_adjust(left=0.05, right=0.95,)
 
         # Plot normalised spectra
         axis.plot(
@@ -405,6 +411,7 @@ class Spectrum1D(object):
             horizontalalignment="center",
             fontsize="small",)
 
+        axis.set_xlim(self.wave[0], self.wave[-1])
         axis.set_xlabel(r"Wavelength ($\mu$m)")
         axis.set_ylabel("Flux")
 
@@ -459,6 +466,7 @@ class Observation(object):
         max_order,
         n_detectors,
         n_orders,
+        fits_file,
         spectra_1d_blaze_corr=None,
         spectra_1d_telluric_corr=None,):
         """
@@ -474,6 +482,7 @@ class Observation(object):
         self.max_order = max_order
         self.n_detectors = n_detectors
         self.n_orders = n_orders
+        self.fits_file = fits_file
         #self.spectra_1d_blaze_corr = spectra_1d_blaze_corr
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
@@ -599,6 +608,15 @@ class Observation(object):
     def max_order(self, value):
         self._max_order = int(value)
 
+    @property
+    def fits_file(self):
+        return self._fits_file
+
+    @fits_file.setter
+    def fits_file(self, value):
+        if os.path.isfile(value):
+            self._fits_file = str(value)
+
 
     def update_t_mid_and_end(self,):
         """Called to update the mid and end JD time of the observation."""
@@ -674,7 +692,7 @@ class Observation(object):
 
         # Make a new subplot if we haven't been given a set of axes
         if fig is None and axis is None:
-            fig, axis = plt.subplots(figsize=(12,4))
+            fig, axis = plt.subplots(figsize=(16,4))
 
         # Loop over spectra array and plot each spectral segment
         for spectrum in self.spectra_1d:
@@ -707,7 +725,7 @@ class Observation(object):
                 # TODO: use actual flux values here.
                 axis.plot(
                     spectrum.wave[spectrum.continuum_pixels],
-                    continuum[spectrum.continuum_pixels],
+                    (spectrum.flux * continuum)[spectrum.continuum_pixels],
                     marker="x",
                     markeredgecolor="k",
                     linestyle="",)
@@ -768,8 +786,8 @@ class Observation(object):
 
     def identify_continuum_regions(
         self,
-        n_cont_region_per_spec=7,
-        timeout_sec=10,
+        n_cont_region_per_spec=10,
+        timeout_sec=20,
         return_wls=False):
         """For every spectral segment, take user input for the continuum 
         region locations. We prompt the user for *up to* n_cont_region_per_spec
@@ -903,6 +921,215 @@ class Observation(object):
             spectrum.continuum_wls = continuum_wavelengths[valid_wls]
 
 
+    def save_molecfit_fits_files(
+        self,
+        molecfit_path,
+        only_one_spectral_segment=False,
+        science_fits="SCIENCE.fits",
+        wavelength_fits="WAVE_INCLUDE.fits",
+        atmosphere_fits='MAPPING_ATMOSPHERIC.fits',
+        pixel_fits="PIXEL_EXCLUDE.fits",
+        edge_px_to_exlude=40,):
+        """Function to write spectra and associated files in a molecfit 
+        compatible format so that we can telluric correct our features.
+
+        Note that if performing continuum normalisation here, the FIT_CONTINUUM
+        parameter in model.rc should be set to 0.
+
+        Molecfit has the following steps, each of which has an associated SOF
+        and rc file.
+        1) Model
+            SOF file (model.sof) takes as input:
+                WAVE_INCLUDE.fits               WAVE_INCLUDE
+                SCIENCE.fits                    SCIENCE
+                PIXEL_EXCLUDE.fits              PIXEL_EXCLUDE
+                WAVE_EXCLUDE.fits               WAVE_EXCLUDE
+
+        2) Calctrans
+            SOF file (calctrans.sof) takes as input:
+                MODEL/MODEL_MOLECULES.fits      MODEL_MOLECULES
+                MODEL/ATM_PARAMETERS.fits       ATM_PARAMETERS
+                MODEL/BEST_FIT_PARAMETERS.fits  BEST_FIT_PARAMETERS
+                MAPPING_ATMOSPHERIC.fits        MAPPING_ATMOSPHERIC
+                SCIENCE.fits                    SCIENCE
+
+        3) Correct
+            SOF file (correct.sof) takes as input:
+                CALCTRANS/TELLURIC_CORR.fits    TELLURIC_CORR
+                SCIENCE.fits                    SCIENCE
+
+        ESO documentation:
+            http://www.eso.org/sci/software/pipelines/skytools/molecfit
+
+        A&A Publication:
+            https://ui.adsabs.harvard.edu/abs/2015A%26A...576A..77S/abstract
+        
+        Parameters
+        ----------
+        molecfit_path: string
+            Filepath where we will save the output fits files.
+
+        only_one_spectral_segment: boolean, default: False
+            Currently unused.
+
+        science_fits: string, default: 'SCIENCE.fits'
+            Filename for output fits file containing science spectra.
+
+        wavelength_fits: string, default: 'WAVE_INCLUDE.fits'
+            Filename for output fits file containing wavelengths to include.
+
+        atmosphere_fits: string, default: 'MAPPING_ATMOSPHERIC.fits'
+            Filename for output fits file mapping 'SCIENCE' - 'ATM_PARAMETERS'.
+
+        pixel_fits: string, default: 'PIXEL_EXCLUDE.fits'
+            Filename for output fits file containing pixels to exclude.
+
+        edge_px_to_exlude: int, default: 40
+            Number of pixels on each side of each spectral segment to mask out
+            when fitting molecfit.
+
+        Output Files
+        ------------
+        1) SCIENCE.fits
+            Science spectra consisting of primary HDU and N fits table HDUs 
+            with columns ['WAVE', 'SPEC' 'ERR']. By default N is equal to the
+            number of spectral segments, but N=1 if only_one_spectral_segment
+            is set to True.
+
+        2) WAVE_INCLUDE.fits
+            Wavelengths to include in Molecfit modelling, plus other input
+            parameters. Fits file consists of
+            an empty primary HDU, and a single fits table HDU with columns
+            ['LOWER_LIMIT', 'UPPER_LIMIT', 'MAPPED_TO_CHIP', 'CONT_FIT_FLAG',
+             'CONT_POLY_ORDER', 'WLC_FIT_FLAG']. 
+             
+            The first two
+
+        3) ATM_PARAMETERS_EXT.fits
+            ATM_PARAMETERS_EXT file for Molecfit. File consists of an empty
+            primary HDU, and then a single fits table HDU with the column 
+            ['ATM_PARAMETERS_EXT'].
+
+        4) PIXEL_EXCLUDE.fits
+            Pixels to exclude in Molecfit modelling. Fits file consists of
+            an empty primary HDU, and a single fits table HDU with columns
+            ['LOWER_LIMIT', 'UPPER_LIMIT',].
+        """
+        # Setup save paths
+        science_save_path = os.path.join(molecfit_path, science_fits)
+        wavelength_save_path = os.path.join(molecfit_path, wavelength_fits)
+        atmosphere_save_path = os.path.join(molecfit_path, atmosphere_fits)
+        pixel_save_path = os.path.join(molecfit_path, pixel_fits)
+
+        # Initialise pixel counter. This is used to count the number of pixels 
+        # over subsequent spectral segments.
+        px_so_far = 0
+
+        # Initialise HDU lists for each of our output fits files, assigning
+        # the each primary HDU from our input science file.
+        with fits.open(self.fits_file) as fits_file:
+            primary_hdu = fits_file[0].copy()
+
+        hdul_output = fits.HDUList([primary_hdu])
+        hdul_winc = fits.HDUList([primary_hdu])
+        hdul_atm =  fits.HDUList([primary_hdu])
+        hdul_excl =  fits.HDUList([primary_hdu])
+
+        # Now initialise other arrays
+        wmin, wmax  = [], []
+        map2chip = []
+        atm_parms_ext = []
+        px_excl_min, px_excl_max = [], []
+
+        # Loop over every spectral segment
+        for spec_i, spec in enumerate(self.spectra_1d):
+            # Get the chip and spectral order indices
+            chip_i = spec.detector_i
+            order_i = spec.order_i
+
+            # Create fits columns for WAVE, SPEC, and ERR
+            col1 = fits.Column(name='WAVE', format='D', array=spec.wave)
+            col2 = fits.Column(name='SPEC', format='D', array=spec.flux)
+            col3 = fits.Column(name='ERR', format='D', array=spec.sigma)
+
+            # Create fits table HDU with WAVE SPEC ERR
+            table_hdu = fits.BinTableHDU.from_columns([col1, col2, col3])
+
+            # Append table HDU to output HDU list
+            hdul_output.append(table_hdu)
+
+            # Append wmin for given order to wmin array and convert to micron
+            wmin.append(np.min(spec.wave)*0.001)
+
+            # Append wmax for giver order to wmax array and convert to micron
+            wmax.append(np.max(spec.wave)*0.001)
+
+            # Setup the columns for PIXEL_EXCLUDE. For CRIRES spectra, the goal
+            # here is to exclude the edge pixels on each side of the detector 
+            # (which are physically masked and don't receive flux) so these 
+            # regions aren't considered when fitting tellurics.
+            px_excl_min.append(px_so_far)
+            px_excl_min.append(len(spec.wave)-edge_px_to_exlude + px_so_far)
+            px_excl_max.append(edge_px_to_exlude + px_so_far)
+            px_excl_max.append(len(spec.wave) + px_so_far)
+            
+            hdul_output[spec_i+1].header.append(
+                ("EXTNAME",
+                "det{:02.0f}_{:02.0f}_01".format(chip_i, order_i),
+                "order/detector"),
+                end=True)
+
+            # Append order counter to map2chip
+            map2chip.append(spec_i+1)
+
+            # Update atmospheric parameter mapping: 1 for non-primary fits HDUs
+            if spec_i+1 == 1:
+                atm_parms_ext.append(0)
+            else:
+                atm_parms_ext.append(1)
+
+            # Index pixel counter
+            px_so_far += len(spec.wave)
+
+        # Setup the columns for the WAVE_INCLUDE output file
+        CONT_FIT_FLAG = np.ones(len(wmin))
+        wmin_winc = fits.Column(name='LOWER_LIMIT', format='D', array=wmin)
+        wmax_winc = fits.Column(name='UPPER_LIMIT', format='D', array=wmax)
+        map2chip_winc = fits.Column(
+            name='MAPPED_TO_CHIP', format='I', array=map2chip)
+        contflag_winc = fits.Column(
+            name='CONT_FIT_FLAG', format='I', array=CONT_FIT_FLAG)
+
+        # Creates WAVE_INCLUDE table HDU and appends to the HDU list
+        table_hdu_winc = fits.BinTableHDU.from_columns(
+            [wmin_winc, wmax_winc, map2chip_winc, contflag_winc])
+        hdul_winc.append(table_hdu_winc)
+
+        pmin_excl = fits.Column(
+            name='LOWER_LIMIT', format='K', array=px_excl_min)
+        pmax_excl = fits.Column(
+            name='UPPER_LIMIT', format='K', array=px_excl_max)
+
+        table_hdu_pexcl = fits.BinTableHDU.from_columns([pmin_excl, pmax_excl])
+        hdul_excl.append(table_hdu_pexcl)
+        hdul_excl.writeto(pixel_save_path, overwrite=True)
+
+        # Write to the science output file
+        hdul_output.writeto(science_save_path, overwrite=True)
+
+        # Write to WAVE_INCLUDE file
+        hdul_winc.writeto(wavelength_save_path, overwrite=True)
+        
+        # Write atmospheric mapping output file
+        col1_atm = fits.Column(
+            name="ATM_PARAMETERS_EXT",
+            format='I',
+            array=atm_parms_ext)
+        table_hdu_atm = fits.BinTableHDU.from_columns([col1_atm])
+        hdul_atm.append(table_hdu_atm)
+        hdul_atm.writeto(atmosphere_save_path, overwrite=True)
+
+
 def initialise_observation_from_crires_nodding_fits(
     fits_file_nodding_extracted,
     fits_file_slit_func=None,
@@ -1031,7 +1258,8 @@ def initialise_observation_from_crires_nodding_fits(
             min_order=min_order,
             max_order=max_order,
             n_detectors=n_detectors,
-            n_orders=len(orders),)
+            n_orders=len(orders),
+            fits_file= os.path.abspath(fits_file_nodding_extracted),)
             
     return observation
 
