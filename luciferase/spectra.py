@@ -663,7 +663,8 @@ class Observation(object):
         do_normalise=False,
         fig=None,
         axis=None,
-        plot_continuum_poly=False,):
+        plot_continuum_poly=False,
+        line_list=None,):
         """Quickly plot all spectra in spectra_1d as a function of wavelength
         for inspection.
 
@@ -1262,6 +1263,80 @@ def initialise_observation_from_crires_nodding_fits(
             fits_file= os.path.abspath(fits_file_nodding_extracted),)
             
     return observation
+
+
+def convert_air_to_vacuum_wl(wavelengths_air,):
+    """Converts provided air wavelengths to vacuum wavelengths.
+
+    Parameters
+    ----------
+    wavelengths_air: float array
+        Array of air wavelength values to convert.
+
+    Returns
+    -------
+    wavelengths_vac: float array
+        Corresponding array of vacuum wavelengths
+    """
+    # Calculate the refractive index for every wavelength
+    ss = 10**4 / wavelengths_air
+    n_ref = (1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - ss) 
+         + 0.0001599740894897 / (38.92568793293 - ss))
+
+    # Calculate vacuum wavelengths
+    wavelengths_vac = wavelengths_air * n_ref
+
+    return wavelengths_vac
+
+
+def read_vald_linelist(filepath,):
+    """Load in a VALD sourced line list into a pandas dataframe format. Note 
+    that the first two lines (everything before the column names) and
+    everything after the last row of line data should be commented out with #,
+    and that VALD by default returns air (rather than vacuum) wavelengths.
+
+    Parameters
+    ----------
+    filepath: string
+        Filepath to the VALD file.
+
+    Returns
+    -------
+    line_list: pd.DataFrame
+        DataFrame of line list data.
+    """
+    # Load in linelist
+    line_list = pd.read_csv(
+        filepath, 
+        sep=",",
+        comment="#")
+
+    # Drop last column
+    line_list.drop(columns=line_list.columns[-1], inplace=True)
+
+    # Remove extra spaces in column names
+    line_list.columns = line_list.columns.str.replace(" ", "")
+
+    # Remove quotes in species column
+    line_list["SpecIon"] = line_list["SpecIon"].str.replace("'", "")
+
+    # Remove quotes from references column
+    line_list["Reference"] = line_list["Reference"].str.replace("'", "")
+
+    # Remove leading and trailihg spaces in reference column
+    line_list["Reference"] = line_list["Reference"].str.lstrip()
+    line_list["Reference"] = line_list["Reference"].str.rstrip()
+
+    # Convert air to vacuum wavelengths
+    line_list["WL_vac(A)"] = convert_air_to_vacuum_wl(line_list["WL_air(A)"])
+
+    # Reorder columns so wavelength columns are together
+    new_col_order = ["SpecIon", "WL_air(A)", "WL_vac(A)", "Excit(eV)", "Vmic",
+        "loggf*", "Rad.", "Stark", "Waals", "factor", "depth", "Reference",]
+
+    line_list = line_list[new_col_order]
+
+    return line_list
 
 
 def load_saved_observation_obj():
