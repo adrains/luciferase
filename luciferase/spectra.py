@@ -1388,7 +1388,8 @@ def read_vald_linelist(filepath,):
     """Load in a VALD sourced line list into a pandas dataframe format. Note 
     that the first two lines (everything before the column names) and
     everything after the last row of line data should be commented out with #,
-    and that VALD by default returns air (rather than vacuum) wavelengths.
+    the column names should have commas inserted between them, and that VALD by
+    default returns air (rather than vacuum) wavelengths.
 
     Parameters
     ----------
