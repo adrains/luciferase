@@ -5,8 +5,10 @@ import glob
 import numpy as np
 import pandas as pd
 from astropy.io import fits
+import astropy.constants as const
 import matplotlib.pyplot as plt
 import luciferase.reduction as lred
+import luciferase.utils as lutils
 from numpy.polynomial.polynomial import Polynomial, polyfit
 
 VALID_NOD_POS = ["A", "B", None,]
@@ -467,6 +469,8 @@ class Observation(object):
         n_detectors,
         n_orders,
         fits_file,
+        bcor,
+        rv,
         spectra_1d_blaze_corr=None,
         spectra_1d_telluric_corr=None,):
         """
@@ -483,6 +487,8 @@ class Observation(object):
         self.n_detectors = n_detectors
         self.n_orders = n_orders
         self.fits_file = fits_file
+        self.bcor = bcor
+        self.rv = rv
         #self.spectra_1d_blaze_corr = spectra_1d_blaze_corr
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
@@ -617,6 +623,22 @@ class Observation(object):
         if os.path.isfile(value):
             self._fits_file = str(value)
 
+    @property
+    def bcor(self):
+        return self._bcor
+
+    @bcor.setter
+    def bcor(self, value):
+        self._bcor = float(value)
+
+    @property
+    def rv(self):
+        return self._rv
+
+    @rv.setter
+    def rv(self, value):
+        self._rv = float(value)
+
 
     def update_t_mid_and_end(self,):
         """Called to update the mid and end JD time of the observation."""
@@ -664,7 +686,8 @@ class Observation(object):
         fig=None,
         axis=None,
         plot_continuum_poly=False,
-        line_list=None,):
+        line_list=None,
+        line_depth_threshold=0.2,):
         """Quickly plot all spectra in spectra_1d as a function of wavelength
         for inspection.
 
@@ -686,6 +709,13 @@ class Observation(object):
         
         plot_continuum_poly: boolean, default: False
             Whether to plot our polynomial fit to the spectral continuum.
+
+        line_list: pandas.DataFrame, default: None
+            VALD line list, imported using the read_vald_linelist function. If 
+            None, no lines are plotted.
+
+        line_depth_threshold: float, default: 0.2
+            Minimum strength of lines to plot. Smaller values are weaker lines.
         """
         # Plot sequence of spectra
         if do_close_plots:
@@ -738,7 +768,35 @@ class Observation(object):
                     spectrum.flux / norm_fac,
                     linewidth=0.5,)
 
-        axis.set_xlabel(r"Wavelength ($\mu$m)")
+            # Now plot line list if we've been asked to
+            if line_list is not None:
+                # Shift the line to the rest frame of the star
+                shift_fac = (1-(self.rv-self.bcor)/(const.c.si.value/1000))
+                wl_new = line_list["WL_vac(nm)"].values * shift_fac
+
+                # Plot only those lines above the depth threshold *and* within
+                # the wavelength region we're considering
+                depth_mask = line_list["depth"] > line_depth_threshold
+                wl_mask = np.logical_and(
+                    wl_new > np.nanmin(spectrum.wave),
+                    line_list["WL_vac(nm)"] < np.nanmax(spectrum.wave),)
+                line_mask = np.logical_and(depth_mask, wl_mask)
+
+                point_height = 1.1 * np.nanmedian(spectrum.flux)
+                text_height = 1.2 * point_height
+
+                for species, wl in zip(
+                    line_list["SpecIon"][line_mask].values, wl_new[line_mask]):
+                    # Plot
+                    axis.annotate(
+                        s=species,
+                        xy=(wl, point_height),
+                        xytext=(wl, text_height),
+                        horizontalalignment="center",
+                        fontsize="xx-small",
+                        arrowprops=dict(arrowstyle='->',lw=1),)
+
+        axis.set_xlabel(r"Wavelength (nm)")
         axis.set_ylabel("Flux")
 
         fig.tight_layout()
@@ -1137,7 +1195,10 @@ def initialise_observation_from_crires_nodding_fits(
     #fits_file_blaze_corrected,
     #fits_file_telluric_corrected,
     fits_ext_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),
-    initialise_empty_bad_px_mask=True,):
+    initialise_empty_bad_px_mask=True,
+    file_format="CRIRES",
+    site="Paranal",
+    rv=np.nan,):
     """Takes a CRIRES+ 1D extracted nodding fits file, and initialises an
     Observation object containing a set of Spectra1D objects.
 
@@ -1156,12 +1217,44 @@ def initialise_observation_from_crires_nodding_fits(
     initialise_empty_bad_px_mask: boolean, default: True
         Whether to initialise empty/uniniformative bad px masks.
 
+    file_format: string, default: 'CRIRES'
+        File format of input fits files. Revevant if different headers are
+        used when extracting coordinate and time info out for computation of
+        the barycentric velocity.
+
+    site: string, default: 'Paranal'
+        Observatory location for computation of the barycentric velocity.
+
+    rv: float, default: np.nan
+        RV of the star (if known) in km/s.
+
     Returns
     -------
     observation: luciferase.spectra.Observation object
         An Observation object containing Spectra1D objects and associated info.
     """
+    # List of valid file formats
+    VALID_FILE_FORMATS = ["CRIRES",]
+
     with fits.open(fits_file_nodding_extracted) as fits_file:
+        # Check file format is valid, and if so get the barycentric correction
+        if file_format == "CRIRES":
+            # Calculcate midpoint
+            exp_time_sec = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
+            t_mid = fits_file[0].header["MJD-OBS"] + exp_time_sec / 86400 / 2
+
+            # Calculate barycentric correction. 
+            # TODO fix 'dubious year' warnings thrown by astropy
+            bcor = lutils.compute_barycentric_correction(
+                ra=fits_file[0].header["RA"],
+                dec=fits_file[0].header["DEC"],
+                time_mid=t_mid,
+                site=site,)
+
+        else:
+            raise Exception("Invalid file format, must be in {}".format(
+                VALID_FILE_FORMATS))
+        
         # Intialise our list of spectra and slit_funcs
         spectra_list = []
         
@@ -1260,7 +1353,9 @@ def initialise_observation_from_crires_nodding_fits(
             max_order=max_order,
             n_detectors=n_detectors,
             n_orders=len(orders),
-            fits_file= os.path.abspath(fits_file_nodding_extracted),)
+            fits_file= os.path.abspath(fits_file_nodding_extracted),
+            bcor=bcor,
+            rv=rv,)
             
     return observation
 
@@ -1330,9 +1425,14 @@ def read_vald_linelist(filepath,):
     # Convert air to vacuum wavelengths
     line_list["WL_vac(A)"] = convert_air_to_vacuum_wl(line_list["WL_air(A)"])
 
+    # Convert both these to nm
+    line_list["WL_air(nm)"] = line_list["WL_air(A)"] / 10
+    line_list["WL_vac(nm)"] = line_list["WL_vac(A)"] / 10
+
     # Reorder columns so wavelength columns are together
-    new_col_order = ["SpecIon", "WL_air(A)", "WL_vac(A)", "Excit(eV)", "Vmic",
-        "loggf*", "Rad.", "Stark", "Waals", "factor", "depth", "Reference",]
+    new_col_order = ["SpecIon", "WL_air(A)", "WL_vac(A)", "WL_air(nm)", 
+        "WL_vac(nm)", "Excit(eV)", "Vmic", "loggf*", "Rad.", "Stark", "Waals",
+        "factor", "depth", "Reference",]
 
     line_list = line_list[new_col_order]
 
