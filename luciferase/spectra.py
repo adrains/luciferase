@@ -4,6 +4,7 @@ import os
 import glob
 import numpy as np
 import pandas as pd
+import warnings
 from astropy.io import fits
 import astropy.constants as const
 import matplotlib.pyplot as plt
@@ -246,12 +247,17 @@ class Spectrum1D(object):
     def update_snr(self):
         """Simple function to recompute SNR assuming Poisson uncertainties."""
         try:
-            with np.seterr(all="ignore"):
+            with np.errstate(divide='ignore', invalid='ignore'):
+                # Compute the SNR
                 bad_px_mask = ~np.isfinite(self.flux)
                 self.snr = np.nanmedian(
-                    (self.flux[bad_px_mask] 
-                    / np.sqrt(np.nanmedian(self.flux[bad_px_mask])))
+                    (self.flux[~bad_px_mask] 
+                    / np.sqrt(np.nanmedian(self.flux[~bad_px_mask])))
                 )
+
+                # Default to 0 in case of error
+                if np.isnan(self.snr):
+                    self.snr = 0
 
         # In case this fails, just set the SNR to zero
         except:
@@ -1198,7 +1204,8 @@ def initialise_observation_from_crires_nodding_fits(
     initialise_empty_bad_px_mask=True,
     file_format="CRIRES",
     site="Paranal",
-    rv=np.nan,):
+    rv=np.nan,
+    drop_empty_orders=True,):
     """Takes a CRIRES+ 1D extracted nodding fits file, and initialises an
     Observation object containing a set of Spectra1D objects.
 
@@ -1227,6 +1234,9 @@ def initialise_observation_from_crires_nodding_fits(
 
     rv: float, default: np.nan
         RV of the star (if known) in km/s.
+
+    drop_empty_orders: boolean, default: True
+        Whether to drop all nan orders.
 
     Returns
     -------
@@ -1318,7 +1328,12 @@ def initialise_observation_from_crires_nodding_fits(
                     continuum_wls=continuum_wls,
                 )
 
-                spectra_list.append(spec_obj)
+                # If we have all nan arrays (SNR set to 0 by default), it means
+                # the orders are empty and should be skipped.
+                if drop_empty_orders and spec_obj.snr == 0:
+                    continue
+                else:
+                    spectra_list.append(spec_obj)
 
         # Sort in wavelength order
         wave_sort_i = np.argsort([spec.wave[0] for spec in spectra_list])
