@@ -59,22 +59,6 @@ class Spectrum1D(object):
 
     bad_px_mask: boolean array
         Bad pixel mask for the spectrum. True corresponds to bad pixels.
-
-    detector_i, order_i: int
-        Integer label for the detector and order assocated with the spectrum.
-
-    seeing_arcsec: float
-        The measured seeing for this observation ('seeing' here being inclusive
-        of AO).
-    
-    slit_func: float array
-        1D slit function across the slit for the observation. For CRIRES 
-        observations, it is from this that the seeing is measured.
-
-    continuum_wavelengths: float array
-        Wavelength values that have been identified as continuum points for
-        doing a continuum normalisation. Note that these wavelength values
-        should be in the reference frame of the star.
     """
     def __init__(
         self,
@@ -83,11 +67,7 @@ class Spectrum1D(object):
         sigma,
         bad_px_mask,
         detector_i,
-        order_i,
-        seeing_arcsec,
-        slit_func,
-        continuum_wls,
-        is_continuum_normalised=False,):
+        order_i,):
         """
         """
         # Do initial checking of array lengths. After this initial check, we
@@ -105,10 +85,6 @@ class Spectrum1D(object):
         self.bad_px_mask = bad_px_mask
         self.detector_i = detector_i
         self.order_i = order_i
-        self.seeing_arcsec = seeing_arcsec
-        self.slit_func = slit_func
-        self.continuum_wls = continuum_wls
-        self.is_continuum_normalised = is_continuum_normalised
 
     @property
     def n_px(self):
@@ -193,6 +169,87 @@ class Spectrum1D(object):
     def snr(self, value):
         self._snr = int(value)
 
+    def update_snr(self):
+        """Simple function to recompute SNR assuming Poisson uncertainties."""
+        try:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                # Compute the SNR
+                bad_px_mask = ~np.isfinite(self.flux)
+                self.snr = np.nanmedian(
+                    (self.flux[~bad_px_mask] 
+                    / np.sqrt(np.nanmedian(self.flux[~bad_px_mask])))
+                )
+
+                # Default to 0 in case of error
+                if np.isnan(self.snr):
+                    self.snr = 0
+
+        # In case this fails, just set the SNR to zero
+        except:
+            self.snr = 0
+
+    def __str__(self):
+        """String representation of Spectrum1D details."""
+        info_str = (
+            "npx {:0.0f}, ".format(self.n_px),
+            "lambda mid {:0.1f} um, ".format(np.nanmean(self.wave)),
+            "snr {:0.0f}".format(self.snr),
+        )
+        return "".join(info_str)
+
+
+class ObservedSpectrum(Spectrum1D):
+    """Class to represent an observed stellar spectrum. Inherits from 
+    Spectrum1D.
+
+    Parameters
+    ----------
+    wave, flux, sigma: float array
+        Wavelength, flux, and uncertainty vectors for the spectrum.
+
+    bad_px_mask: boolean array
+        Bad pixel mask for the spectrum. True corresponds to bad pixels.
+
+    detector_i, order_i: int
+        Integer label for the detector and order assocated with the spectrum.
+
+    seeing_arcsec: float
+        The measured seeing for this observation ('seeing' here being inclusive
+        of AO).
+    
+    slit_func: float array
+        1D slit function across the slit for the observation. For CRIRES 
+        observations, it is from this that the seeing is measured.
+
+    continuum_wavelengths: float array
+        Wavelength values that have been identified as continuum points for
+        doing a continuum normalisation. Note that these wavelength values
+        should be in the reference frame of the star.
+    """
+    def __init__(
+        self,
+        wave,
+        flux,
+        sigma,
+        bad_px_mask,
+        detector_i,
+        order_i,
+        seeing_arcsec,
+        slit_func,
+        continuum_wls,
+        is_continuum_normalised=False,):
+        """
+        """
+        # Initialise basic parameters with superclass constructor
+        super(ObservedSpectrum, self).__init__(
+            wave, flux, sigma, bad_px_mask, detector_i, order_i,)
+        
+        # Now initialise everything else
+        self.seeing_arcsec = seeing_arcsec
+        self.slit_func = slit_func
+        self.continuum_wls = continuum_wls
+        self.is_continuum_normalised = is_continuum_normalised
+
     @property
     def seeing_arcsec(self):
         return self._seeing_arcsec
@@ -243,25 +300,6 @@ class Spectrum1D(object):
     @continuum_pixels.setter
     def continuum_pixels(self, value):
         self._continuum_pixels = np.array(value)
-
-    def update_snr(self):
-        """Simple function to recompute SNR assuming Poisson uncertainties."""
-        try:
-            with np.errstate(divide='ignore', invalid='ignore'):
-                # Compute the SNR
-                bad_px_mask = ~np.isfinite(self.flux)
-                self.snr = np.nanmedian(
-                    (self.flux[~bad_px_mask] 
-                    / np.sqrt(np.nanmedian(self.flux[~bad_px_mask])))
-                )
-
-                # Default to 0 in case of error
-                if np.isnan(self.snr):
-                    self.snr = 0
-
-        # In case this fails, just set the SNR to zero
-        except:
-            self.snr = 0
 
     def __str__(self):
         """String representation of Spectrum1D details."""
@@ -424,6 +462,95 @@ class Spectrum1D(object):
         axis.set_ylabel("Flux")
 
 
+class TelluricSpectrum(Spectrum1D):
+    """Class to hold a modelled telluric spectrum. Inherits from Spectrum1D.
+
+    The molecfit file used to prepare this object has the following columns:
+     - chip:    science spectral segment #
+     - lambda:  science wavelength scale
+     - flux:    science fluxes
+     - weight:  science flux weights. Per src/mf_readspec.c (in the molecfit
+                source code), the weights are simply the inverse variance 
+                (i.e. 1/sigma).
+     - mrange:  model spectral segment #
+     - mlambda: model wavelength scale
+     - mscal:   model continuum scaling factor
+     - mflux:   best fit model telluric correction
+     - mweight: model flux weights (i.e. the inverse variance)
+     - dev:     weighted difference between model and observed spectrum (per
+                the description in the header of mf_molecfit_writefile in
+                src/mf_molecfit.c)
+     - mtrans:  model transmission curve (for telluric features in absorption).
+                note that this *should* be equal to mflux in the absence of
+                molecfit performing its own continuum fit
+
+    Of these, we take mlambda --> wave, mtrans --> flux, 1/mweight --> sigma, 
+    dev --> model_weighted_residuals, and mscal --> model_continuum_scaling.
+
+    Parameters
+    ----------
+    wave, flux, sigma: float array
+        Wavelength, flux, and uncertainty vectors for the spectrum.
+
+    bad_px_mask: boolean array
+        Bad pixel mask for the spectrum. True corresponds to bad pixels.
+
+    detector_i, order_i: int
+        Integer label for the detector and order assocated with the spectrum.
+
+    model_weighted_residuals: float array
+        Molecfit calculated weighted residuals on telluric fit.
+
+    model_continuum_scaling: float array
+        Scaling array to convert between atmospheric transmission (normalised
+        to 1) of telluric features and the fitted spectra. Note that this will
+        be an array of 1s if Molecfit did not do its own continuum fitting. 
+    """
+    def __init__(
+        self,
+        wave,
+        flux,
+        sigma,
+        bad_px_mask,
+        detector_i,
+        order_i,
+        model_weighted_residuals,
+        model_continuum_scaling,):
+        """
+        """
+        # Initialise basic parameters with superclass constructor
+        super(TelluricSpectrum, self).__init__(
+            wave, flux, sigma, bad_px_mask, detector_i, order_i,)
+        
+        # Now initialise everything else
+        self.model_weighted_residuals = model_weighted_residuals
+        self.model_continuum_scaling = model_continuum_scaling
+        
+    @property
+    def model_weighted_residuals(self):
+        return self._model_weighted_residuals
+
+    @model_weighted_residuals.setter
+    def model_weighted_residuals(self, value):
+        # Check dimensions
+        if len(value) != self.n_px:
+            raise ValueError("Error, length of array != n_px.")
+        else:
+            self._model_weighted_residuals = np.array(value)
+
+    @property
+    def model_continuum_scaling(self):
+        return self._model_continuum_scaling
+
+    @model_continuum_scaling.setter
+    def model_continuum_scaling(self, value):
+        # Check dimensions
+        if len(value) != self.n_px:
+            raise ValueError("Error, length of array != n_px.")
+        else:
+            self._model_continuum_scaling = np.array(value)
+
+
 class Observation(object):
     """Class to represent a single observation being composed of at least one
     spectral segment, but possiby more depending on spectral orders.
@@ -458,8 +585,25 @@ class Observation(object):
     spectra_1d_blaze_corr, spectra_1d_telluric_corr: TODO, default: None,
         Currently unused.
 
-    n_detectors: int, default: 3
+    n_detectors: int
         Number of detectors.
+
+    n_orders: int
+        Number of spectral orders. Note that not all orders necessarily need to
+        have flux on all detectors.
+    
+    fits_file: string
+        Source fits file for the data.
+
+    bcor: float
+        Barycentric velocity in km/s.
+
+    rv: float
+        Radial velocity of the star in km/s.
+
+    spectra_1d_telluric_model: luciferase.spectra.TelluricSpectrum array
+        Modelled telluric spectra corresponding to spectrum_1d. Defaults to []
+        until assigned with initialise_molecfit_best_fit_model.
     """
     def __init__(
         self,
@@ -477,6 +621,7 @@ class Observation(object):
         fits_file,
         bcor,
         rv,
+        spectra_1d_telluric_model=[],
         spectra_1d_blaze_corr=None,
         spectra_1d_telluric_corr=None,):
         """
@@ -495,7 +640,7 @@ class Observation(object):
         self.fits_file = fits_file
         self.bcor = bcor
         self.rv = rv
-        #self.spectra_1d_blaze_corr = spectra_1d_blaze_corr
+        self.spectra_1d_telluric_model = spectra_1d_telluric_model
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
         # Calculate t_mid_jd and t_end_jd. TODO: make this automatic.
@@ -513,7 +658,7 @@ class Observation(object):
         
         for spec_i, spectrum in enumerate(value):
             if (type(spectrum) != Spectrum1D 
-            and issubclass(type(spectrum), Spectrum1D)):
+            and not issubclass(type(spectrum), Spectrum1D)):
                 raise ValueError((
                     "Spectrum #{:0.0f} in spectrum_1d is not of type "
                     "Spectrum1D or inherited from it.").format(spec_i))
@@ -645,6 +790,36 @@ class Observation(object):
     def rv(self, value):
         self._rv = float(value)
 
+    @property
+    def spectra_1d_telluric_model(self):
+        return self._spectra_1d_telluric_model
+
+    @spectra_1d_telluric_model.setter
+    def spectra_1d_telluric_model(self, value):
+        # Make sure the result is a list of Spectrum1D objects
+        if type(value) != list:
+            raise ValueError(
+                "spectra_1d_telluric_model should be a list of spectra.")
+        
+        # Make sure the list of model telluric spectra is either empty or has
+        # the same length as spectrum_1d
+        if len(value) != 0 and len(value) != len(self.spectra_1d):
+            raise ValueError(("Length of spectra_1d_telluric_model should be "
+                "the same as that of spectrum_1d."))
+        
+        # Finally check to make sure each object in the list is either a 
+        # TelluricSpectrum object, or is derived from it.
+        for spec_i, spectrum in enumerate(value):
+            if (type(spectrum) != TelluricSpectrum 
+            and not issubclass(type(spectrum), TelluricSpectrum)):
+                raise ValueError((
+                    "Telluric Spectrum #{:0.0f} in spectra_1d_telluric_model "
+                    "is not of type TelluricSpectrum or inherited from it."
+                    ).format(spec_i))
+
+        # Otherwise all good
+        self._spectra_1d_telluric_model = value
+
 
     def update_t_mid_and_end(self,):
         """Called to update the mid and end JD time of the observation."""
@@ -693,9 +868,17 @@ class Observation(object):
         axis=None,
         plot_continuum_poly=False,
         line_list=None,
-        line_depth_threshold=0.2,):
+        line_depth_threshold=0.2,
+        plot_molecfit_model=False,
+        y_lim_median_fac=1.5,
+        figsize=(16,4),
+        do_save=False,
+        save_folder="plots/",
+        line_annotation_fontsize="xx-small",
+        alternate_annotation_height=True,
+        linewidth=0.4,):
         """Quickly plot all spectra in spectra_1d as a function of wavelength
-        for inspection.
+        for inspection. Optionally can be saved as a pdf.
 
         Parameters
         ----------
@@ -722,6 +905,34 @@ class Observation(object):
 
         line_depth_threshold: float, default: 0.2
             Minimum strength of lines to plot. Smaller values are weaker lines.
+
+        plot_molecfit_model: boolean, default: False
+            Whether to overplot an imported best fit Molecfit model.
+
+        y_lim_median_fac: float, default: 1.5
+            Used to avoid edge pixels distorting the y scale--a median is 
+            computed of all flux pixels, and the upper limit is this median
+            multiplied by y_lim_median_fac.
+
+        figsize: float tuple, default: (16,4)
+            Size of the figure in inches, has format (x, y).
+
+        do_save: boolean, default: False
+            Whether to save the resulting plot as a pdf.
+
+        save_folder: string, default: 'plots/'
+            Directory to save output plots to as spectra_<objname>.pdf.
+
+        line_annotation_fontsize: string, default: 'xx-small'
+            Font size for atomic line annotations
+
+        alternate_annotation_height: boolean, default: True
+            Whether to alternate the heights of atomic line annotations (i.e. 
+            short arrow, tall arrow, short arrow, tall arrow, etc) to better
+            avoid overlapping text.
+
+        linewidth: float, default: 0.4
+            Linewidth for plotted spectra.
         """
         # Plot sequence of spectra
         if do_close_plots:
@@ -729,10 +940,13 @@ class Observation(object):
 
         # Make a new subplot if we haven't been given a set of axes
         if fig is None and axis is None:
-            fig, axis = plt.subplots(figsize=(16,4))
+            fig, axis = plt.subplots(figsize=figsize)
+
+        # Set y limits based on median flux
+        fluxes = []
 
         # Loop over spectra array and plot each spectral segment
-        for spectrum in self.spectra_1d:
+        for spec_i, spectrum in enumerate(self.spectra_1d):
             # Plot normalised spectra if requested
             if do_normalise:
                 norm_fac = np.nanmedian(spectrum.flux)
@@ -749,13 +963,13 @@ class Observation(object):
                 axis.plot(
                     spectrum.wave,
                     spectrum.flux * continuum,
-                    linewidth=0.5,)
+                    linewidth=linewidth,)
 
                 # Plot continuum fit
                 axis.plot(
                     spectrum.wave,
                     continuum,
-                    linewidth=0.5,
+                    linewidth=linewidth,
                     color="r",)
 
                 # Plot continuum points used for fit
@@ -772,10 +986,27 @@ class Observation(object):
                 axis.plot(
                     spectrum.wave,
                     spectrum.flux / norm_fac,
-                    linewidth=0.5,)
+                    linewidth=linewidth,)
 
-            # Now plot line list if we've been asked to
+            # Append to our fluxes array
+            fluxes.append(spectrum.flux / norm_fac)
+
+            # Plot the best fit molecfit model if a) we've been asked to, and
+            # b) we actually have it imported.
+            if len(self.spectra_1d_telluric_model) > 0 and plot_molecfit_model:
+                axis.plot(
+                    self.spectra_1d_telluric_model[spec_i].wave,
+                    self.spectra_1d_telluric_model[spec_i].flux / norm_fac,
+                    linewidth=linewidth,
+                    alpha=0.9,
+                    color="black",
+                    linestyle="--",)
+
+            # Now annote the line list if we've been asked to
             if line_list is not None:
+                # Warn user if either RV or bcor is nan
+                if np.isnan(self.rv) or np.isnan(self.bcor):
+                    raise Warning("Warning: either bcor or RV is NaN.")
                 # Shift the line to the rest frame of the star
                 shift_fac = (1-(self.rv-self.bcor)/(const.c.si.value/1000))
                 wl_new = line_list["WL_vac(nm)"].values * shift_fac
@@ -791,21 +1022,38 @@ class Observation(object):
                 point_height = 1.1 * np.nanmedian(spectrum.flux)
                 text_height = 1.2 * point_height
 
-                for species, wl in zip(
-                    line_list["SpecIon"][line_mask].values, wl_new[line_mask]):
-                    # Plot
+                for species_i, (species, wl) in enumerate(zip(
+                    line_list["SpecIon"][line_mask].values, 
+                    wl_new[line_mask])):
+
+                    if alternate_annotation_height and species_i % 2 == 0:
+                        offset = (text_height - point_height)/4
+                    else:
+                        offset = 0
+
+                    # Plot text and arrow for each line
                     axis.annotate(
-                        s=species,
+                        text=species,
                         xy=(wl, point_height),
-                        xytext=(wl, text_height),
+                        xytext=(wl, text_height + offset),
                         horizontalalignment="center",
-                        fontsize="xx-small",
-                        arrowprops=dict(arrowstyle='->',lw=1),)
+                        fontsize=line_annotation_fontsize,
+                        arrowprops=dict(arrowstyle='->',lw=0.2),)
+
+        # Set height based on median fluxes
+        fluxes = np.concatenate(fluxes)
+        axis.set_ylim(-0.1, np.nanmedian(fluxes)*y_lim_median_fac)
 
         axis.set_xlabel(r"Wavelength (nm)")
         axis.set_ylabel("Flux")
 
         fig.tight_layout()
+
+        # Save if asked
+        if do_save:
+            fig_name = "spectra_{}.pdf".format(
+                self.object_name.replace(" ", ""))
+            plt.savefig(os.path.join(save_folder, fig_name,))
 
     
     def continuum_normalise_spectra(
@@ -853,7 +1101,7 @@ class Observation(object):
         self,
         n_cont_region_per_spec=10,
         timeout_sec=20,
-        return_wls=False):
+        return_wls=False,):
         """For every spectral segment, take user input for the continuum 
         region locations. We prompt the user for *up to* n_cont_region_per_spec
         continuum points. If there are fewer continuum points than this, the 
@@ -888,6 +1136,10 @@ class Observation(object):
         for spec_i, spectrum in enumerate(self.spectra_1d):
             spectrum.plot_spectrum()
             plt.title(title_text)
+
+            # Set the Y limit based on the median to avoid edge pixel spikes
+            plt.ylim(0, 2*np.nanmedian(spectrum.flux))
+
             user_coords = plt.ginput(
                 n=n_cont_region_per_spec,
                 timeout=timeout_sec,)
@@ -1133,6 +1385,7 @@ class Observation(object):
             # here is to exclude the edge pixels on each side of the detector 
             # (which are physically masked and don't receive flux) so these 
             # regions aren't considered when fitting tellurics.
+            # TODO: AH suggested there should be a +1 in here for indexing
             px_excl_min.append(px_so_far)
             px_excl_min.append(len(spec.wave)-edge_px_to_exlude + px_so_far)
             px_excl_max.append(edge_px_to_exlude + px_so_far)
@@ -1195,11 +1448,91 @@ class Observation(object):
         hdul_atm.writeto(atmosphere_save_path, overwrite=True)
 
 
+    def initialise_molecfit_best_fit_model(
+        self,
+        molecfit_model_fits_file,
+        convert_um_to_nm=True,):
+        """Imports and saves the best fit molecfit spectrum for each spectrum
+        in specta_1d. Note that this assumes that the model molecfit spectrum 
+        is sorted the same as the observed spectra (as we use it as a reference
+        for order/detector numbering). 
+
+        Parameters
+        ----------
+        molecfit_model_fits_file: string
+            Filepath to the molecfit model fits file.
+
+        convert_um_to_nm: boolean, default: True
+            Whether the molecfit model wavelengths are in microns, and if so to
+            convert them back to nm.
+        """
+        with fits.open(molecfit_model_fits_file) as model:
+            # For convenience grab molecfit data
+            model_chip_num = model[1].data["chip"]
+            chip_num_unique = list(set(model_chip_num))
+            chip_num_unique.sort()
+
+            model_wave = model[1].data["mlambda"]
+
+            # Convert wavelengths if necessary
+            if convert_um_to_nm:
+                model_wave *= 1000
+
+            model_flux = model[1].data["mflux"]
+
+            # Convert 1/var to sigma
+            model_sigma = 1 / model[1].data["mweight"]**0.5
+
+            model_weighted_residuals = model[1].data["dev"]
+            model_cont_scaling = model[1].data["mscal"]
+
+            # Initialise our output list of TelluricSpectra objects
+            telluric_spectra_list = []
+
+            # Loop over each chip number
+            for chip_i, chip_num in enumerate(chip_num_unique):
+                # Create each of our vectors, grabbing only the data for this 
+                # particular order/detector segment
+                wave = model_wave[model_chip_num == chip_num]
+                flux = model_flux[model_chip_num == chip_num]
+                sigma = model_sigma[model_chip_num == chip_num]
+                resid = model_weighted_residuals[model_chip_num == chip_num]
+                cont_scaling = model_cont_scaling[model_chip_num == chip_num]
+                detector_i = self.spectra_1d[chip_i].detector_i
+                order_i = self.spectra_1d[chip_i].order_i
+
+                # Initialise empty bad_px_mask
+                # TODO: handle this better. Does the base class need a 
+                # # bad_px_mask?
+                bad_px_mask = np.full(wave.shape, False)
+
+                telluric_spec_obj = TelluricSpectrum(
+                    wave=wave,
+                    flux=flux,
+                    sigma=sigma,
+                    bad_px_mask=bad_px_mask,
+                    detector_i=detector_i,
+                    order_i=order_i,
+                    model_weighted_residuals=resid,
+                    model_continuum_scaling=cont_scaling,
+                )
+
+                # Append
+                telluric_spectra_list.append(telluric_spec_obj)
+
+            # Now attach to our observation object
+            self.spectra_1d_telluric_model = telluric_spectra_list
+
+
+    def load_molecfit_corrected_spectra(self,):
+        """
+        """
+        pass
+
+
 def initialise_observation_from_crires_nodding_fits(
     fits_file_nodding_extracted,
     fits_file_slit_func=None,
-    #fits_file_blaze_corrected,
-    #fits_file_telluric_corrected,
     fits_ext_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),
     initialise_empty_bad_px_mask=True,
     file_format="CRIRES",
@@ -1316,7 +1649,7 @@ def initialise_observation_from_crires_nodding_fits(
                 # TODO allow importing continuum points
                 continuum_wls = []
 
-                spec_obj = Spectrum1D(
+                spec_obj = ObservedSpectrum(
                     wave=wave,
                     flux=spec,
                     sigma=e_spec,
