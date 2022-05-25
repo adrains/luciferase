@@ -90,3 +90,66 @@ def compute_barycentric_correction(
     bcor = barycorr.to(u.km/u.s).value
 
     return bcor
+
+def load_plumage_template_spectrum(
+    template_fits,
+    do_convert_angstroms_to_nm=True,
+    do_convert_air_to_vacuum_wl=False,):
+    """Imports a plumage sourced synthetic template spectrum in the form of
+    wavelength and spectrum vectors.
+
+    Parameters
+    ----------
+    template_fits: string
+        Filepath of the fits file to load. It should have three extensions:
+        [WAVE, SPEC, and PARAMS]
+    
+    convert_angstroms_to_nm: boolean, default: True
+        If True, assumes that the template spectrum wavelength scale is in
+        Angstroms and divides by 10 to convert it to nm.
+
+    do_convert_air_to_vacuum_wl: boolean, default: False
+        Whether to convert air to vacuum wavelengths on import.
+
+    Returns
+    -------
+    wave, spec: float array
+        Template wavelength and spectrum arrays.
+    """
+    with fits.open(template_fits) as tfits:
+        wave = tfits["WAVE"].data
+        spec = tfits["SPEC"].data[0]    # By default this array is 2D
+
+        if do_convert_air_to_vacuum_wl:
+            wave = convert_air_to_vacuum_wl(wave)
+
+        if do_convert_angstroms_to_nm:
+            wave /= 10
+        
+    return wave, spec
+
+
+def convert_air_to_vacuum_wl(wavelengths_air,):
+    """Converts provided air wavelengths to vacuum wavelengths using the 
+    formalism described here: 
+        https://www.astro.uu.se/valdwiki/Air-to-vacuum%20conversion
+
+    Parameters
+    ----------
+    wavelengths_air: float array
+        Array of air wavelength values to convert.
+
+    Returns
+    -------
+    wavelengths_vac: float array
+        Corresponding array of vacuum wavelengths
+    """
+    # Calculate the refractive index for every wavelength
+    ss = 10**4 / wavelengths_air
+    n_ref = (1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - ss)
+         + 0.0001599740894897 / (38.92568793293 - ss))
+
+    # Calculate vacuum wavelengths
+    wavelengths_vac = wavelengths_air * n_ref
+
+    return wavelengths_vac

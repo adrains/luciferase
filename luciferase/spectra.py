@@ -10,6 +10,8 @@ import astropy.constants as const
 import matplotlib.pyplot as plt
 import luciferase.reduction as lred
 import luciferase.utils as lutils
+from scipy.interpolate import interp1d
+from scipy.optimize import least_squares
 from numpy.polynomial.polynomial import Polynomial, polyfit
 
 VALID_NOD_POS = ["A", "B", None,]
@@ -621,6 +623,7 @@ class Observation(object):
         fits_file,
         bcor,
         rv,
+        e_rv,
         spectra_1d_telluric_model=[],
         spectra_1d_blaze_corr=None,
         spectra_1d_telluric_corr=None,):
@@ -640,6 +643,7 @@ class Observation(object):
         self.fits_file = fits_file
         self.bcor = bcor
         self.rv = rv
+        self.e_rv = e_rv
         self.spectra_1d_telluric_model = spectra_1d_telluric_model
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
@@ -789,6 +793,14 @@ class Observation(object):
     @rv.setter
     def rv(self, value):
         self._rv = float(value)
+
+    @property
+    def e_rv(self):
+        return self._e_rv
+
+    @e_rv.setter
+    def e_rv(self, value):
+        self._e_rv = float(value)
 
     @property
     def spectra_1d_telluric_model(self):
@@ -1530,6 +1542,214 @@ class Observation(object):
         pass
 
 
+    def fit_rv(
+        self,
+        template_spectrum_fits,
+        segment_contamination_threshold=0.95,
+        ignore_segments=[],
+        pixel_absorption_threshold=0.9,
+        ls_diff_step=(0.1),
+        rv_init_guess=0,
+        rv_min=-200,
+        rv_max=200,
+        delta_rv=1,
+        fit_method="CC",
+        do_diagnostic_plots=False,
+        verbose=False,
+        figsize=(16,4),):
+        """
+
+        TODO: Ideally there'd be a 'prepare for fitting' function, then 
+        separate fitting functions (rather than a 'master' fitting function)
+        which does the prep and then delegates out to subfunctions.
+
+        Parameters
+        ----------
+        template_spectrum_fits: string
+            Filepath to template spectrum to import for RV fitting.
+
+        segment_contamination_threshold: float, default: 0.95
+            If the median flux value for the model telluric transmission of a
+            spectral segment is below this we consider the *entire segment* too
+            contaminated for use when RV fitting. A value of 1 in this case 
+            would be entirely continuum (and be the most restrictive), and a 
+            value of 0 would be the most permissible.
+
+        ignore_segments: int list, default: []
+            List of spectral segments to ignore, where 0 is the first segment.
+
+        pixel_absorption_threshold: float, default: 0.9
+            Similar to segment_contamination_threshold, but it operates on a
+            *per pixel* level on the model telluric spectrum rather than a per
+            segment level.
+            
+        ls_diff_step: float tuple, default: (0.1)
+            Input for least squares fitting, sets the step size in km/s.
+
+        rv_init_guess: float, default: 0
+            Initial guess for RV in km/s for use when least squares fitting.
+            
+        rv_min: float, default: -200
+            Lower RV bound in km/s to apply to both cross correlation and least
+            squares fitting.
+
+        rv_max: float, default: +200
+            Upper RV bound in km/s to apply to both cross correlation and least
+            squares fitting.
+
+        delta_rv: float, default 1
+            RV step size for cross correlation scan in km/s.
+
+        fit_method: string, default 'CC'
+            Fit method, either 'CC' for cross correlation, or 'LS' for least
+            squares fitting.
+
+        do_diagnostic_plots: boolean, default: False
+            Whether to plot diagnostic plots at the conclusion of the fit.
+
+        verbose: boolean, default: False
+            Whether to print updates on fitting.
+
+        figsize: float tuple, default: (16,4)
+            Figure size of diagnostic plot.
+        """
+        # Check the requested fitting method is valid
+        fit_method = fit_method.upper()
+        VALID_METHODS = ["CC", "LS"]
+
+        if fit_method not in VALID_METHODS:
+            raise ValueError("Invalid method. Must be in {}".format(
+                VALID_METHODS))
+
+        # Set the detault bad pixel value--cross correlation is happy with NaNs
+        # but the least squares fitting breaks if it sees them.
+        if fit_method == "CC":
+            bad_px_value = np.nan
+        elif fit_method == "LS":
+            bad_px_value = 1
+
+        # Only proceed if we have a set of telluric model spectra
+        if len(self.spectra_1d_telluric_model) != len(self._spectra_1d):
+            raise Exception("No telluric model to use for masking!")
+
+        # Intiialise pixel exclude mask for *all* spectral pixels. This will
+        # be separated by segment (i.e. 2D rather than 1D), but we'll later
+        # make a single continuous 1D array.
+        pixel_exclude_mask = []
+
+        # Mask out any segments that we're ignoring due to excessive telluric
+        # absorption. We'll do this by taking a median of the telluric model
+        # flux, and if this median is below our contamination threshold then
+        # we'll consider the segment too contaminated to be useful for radial
+        # velocity fitting.
+        exclude_segment_mask = []
+
+        for seg_i, tspec in enumerate(self.spectra_1d_telluric_model):
+            # If the segment is too contaminated to use, mask it out entirely
+            if (np.nanmedian(tspec.flux) < segment_contamination_threshold
+                or seg_i in ignore_segments):
+                exclude_segment_mask.append(True)
+                pixel_exclude_mask.append(np.full(tspec.flux.shape, True))
+
+            # Otherwise only mask out nan pixels and those below the telluric 
+            # absorption threshold
+            else:
+                exclude_segment_mask.append(False)
+
+                # While we aren't excluding this entire segment, we'll still 
+                # exclude any pixels with *telluric* absorption below
+                # pixel_absorption_threshold or *science* pixels with nans,
+                # infs, or nonphysical spikes (e.g. detector edge effects)
+                telluric_absorb_mask = tspec.flux < pixel_absorption_threshold
+
+                sci_nonfinite_mask = np.logical_or(
+                    ~np.isfinite(self.spectra_1d[seg_i].flux),
+                    ~np.isfinite(self.spectra_1d[seg_i].sigma))
+
+                with np.errstate(invalid='ignore'):
+                    sci_nonphysical_mask = np.logical_or(
+                        self.spectra_1d[seg_i].flux > 1.05,
+                        self.spectra_1d[seg_i].flux < 0,)
+
+                exclude_mask = np.logical_or(
+                    telluric_absorb_mask,
+                    np.logical_or(sci_nonphysical_mask, sci_nonfinite_mask))
+
+                pixel_exclude_mask.append(exclude_mask)
+
+                assert np.sum(
+                    np.isnan(self.spectra_1d[seg_i].flux[~exclude_mask])) == 0
+
+        pixel_exclude_mask = np.hstack(pixel_exclude_mask)
+        exclude_segment_mask = np.array(exclude_segment_mask)
+
+        # Stitch wavelengths, spectra, and sigmas together
+        sci_wave = np.hstack([spec.wave for spec in self.spectra_1d])
+        sci_flux = np.hstack([spec.flux for spec in self.spectra_1d])
+        sci_sigma = np.hstack([spec.sigma for spec in self.spectra_1d])
+
+        # Now mask out regions we're not considering
+        sci_flux[pixel_exclude_mask] = bad_px_value
+        sci_sigma[pixel_exclude_mask] = np.inf
+
+        # Load in our template spectrum and the associated interpolator
+        temp_wave, temp_flux = lutils.load_plumage_template_spectrum(
+            template_spectrum_fits, do_convert_air_to_vacuum_wl=True,)
+        
+        calc_template_flux = interp1d(
+            x=temp_wave,
+            y=temp_flux,
+            kind="linear",
+            bounds_error=False,
+            assume_sorted=True)
+
+        # Intialise output for misc fitting parameters
+        fit_dict = {}
+
+        # Fit using cross-correlation--best for scanning a wide range
+        if fit_method == "CC":
+            rv, rv_steps, cross_corrs = fit_rv_cross_corr(
+                sci_wave=sci_wave,
+                sci_flux=sci_flux,
+                calc_template_flux=calc_template_flux,
+                bcor=self.bcor,
+                rv_min=rv_min,
+                rv_max=rv_max,
+                delta_rv=delta_rv,
+                do_diagnostic_plots=do_diagnostic_plots,
+                figsize=figsize)
+
+            e_rv = np.nan
+            fit_dict["rv_steps"] = rv_steps
+            fit_dict["cross_corrs"] = cross_corrs
+
+        # Fit using least squares--best once the local maximum has been 
+        # identified and you want to fit considering flux uncertainties.
+        elif fit_method == "LS":
+            rv, e_rv, fit_dict = fit_rv_least_squares(
+                sci_wave=sci_wave,
+                sci_flux=sci_flux,
+                sci_sigma=sci_sigma,
+                calc_template_flux=calc_template_flux,
+                bcor=self.bcor,
+                rv_init_guess=rv_init_guess,
+                rv_min=rv_min,
+                rv_max=rv_max,
+                ls_diff_step=ls_diff_step,
+                do_diagnostic_plots=do_diagnostic_plots,
+                verbose=verbose,
+                figsize=figsize)
+
+        if verbose:
+            print(rv, "km/s")
+
+        # Save our fitted RV, return fitting dictionary
+        self.rv = rv
+        self.e_rv = e_rv
+
+        return fit_dict
+
+
 def initialise_observation_from_crires_nodding_fits(
     fits_file_nodding_extracted,
     fits_file_slit_func=None,
@@ -1708,30 +1928,6 @@ def initialise_observation_from_crires_nodding_fits(
     return observation
 
 
-def convert_air_to_vacuum_wl(wavelengths_air,):
-    """Converts provided air wavelengths to vacuum wavelengths.
-
-    Parameters
-    ----------
-    wavelengths_air: float array
-        Array of air wavelength values to convert.
-
-    Returns
-    -------
-    wavelengths_vac: float array
-        Corresponding array of vacuum wavelengths
-    """
-    # Calculate the refractive index for every wavelength
-    ss = 10**4 / wavelengths_air
-    n_ref = (1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - ss) 
-         + 0.0001599740894897 / (38.92568793293 - ss))
-
-    # Calculate vacuum wavelengths
-    wavelengths_vac = wavelengths_air * n_ref
-
-    return wavelengths_vac
-
-
 def read_vald_linelist(filepath,):
     """Load in a VALD sourced line list into a pandas dataframe format. Note 
     that the first two lines (everything before the column names) and
@@ -1772,7 +1968,8 @@ def read_vald_linelist(filepath,):
     line_list["Reference"] = line_list["Reference"].str.rstrip()
 
     # Convert air to vacuum wavelengths
-    line_list["WL_vac(A)"] = convert_air_to_vacuum_wl(line_list["WL_air(A)"])
+    line_list["WL_vac(A)"] = lutils.convert_air_to_vacuum_wl(
+        line_list["WL_air(A)"])
 
     # Convert both these to nm
     line_list["WL_air(nm)"] = line_list["WL_air(A)"] / 10
@@ -1792,3 +1989,280 @@ def load_saved_observation_obj():
     """
     """
     pass
+
+
+def fit_rv_cross_corr(
+    sci_wave,
+    sci_flux,
+    calc_template_flux,
+    bcor,
+    rv_min,
+    rv_max,
+    delta_rv,
+    do_diagnostic_plots,
+    figsize,):
+    """Computes the cross correlation of pre-masked observed spectra against
+    a template spectrum from rv_min to rv_max in steps of delta_rv. Returns
+    the best fit RV, as well as the RV steps, and cross correlation values.
+
+    Parameters
+    ----------
+    sci_wave: float array
+        Science wavelength array corresponding to sci_flux.
+    
+    sci_flux: float array
+        Science flux array corresponding to sci_wave. Note that pixels not to
+        be included in the fit should be pre-masked and set to some default 
+        value (ideally NaN).
+
+    calc_template_flux: scipy.interpolate.interpolate.interp1d
+        Interpolation function for RV template to cross correlate with.
+
+    bcor: float
+        Barcycentric correction in km/s.
+
+    rv_min: float
+        Lower RV bound in km/s to apply to both cross correlation and least
+        squares fitting.
+
+    rv_max: float
+        Upper RV bound in km/s to apply to both cross correlation and least
+        squares fitting.
+
+    delta_rv: float
+        RV step size for cross correlation scan in km/s.
+
+    do_diagnostic_plots: boolean
+        Whether to plot diagnostic plots at the conclusion of the fit.
+
+    figsize: float tuple
+        Figure size of diagnostic plot.
+
+    Returns
+    -------
+    rv: float
+        Best fit RV in km/s.
+
+    rv_steps: float array
+        RV values in km/s the cross correlation was evaluated at.
+
+    cross_corrs: float array
+        Cross correlation values corresponding to rv_steps.
+    """
+    # Compute the RV steps to evaluate the cross correlation at
+    rv_steps = np.arange(rv_min, rv_max, delta_rv)
+
+    # Initialise our output vector of cross correlations
+    cross_corrs = np.full(rv_steps.shape, 0)
+
+    # Run cross correlation for each RV step
+    for rv_i, rv in enumerate(rv_steps):
+        # Shift the template spectrum
+        template_flux = calc_template_flux(
+            sci_wave * (1-(rv-bcor)/(const.c.si.value/1000)))
+
+        # Compute the cross correlation
+        cross_corrs[rv_i] = np.nansum(sci_flux * template_flux)
+
+    # Determine closest RV
+    best_fit_rv =  rv_steps[np.argmax(cross_corrs)]
+
+    if do_diagnostic_plots:
+        plt.close("all")
+        fig, (cc_axis, spec_axis) = plt.subplots(2,1, figsize=figsize)
+        plt.subplots_adjust(hspace=0.4,)
+
+        # Plot cross correlation fit
+        cc_axis.plot(rv_steps, cross_corrs, linewidth=0.2)
+        cc_axis.set_xlabel("RV (km/s)")
+        cc_axis.set_ylabel("Cross Correlation")
+
+        # Compute best fit template and plot spectral fit
+        template_flux = calc_template_flux(
+            sci_wave * (1-(best_fit_rv-bcor)/(const.c.si.value/1000)))
+
+        spec_axis.plot(
+            sci_wave, sci_flux, linewidth=0.2, label="science")
+
+        spec_axis.plot(
+            sci_wave, template_flux, linewidth=0.2, label="template")
+
+        spec_axis.legend()
+        spec_axis.set_xlabel("Wavelength (nm)")
+        spec_axis.set_ylabel("Flux (cont norm)")
+        plt.tight_layout()
+    
+    return best_fit_rv, rv_steps, cross_corrs
+
+
+def fit_rv_least_squares(
+    sci_wave,
+    sci_flux,
+    sci_sigma,
+    calc_template_flux,
+    bcor,
+    rv_init_guess,
+    rv_min,
+    rv_max,
+    ls_diff_step,
+    do_diagnostic_plots,
+    verbose,
+    figsize,):
+    """Performs least squares fitting of pre-masked observed spectra against
+    a template spectrum from rv_min to rv_max. Returns the best fit RV, the
+    statistical uncertainty, as well as the returned fitting dictionary.
+
+    Parameters
+    ----------
+    sci_wave: float array
+        Science wavelength array corresponding to sci_flux and sci_sigma.
+    
+    sci_flux: float array
+        Science flux array corresponding to sci_wave and sci_sigma. Note that 
+        pixels not to be included in the fit should be pre-masked and set to 
+        some default value (ideally 1, as NaN breaks the least squares fit).
+
+    sci_sigma: float array
+        Science sigma array corresponding to sci_wave and sci_flux. Note that 
+        pixels not to be included in the fit should be pre-masked and set to 
+        some default value (ideally inf, as NaN breaks the least squares fit).
+
+    calc_template_flux: scipy.interpolate.interpolate.interp1d
+        Interpolation function for RV template to cross correlate with.
+
+    bcor: float
+        Barcycentric correction in km/s.
+
+    rv_init_guess: float
+        Initial guess for the RV in km/s.
+
+    rv_min: float
+        Lower RV bound in km/s to apply to both cross correlation and least
+        squares fitting.
+
+    rv_max: float
+        Upper RV bound in km/s to apply to both cross correlation and least
+        squares fitting.
+
+    ls_diff_step: float tuple, default: (0.1)
+        Input for least squares fitting, sets the step size in km/s.
+
+    do_diagnostic_plots: boolean
+        Whether to plot diagnostic plots at the conclusion of the fit.
+
+    verbose: boolean
+        Whether to print updates on fitting.
+
+    figsize: float tuple
+        Figure size of diagnostic plot.
+
+    Returns
+    -------
+    rv, std: float
+        Best fit RV and corresponding statistical uncertainty.
+
+    ls_fit_dict: dict
+        Dictionary overview of least squares fit as outputted from 
+        scipy.optimize.least_squares.
+    """
+    # Prepare list of arguments for least squares fitting
+    params_init = [rv_init_guess]
+    args = (sci_wave, sci_flux, sci_sigma, calc_template_flux, bcor, verbose)
+
+    # Do fit
+    ls_fit_dict = least_squares(
+        calc_rv_shift_residual, 
+        params_init, 
+        jac="3-point",
+        bounds=((rv_min),(rv_max)),
+        diff_step=ls_diff_step,
+        args=args,)
+
+    # Calculate uncertainty
+    residuals = ls_fit_dict["fun"]
+
+    # Calculate RMS to scale uncertainties by
+    rms = np.sqrt(np.sum(residuals**2)/np.sum(residuals != 0))
+
+    # Calculate uncertainties
+    jac = ls_fit_dict["jac"]
+    cov = np.linalg.inv(jac.T.dot(jac))
+    std = np.sqrt(np.diagonal(cov)) * rms
+    ls_fit_dict["std"] = std
+
+    rv = float(ls_fit_dict["x"])
+
+    if do_diagnostic_plots:
+        plt.close("all")
+        fig, spec_axis = plt.subplots(1,1, figsize=figsize)
+
+        # Compute best fit template and plot spectral fit
+        template_flux = calc_template_flux(
+            sci_wave * (1-(rv-bcor)/(const.c.si.value/1000)))
+
+        spec_axis.plot(
+            sci_wave, sci_flux, linewidth=0.2, label="science")
+
+        spec_axis.plot(
+            sci_wave, template_flux, linewidth=0.2, label="template")
+
+        spec_axis.legend()
+        spec_axis.set_xlabel("Wavelength (nm)")
+        spec_axis.set_ylabel("Flux (cont norm)")
+        plt.tight_layout()
+
+    return rv, std, ls_fit_dict
+
+
+def calc_rv_shift_residual(
+    params,
+    sci_wave,
+    sci_flux,
+    sci_sigma,
+    template_flux_interp,
+    bcor,
+    verbose):
+    """Loss function for least squares fitting.
+
+    Parameters
+    ----------
+    params: float array
+        params[0] is the radial velocity in km/s.
+    
+    wave: float array
+        Wavelength scale of the science spectra.
+
+    flux: float array
+        Fluxes for the science spectra.
+
+    e_flux: float array
+        Uncertainties on the science fluxes.
+
+    template_flux_interp: scipy.interpolate.interpolate.interp1d object
+        Interpolation function to take wavelengths and compute template
+        spectrum.
+
+    bcor: float
+        Barycentric velocity in km/s.
+
+    verbose: boolean
+        Whether to print updates on fitting.
+
+    Returns
+    -------
+    resid_vect: float array
+        Error weighted loss.
+    """
+    # Shift the template spectrum
+    template_flux = template_flux_interp(
+        sci_wave * (1-(params[0]-bcor)/(const.c.si.value/1000)))
+
+    # Return loss
+    resid_vect = (sci_flux - template_flux) / sci_sigma
+
+    rchi2 = np.sum(resid_vect**2) / (len(resid_vect)-len(params))
+
+    if verbose:
+        print("RV = {:+0.5f}, rchi^2 = {:0.5f}".format(params[0],rchi2))
+
+    return resid_vect
