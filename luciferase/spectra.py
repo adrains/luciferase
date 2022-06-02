@@ -4,10 +4,10 @@ import os
 import glob
 import numpy as np
 import pandas as pd
-import warnings
 from astropy.io import fits
 import astropy.constants as const
 import matplotlib.pyplot as plt
+import matplotlib.ticker as plticker
 import luciferase.reduction as lred
 import luciferase.utils as lutils
 from scipy.interpolate import interp1d
@@ -600,8 +600,11 @@ class Observation(object):
     bcor: float
         Barycentric velocity in km/s.
 
-    rv: float
-        Radial velocity of the star in km/s.
+    rv, e_rv: float
+        Radial velocity and radial velocity uncertainty of the star in km/s.
+
+    rv_template_interpolator: scipy.interpolate.interpolate.interp1d object
+        Interpolation object used to determine RV.
 
     spectra_1d_telluric_model: luciferase.spectra.TelluricSpectrum array
         Modelled telluric spectra corresponding to spectrum_1d. Defaults to []
@@ -625,6 +628,7 @@ class Observation(object):
         rv,
         e_rv,
         spectra_1d_telluric_model=[],
+        rv_template_interpolator=None,
         spectra_1d_blaze_corr=None,
         spectra_1d_telluric_corr=None,):
         """
@@ -645,6 +649,7 @@ class Observation(object):
         self.rv = rv
         self.e_rv = e_rv
         self.spectra_1d_telluric_model = spectra_1d_telluric_model
+        self.rv_template_interpolator = rv_template_interpolator
         #self.spectra_1d_telluric_corr = spectra_1d_telluric_corr
 
         # Calculate t_mid_jd and t_end_jd. TODO: make this automatic.
@@ -831,6 +836,32 @@ class Observation(object):
 
         # Otherwise all good
         self._spectra_1d_telluric_model = value
+    
+    @property
+    def rv_template_interpolator(self):
+        return self._rv_template_interpolator
+
+    @rv_template_interpolator.setter
+    def rv_template_interpolator(self, value):
+        if type(value) == interp1d or value is None:
+            self._rv_template_interpolator = value
+        else:
+            raise ValueError("Invalid interpolator!")
+    
+    @property
+    def wave_all(self):
+        """Convenience function to access 1D array of wavelengths."""
+        return np.hstack([spec.wave for spec in self.spectra_1d])
+
+    @property
+    def flux_all(self):
+        """Convenience function to access 1D array of fluxes."""
+        return np.hstack([spec.flux for spec in self.spectra_1d])
+
+    @property
+    def sigma_all(self):
+        """Convenience function to access 1D array of sigmas."""
+        return np.hstack([spec.sigma for spec in self.spectra_1d])
 
 
     def update_t_mid_and_end(self,):
@@ -1056,6 +1087,9 @@ class Observation(object):
         fluxes = np.concatenate(fluxes)
         axis.set_ylim(-0.1, np.nanmedian(fluxes)*y_lim_median_fac)
 
+        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=25))
+        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=50))
+
         axis.set_xlabel(r"Wavelength (nm)")
         axis.set_ylabel("Flux")
 
@@ -1262,8 +1296,16 @@ class Observation(object):
         """Function to write spectra and associated files in a molecfit 
         compatible format so that we can telluric correct our features.
 
-        Note that if performing continuum normalisation here, the FIT_CONTINUUM
+        Note 1: if performing continuum normalisation here, the FIT_CONTINUUM
         parameter in model.rc should be set to 0.
+
+        Note 2: this function only generates a basic pixel mask which masks out
+        detector edge pixels. To also mask out strong science lines or produce
+        diagnostic plots, run save_molecfit_pixel_exclude separately.
+
+        TODO: split this function up so that there are separate functions for
+        writing science files, wavelength files, atmosphere files, and pixel
+        exclusion files (the latter of which is already done).
 
         Molecfit has the following steps, each of which has an associated SOF
         and rc file.
@@ -1348,11 +1390,6 @@ class Observation(object):
         science_save_path = os.path.join(molecfit_path, science_fits)
         wavelength_save_path = os.path.join(molecfit_path, wavelength_fits)
         atmosphere_save_path = os.path.join(molecfit_path, atmosphere_fits)
-        pixel_save_path = os.path.join(molecfit_path, pixel_fits)
-
-        # Initialise pixel counter. This is used to count the number of pixels 
-        # over subsequent spectral segments.
-        px_so_far = 0
 
         # Initialise HDU lists for each of our output fits files, assigning
         # the each primary HDU from our input science file.
@@ -1362,13 +1399,11 @@ class Observation(object):
         hdul_output = fits.HDUList([primary_hdu])
         hdul_winc = fits.HDUList([primary_hdu])
         hdul_atm =  fits.HDUList([primary_hdu])
-        hdul_excl =  fits.HDUList([primary_hdu])
 
         # Now initialise other arrays
         wmin, wmax  = [], []
         map2chip = []
         atm_parms_ext = []
-        px_excl_min, px_excl_max = [], []
 
         # Loop over every spectral segment
         for spec_i, spec in enumerate(self.spectra_1d):
@@ -1392,16 +1427,6 @@ class Observation(object):
 
             # Append wmax for giver order to wmax array and convert to micron
             wmax.append(np.max(spec.wave)*0.001)
-
-            # Setup the columns for PIXEL_EXCLUDE. For CRIRES spectra, the goal
-            # here is to exclude the edge pixels on each side of the detector 
-            # (which are physically masked and don't receive flux) so these 
-            # regions aren't considered when fitting tellurics.
-            # TODO: AH suggested there should be a +1 in here for indexing
-            px_excl_min.append(px_so_far)
-            px_excl_min.append(len(spec.wave)-edge_px_to_exlude + px_so_far)
-            px_excl_max.append(edge_px_to_exlude + px_so_far)
-            px_excl_max.append(len(spec.wave) + px_so_far)
             
             hdul_output[spec_i+1].header.append(
                 ("EXTNAME",
@@ -1418,9 +1443,6 @@ class Observation(object):
             else:
                 atm_parms_ext.append(1)
 
-            # Index pixel counter
-            px_so_far += len(spec.wave)
-
         # Setup the columns for the WAVE_INCLUDE output file
         CONT_FIT_FLAG = np.ones(len(wmin))
         wmin_winc = fits.Column(name='LOWER_LIMIT', format='D', array=wmin)
@@ -1434,15 +1456,6 @@ class Observation(object):
         table_hdu_winc = fits.BinTableHDU.from_columns(
             [wmin_winc, wmax_winc, map2chip_winc, contflag_winc])
         hdul_winc.append(table_hdu_winc)
-
-        pmin_excl = fits.Column(
-            name='LOWER_LIMIT', format='K', array=px_excl_min)
-        pmax_excl = fits.Column(
-            name='UPPER_LIMIT', format='K', array=px_excl_max)
-
-        table_hdu_pexcl = fits.BinTableHDU.from_columns([pmin_excl, pmax_excl])
-        hdul_excl.append(table_hdu_pexcl)
-        hdul_excl.writeto(pixel_save_path, overwrite=True)
 
         # Write to the science output file
         hdul_output.writeto(science_save_path, overwrite=True)
@@ -1458,6 +1471,159 @@ class Observation(object):
         table_hdu_atm = fits.BinTableHDU.from_columns([col1_atm])
         hdul_atm.append(table_hdu_atm)
         hdul_atm.writeto(atmosphere_save_path, overwrite=True)
+
+        # And finally save the basic pixel exclude file with only edge pixels.
+        # To also mask out strong science lines, run this separately.
+        self.save_molecfit_pixel_exclude(
+            molecfit_path,
+            pixel_fits=pixel_fits,
+            edge_px_to_exlude=edge_px_to_exlude,
+            do_science_line_masking=True,)
+
+
+    def save_molecfit_pixel_exclude(
+        self,
+        molecfit_path,
+        pixel_fits="PIXEL_EXCLUDE.fits",
+        edge_px_to_exlude=40,
+        do_science_line_masking=True,
+        px_absorption_threshold=0.9,
+        do_plot_exclusion_diagnostic=False,):
+        """Writes the pixel exclude fits file for input to Molecfit. If we have
+        a template spectrum interpolator, we will exclude strong science lines
+        as well as the detector edges, otherwise just the latter.
+
+        Parameters
+        ----------
+        molecfit_path: string
+            Directory to save fits file.
+
+        pixel_fits: string, default: 'PIXEL_EXCLUDE.fits'
+            Name of the output pixel exclude fits file.
+
+        edge_px_to_exclude: int, default: 40
+            Pixels to exclude from each edge of the detector.
+
+        do_science_line_masking: boolean, default: True
+            If True, we will also exclude strong science lines in addition to
+            excluding the detector edges.
+
+        px_absorption_threshold: float, default: 0.9
+            Continuum normalised pixels with flux values below this will be
+            considered to belong to strong science lines and will be masked
+            out during the Molecfit fit.
+
+        do_plot_exclusion_diagnostic: boolean, default: False
+            Whether to plot a diagnostic plot.
+
+        Output Files
+        ------------
+        PIXEL_EXCLUDE.fits
+            Pixels to exclude in Molecfit modelling. Fits file consists of
+            an empty primary HDU, and a single fits table HDU with columns
+            ['LOWER_LIMIT', 'UPPER_LIMIT',].
+        """
+        # Initialise HDU lists for our output fits file, assigning the primary 
+        # HDU from our input science file.
+        with fits.open(self.fits_file) as fits_file:
+            primary_hdu = fits_file[0].copy()
+
+        hdul_excl =  fits.HDUList([primary_hdu])
+
+        # Initialise exclusion arrays
+        px_excl_min, px_excl_max = [], []
+
+        wave = self.wave_all
+        flux = self.flux_all
+
+        # Initialise the pixel exclusion array by first excluding all edge
+        # pixels. While we could do this in a vectorised way, we'll use a loop
+        # so that we don't have to assume that all segments are the same length
+        px_exclude_mask_all = []
+
+        for spec_i, spec in enumerate(self.spectra_1d):
+            px_exclude_mask = np.full(spec.wave.shape, False)
+            px_exclude_mask[:edge_px_to_exlude] = True
+            px_exclude_mask[-edge_px_to_exlude:] = True
+
+            px_exclude_mask_all.append(px_exclude_mask)
+
+        px_exclude_mask_all = np.hstack(px_exclude_mask_all)
+
+        # Now we want to also exclude all pixels with model absorption greater
+        # than our threshold. The intent here is to mask out strong lines that
+        # might confluse molecfit when it is fitting for telluric species.
+        if (do_science_line_masking
+            and self.rv_template_interpolator is not None):
+            model_flux = self.rv_template_interpolator(
+                wave * (1-(self.rv-self.bcor)/(const.c.si.value/1000)))
+            px_exclude_mask_all = np.logical_or(
+                px_exclude_mask_all,
+                model_flux < px_absorption_threshold,)
+
+        # Our mask is now complete, and we need to convert this to the molecfit
+        # pixel exclusion format, which is a matched set of arrays 
+        # corresponding to the lower and upper limits of the exclusion region.
+        prev_px_excluded = False
+
+        for px_i, px_exclude in enumerate(px_exclude_mask_all):
+            # We've gotten to the end of the excluded region
+            if (not px_exclude and prev_px_excluded
+                or px_i+1 == len(px_exclude_mask_all) and prev_px_excluded):
+                px_excl_min.append(px_i_min)
+                px_excl_max.append(px_i_max)
+
+                prev_px_excluded = False
+
+            # Start of excluded region, but hold off adding to our arrays
+            # Note: current assumption is that to mask a single pixel the max
+            # and min values should be the same.
+            elif px_exclude and not prev_px_excluded:
+                px_i_min = px_i
+                px_i_max = px_i 
+                prev_px_excluded = True
+            
+            # Continue to storing, but update max
+            elif px_exclude and prev_px_excluded:
+                # Set max
+                px_i_max = px_i
+                continue
+        # reset
+        else:
+            prev_px_excluded = False
+
+        # Save the fits file
+        pmin_excl = fits.Column(
+            name='LOWER_LIMIT', format='K', array=px_excl_min)
+        pmax_excl = fits.Column(
+            name='UPPER_LIMIT', format='K', array=px_excl_max)
+
+        pixel_save_path = os.path.join(molecfit_path, pixel_fits)
+
+        table_hdu_pexcl = fits.BinTableHDU.from_columns([pmin_excl, pmax_excl])
+        hdul_excl.append(table_hdu_pexcl)
+        hdul_excl.writeto(pixel_save_path, overwrite=True)
+
+        # Optionally plot a diagnostic
+        if do_plot_exclusion_diagnostic:
+            self.plot_spectra()
+
+            # TODO: include this all in plotting function
+            plt.plot(
+                wave,
+                model_flux,
+                linewidth=0.5,
+                color="black",
+                linestyle="--",)
+
+            for px_min, px_max in zip(px_excl_min, px_excl_max):
+                plt.axvspan(
+                    wave[px_min],
+                    wave[px_max],
+                    ymin=0, 
+                    ymax=2,
+                    alpha=0.4,
+                    color="r",)
 
 
     def initialise_molecfit_best_fit_model(
@@ -1547,7 +1713,7 @@ class Observation(object):
         template_spectrum_fits,
         segment_contamination_threshold=0.95,
         ignore_segments=[],
-        pixel_absorption_threshold=0.9,
+        px_absorption_threshold=0.9,
         ls_diff_step=(0.1),
         rv_init_guess=0,
         rv_min=-200,
@@ -1557,7 +1723,10 @@ class Observation(object):
         do_diagnostic_plots=False,
         verbose=False,
         figsize=(16,4),):
-        """
+        """Function to fit the radial velocity globally for the observation
+        object by doing a simultaneous fit using all spectral segments. Two
+        different methods are implemented: a cross correlation and a least
+        squares fit.
 
         TODO: Ideally there'd be a 'prepare for fitting' function, then 
         separate fitting functions (rather than a 'master' fitting function)
@@ -1578,7 +1747,7 @@ class Observation(object):
         ignore_segments: int list, default: []
             List of spectral segments to ignore, where 0 is the first segment.
 
-        pixel_absorption_threshold: float, default: 0.9
+        px_absorption_threshold: float, default: 0.9
             Similar to segment_contamination_threshold, but it operates on a
             *per pixel* level on the model telluric spectrum rather than a per
             segment level.
@@ -1628,60 +1797,78 @@ class Observation(object):
         elif fit_method == "LS":
             bad_px_value = 1
 
-        # Only proceed if we have a set of telluric model spectra
-        if len(self.spectra_1d_telluric_model) != len(self._spectra_1d):
-            raise Exception("No telluric model to use for masking!")
-
         # Intiialise pixel exclude mask for *all* spectral pixels. This will
         # be separated by segment (i.e. 2D rather than 1D), but we'll later
         # make a single continuous 1D array.
         pixel_exclude_mask = []
 
-        # Mask out any segments that we're ignoring due to excessive telluric
-        # absorption. We'll do this by taking a median of the telluric model
-        # flux, and if this median is below our contamination threshold then
-        # we'll consider the segment too contaminated to be useful for radial
-        # velocity fitting.
-        exclude_segment_mask = []
+        # If we don't have a set of telluric model spectra, we're limited to
+        # fitting without masking out the telluric features.
+        if len(self.spectra_1d_telluric_model) != len(self._spectra_1d):
+            print("No telluric model to use for masking, doing basic fit.")
 
-        for seg_i, tspec in enumerate(self.spectra_1d_telluric_model):
-            # If the segment is too contaminated to use, mask it out entirely
-            if (np.nanmedian(tspec.flux) < segment_contamination_threshold
-                or seg_i in ignore_segments):
-                exclude_segment_mask.append(True)
-                pixel_exclude_mask.append(np.full(tspec.flux.shape, True))
-
-            # Otherwise only mask out nan pixels and those below the telluric 
-            # absorption threshold
-            else:
-                exclude_segment_mask.append(False)
-
-                # While we aren't excluding this entire segment, we'll still 
-                # exclude any pixels with *telluric* absorption below
-                # pixel_absorption_threshold or *science* pixels with nans,
-                # infs, or nonphysical spikes (e.g. detector edge effects)
-                telluric_absorb_mask = tspec.flux < pixel_absorption_threshold
-
+            for seg_i, spec in enumerate(self.spectra_1d):
+                # Mask out NaN, inf, or nonphysical pixels
                 sci_nonfinite_mask = np.logical_or(
-                    ~np.isfinite(self.spectra_1d[seg_i].flux),
-                    ~np.isfinite(self.spectra_1d[seg_i].sigma))
+                        ~np.isfinite(spec.flux),
+                        ~np.isfinite(spec.sigma))
 
                 with np.errstate(invalid='ignore'):
                     sci_nonphysical_mask = np.logical_or(
-                        self.spectra_1d[seg_i].flux > 1.05,
-                        self.spectra_1d[seg_i].flux < 0,)
+                        spec.flux > 1.05,
+                        spec.flux < 0,)
 
                 exclude_mask = np.logical_or(
-                    telluric_absorb_mask,
-                    np.logical_or(sci_nonphysical_mask, sci_nonfinite_mask))
+                    sci_nonphysical_mask, 
+                    sci_nonfinite_mask)
 
                 pixel_exclude_mask.append(exclude_mask)
 
-                assert np.sum(
-                    np.isnan(self.spectra_1d[seg_i].flux[~exclude_mask])) == 0
+                assert np.sum(np.isnan(spec.flux[~exclude_mask])) == 0
+
+        # Otherise we can proceed with the smarter RV fit where we mask out any
+        # segments that we're ignoring due to excessive telluric absorption. 
+        # We'll do this by taking a median of the telluric model flux, and if 
+        # this median is below our contamination threshold then we'll consider
+        # the segment too contaminated to be useful for radial velocity fitting
+        else:
+            for seg_i, tspec in enumerate(self.spectra_1d_telluric_model):
+                # If a segment is too contaminated to use, mask it out entirely
+                if (np.nanmedian(tspec.flux) < segment_contamination_threshold
+                    or seg_i in ignore_segments):
+                    pixel_exclude_mask.append(np.full(tspec.flux.shape, True))
+
+                # Otherwise only mask out nan pixels and those below the
+                # telluric absorption threshold
+                else:
+                    # While we aren't excluding this entire segment, we'll 
+                    # still exclude any pixels with *telluric* absorption below
+                    # px_absorption_threshold or *science* pixels with nans,
+                    # infs, or nonphysical spikes (e.g. detector edge effects)
+                    telluric_absorb_mask = tspec.flux < px_absorption_threshold
+
+                    sci_nonfinite_mask = np.logical_or(
+                        ~np.isfinite(self.spectra_1d[seg_i].flux),
+                        ~np.isfinite(self.spectra_1d[seg_i].sigma))
+
+                    with np.errstate(invalid='ignore'):
+                        sci_nonphysical_mask = np.logical_or(
+                            self.spectra_1d[seg_i].flux > 1.05,
+                            self.spectra_1d[seg_i].flux < 0,)
+
+                    exclude_mask = np.logical_or(
+                        telluric_absorb_mask,
+                        np.logical_or(
+                            sci_nonphysical_mask, 
+                            sci_nonfinite_mask))
+
+                    pixel_exclude_mask.append(exclude_mask)
+
+                    assert np.sum(
+                        np.isnan(
+                            self.spectra_1d[seg_i].flux[~exclude_mask])) == 0
 
         pixel_exclude_mask = np.hstack(pixel_exclude_mask)
-        exclude_segment_mask = np.array(exclude_segment_mask)
 
         # Stitch wavelengths, spectra, and sigmas together
         sci_wave = np.hstack([spec.wave for spec in self.spectra_1d])
@@ -1702,6 +1889,9 @@ class Observation(object):
             kind="linear",
             bounds_error=False,
             assume_sorted=True)
+
+        # Store the interpolator
+        self.rv_template_interpolator = calc_template_flux
 
         # Intialise output for misc fitting parameters
         fit_dict = {}
@@ -1758,6 +1948,7 @@ def initialise_observation_from_crires_nodding_fits(
     file_format="CRIRES",
     site="Paranal",
     rv=np.nan,
+    e_rv=np.nan,
     drop_empty_orders=True,):
     """Takes a CRIRES+ 1D extracted nodding fits file, and initialises an
     Observation object containing a set of Spectra1D objects.
@@ -1785,8 +1976,8 @@ def initialise_observation_from_crires_nodding_fits(
     site: string, default: 'Paranal'
         Observatory location for computation of the barycentric velocity.
 
-    rv: float, default: np.nan
-        RV of the star (if known) in km/s.
+    rv, e_rv: float, default: np.nan
+        RV and associated uncertainty of the star (if known) in km/s.
 
     drop_empty_orders: boolean, default: True
         Whether to drop all nan orders.
@@ -1923,7 +2114,8 @@ def initialise_observation_from_crires_nodding_fits(
             n_orders=len(orders),
             fits_file= os.path.abspath(fits_file_nodding_extracted),
             bcor=bcor,
-            rv=rv,)
+            rv=rv,
+            e_rv=e_rv,)
             
     return observation
 
