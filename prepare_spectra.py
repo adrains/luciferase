@@ -57,8 +57,8 @@ if not os.path.isdir(molecfit_out_path):
 # Preparing spectra
 # -----------------------------------------------------------------------------
 # Initialise object
-ob = lspec.initialise_observation_from_crires_nodding_fits(
-    fits_file_nodding_extracted=sci_spec_path)
+ob = lspec.initialise_observation_from_crires_fits(
+    fits_file_extracted=sci_spec_path)
 
 # Do continuum fitting (either from scrath or via pre-computed params)
 if DO_IDENTIFY_CONTINUUM_REGIONS:

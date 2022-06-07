@@ -26,6 +26,9 @@ FILE_PATTERNS = [
     "cr2res_obs_nodding_extractedA.fits",
     "cr2res_obs_nodding_extractedB.fits",
     "cr2res_obs_nodding_extracted_combined.fits",
+    "cr2res_obs_pol_pol_specA.fits",
+    "cr2res_obs_pol_pol_specB.fits",
+    "cr2res_obs_pol_pol_spec_combined.fits",
 ]
 
 def blaze_corr_fits(
@@ -46,6 +49,27 @@ def blaze_corr_fits(
     # Load in blaze function and science frame
     with fits.open(new_sci_fits, mode="update") as sci_fits, \
         fits.open(blaze_fits_path) as blz_fits:
+
+        # Determine whether this is a polarisation observation or not, as the
+        # file format will be different. Polarisation observations will have
+        # the 'SPU' (Spherical Polarisation Unit) optic listed.
+        if sci_fits[0].header["HIERARCH ESO INS1 OPTI1 ID"] == "SPU":
+            is_polarisation_ob = True
+            n_cols = 7
+            flux_col_i = 5
+            sigma_col_i = 6
+        
+        # Nodding observations should be listed as 'FREE'
+        elif sci_fits[0].header["HIERARCH ESO INS1 OPTI1 ID"] == "FREE":
+            is_polarisation_ob = False
+            n_cols = 3
+            flux_col_i = 0
+            sigma_col_i = 1
+            
+        # Not sure what other options there are, but break just in case
+        else:
+            raise Exception("Unknown observation type.")
+
         # Find global maximum for blaze function to divide by
         blaze_max = 0
 
@@ -65,8 +89,13 @@ def blaze_corr_fits(
 
             col_match = [cs == cb for (cs, cb) in zip(cols_sci, cols_blz)]
 
-            # If not consistent, no point continuing
-            if not np.all(col_match):
+            # Check for column consistency if not doing polarisation obs
+            # TODO: this step doesn't make sense for observations of extended
+            # objects (e.g. Venus) where there are multiple spectra extracted
+            # from different regions along the slit. Generalise this to check
+            # that the order and detector numbers match rather than the column
+            # names specifically.
+            if not is_polarisation_ob and not np.all(col_match):
                 raise Exception("Columns don't match!")
 
             # Look for the maximum counts, assuming that the columns are 
@@ -81,16 +110,19 @@ def blaze_corr_fits(
         for fits_ext in fits_ext_names:
             # Get column names
             cols = sci_fits[fits_ext].data.columns.names
+            blz_cols = blz_fits[fits_ext].data.columns.names
 
             # Blaze correct science data with normalised blaze function
-            for flux_col, err_col in zip(cols[::3], cols[1::3]):
+            for flux_col, err_col, blz_flux_col, blz_err_col in zip(
+                cols[flux_col_i::n_cols], cols[sigma_col_i::n_cols], 
+                blz_cols[::3], blz_cols[1::3]):
                 # Suppress division by zero and nan warnings. This should be
                 # fine so long as we use a proper bad pixel mask during 
                 # subsequent analysis.
                 with np.errstate(divide="ignore", invalid="ignore"):
                     # Normalise blaze by dividing by maximum
-                    blz = blz_fits[fits_ext].data[flux_col] / blaze_max
-                    e_blz = blz_fits[fits_ext].data[err_col] / blaze_max
+                    blz = blz_fits[fits_ext].data[blz_flux_col] / blaze_max
+                    e_blz = blz_fits[fits_ext].data[blz_err_col] / blaze_max
                     
                     sci = sci_fits[fits_ext].data[flux_col].copy()
                     e_sci = sci_fits[fits_ext].data[err_col].copy()

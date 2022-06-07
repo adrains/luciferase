@@ -1940,10 +1940,11 @@ class Observation(object):
         return fit_dict
 
 
-def initialise_observation_from_crires_nodding_fits(
-    fits_file_nodding_extracted,
+def initialise_observation_from_crires_fits(
+    fits_file_extracted,
     fits_file_slit_func=None,
     fits_ext_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),
+    slit_pos_spec_num=1,
     initialise_empty_bad_px_mask=True,
     file_format="CRIRES",
     site="Paranal",
@@ -1955,7 +1956,7 @@ def initialise_observation_from_crires_nodding_fits(
 
     Parameters
     ----------
-    fits_file_nodding_extracted: string
+    fits_file_extracted: string
         Filepath to CRIRES+ 1D extracted nodding fits file.
 
     fits_file_slit_func: string, default: None
@@ -1964,6 +1965,12 @@ def initialise_observation_from_crires_nodding_fits(
     fits_ext_names: string array, 
         default: ("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1")
         HDU names for each chip. Defaults to CRIRES+ standard.
+
+    slit_pos_spec_num: int, default: 1
+        Spectrum number for when extracting multiple spectra from different
+        positions along the slit. Currently an Observation object only holds
+        a single spectrum, so this function should be called N times for 
+        extended objects where N is the number of spectra extracted.
 
     initialise_empty_bad_px_mask: boolean, default: True
         Whether to initialise empty/uniniformative bad px masks.
@@ -1990,9 +1997,25 @@ def initialise_observation_from_crires_nodding_fits(
     # List of valid file formats
     VALID_FILE_FORMATS = ["CRIRES",]
 
-    with fits.open(fits_file_nodding_extracted) as fits_file:
+    with fits.open(fits_file_extracted) as fits_file:
         # Check file format is valid, and if so get the barycentric correction
         if file_format == "CRIRES":
+            # Polarisation observations cannot have multiple spectra extracted
+            # from along the slit, and thus have a different format to nodding
+            # frames.
+            if fits_file[0].header["HIERARCH ESO INS1 OPTI1 ID"] == "SPU":
+                obs_type = "POL"
+                wl_col_suffix = "_WL"
+                spec_col_suffix = "_INTENS"
+                sigma_col_suffix = "_INTENS_ERR"
+            # Otherwise assume the observations are in the nodding format, and
+            # use the provided slit_pos_spec_num.
+            else:
+                obs_type = "NOD"
+                wl_col_suffix = "_{:02.0f}_WL".format(slit_pos_spec_num)
+                spec_col_suffix = "_{:02.0f}_SPEC".format(slit_pos_spec_num)
+                sigma_col_suffix = "_{:02.0f}_ERR".format(slit_pos_spec_num)
+
             # Calculcate midpoint
             exp_time_sec = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
             t_mid = fits_file[0].header["MJD-OBS"] + exp_time_sec / 86400 / 2
@@ -2030,13 +2053,13 @@ def initialise_observation_from_crires_nodding_fits(
 
             for order in orders:
                 # First check this order exists for this detector
-                if ("{:02.0f}_01_WL".format(order) 
+                if ("{:02.0f}{}".format(order, wl_col_suffix) 
                     not in hdu_data.columns.names):
                     continue
 
-                wave = hdu_data["{:02.0f}_01_WL".format(order)]
-                spec = hdu_data["{:02.0f}_01_SPEC".format(order)]
-                e_spec = hdu_data["{:02.0f}_01_ERR".format(order)]
+                wave = hdu_data["{:02.0f}{}".format(order, wl_col_suffix)]
+                spec = hdu_data["{:02.0f}{}".format(order, spec_col_suffix)]
+                e_spec = hdu_data["{:02.0f}{}".format(order, sigma_col_suffix)]
 
                 if initialise_empty_bad_px_mask:
                     bad_px_mask = np.full(len(wave), False)
@@ -2046,6 +2069,8 @@ def initialise_observation_from_crires_nodding_fits(
 
                 # Check if we have been given the slit function file, and if
                 # so use it to compute the seeing for our current order
+                # TODO: unclear how this interacts with polarimetric 
+                # observations
                 if fits_file_slit_func is not None:
                     with fits.open(fits_file_slit_func) as slit_func_fits: 
                         sf_hdu = slit_func_fits[fits_ext].data
@@ -2112,7 +2137,7 @@ def initialise_observation_from_crires_nodding_fits(
             max_order=max_order,
             n_detectors=n_detectors,
             n_orders=len(orders),
-            fits_file= os.path.abspath(fits_file_nodding_extracted),
+            fits_file= os.path.abspath(fits_file_extracted),
             bcor=bcor,
             rv=rv,
             e_rv=e_rv,)

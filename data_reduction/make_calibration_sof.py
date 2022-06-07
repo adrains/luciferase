@@ -51,6 +51,16 @@ dark_exps = []
 dark_ndits = []
 
 for fn in fits_fns:
+    # Skip if the file is not for the stated wavelength setting. Note that some
+    # fits files (annoyingly) don't have this header keyword.
+    # TODO: do this without relying on catching exceptions
+    try:
+        if fits.getval(fn, "HIERARCH ESO INS WLEN ID") != wl_setting:
+            continue
+    except:
+        continue
+
+    # Otherwise continue
     if fits.getval(fn, "OBJECT") == "FLAT":
         flat_fns.append(fn)
         flat_exps.append(fits.getval(fn, "HIERARCH ESO DET SEQ1 DIT"))
