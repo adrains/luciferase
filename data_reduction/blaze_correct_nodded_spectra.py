@@ -3,16 +3,20 @@ given the appropriate calibration blaze flat, and save as a new fits file.
 
 Run as
 ------
-python blaze_correct_nodded_spectra.py [data_path] [cal_flat_blaze_path]
+python blaze_correct_nodded_spectra.py [path] [cal_flat_blaze_path] [n_spec]
 
-where [data_path] is the path to the data (which can include wildcards for
-globbing), and [cal_flat_blaze_path] is the calibration flat blaze fits file.
+where [path] is the path to the data (which can include wildcards for
+globbing), [cal_flat_blaze_path] is the calibration flat blaze fits file, and
+[n_spec] is the number of spectra extracted along the slit in the case of 
+observing extended objects (if not provided, defaults to 1).
+
 Make sure to wrap any wildcard filepaths in quotes to prevent globbing
 happening on the command line (versus in python).
 
 Blaze corrected spectra are saved in the same location as the original science
 file, only now with a new extension (by default _baze_corr).
 """
+from multiprocessing.sharedctypes import Value
 import os
 import sys
 import glob
@@ -31,11 +35,25 @@ FILE_PATTERNS = [
     "cr2res_obs_pol_pol_spec_combined.fits",
 ]
 
+# These headers should be the same across the science and blaze files
+HEADER_EQUALITIES_TO_ENFORCE = [
+    "HIERARCH ESO INS WLEN ID",
+    "HIERARCH ESO INS GRAT1 MINORD",
+    "HIERARCH ESO INS GRAT1 MAXORD",
+    "HIERARCH ESO INS GRAT1 ZP_ORD",
+    "HIERARCH ESO INS WLEN MAXCORD",
+    "HIERARCH ESO INS WLEN MINCORD",
+]
+
+# Extension to the filename of the blaze corrected file
+NEW_FN_EXT = "blaze_corr"
+
 def blaze_corr_fits(
     sci_fits_path,
     blaze_fits_path,
+    n_spec=1,
     new_ext="blaze_corr",
-    fits_ext_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),):
+    detector_names=("CHIP1.INT1", "CHIP2.INT1", "CHIP3.INT1"),):
     """Correct a single extracted nodding spectrum for the blaze function.
 
     Assume that both filenames are in absolute form.
@@ -50,22 +68,35 @@ def blaze_corr_fits(
     with fits.open(new_sci_fits, mode="update") as sci_fits, \
         fits.open(blaze_fits_path) as blz_fits:
 
+        # Check for header equality, and raise an exception if any of the
+        # headers we're checking don't match
+        for header in HEADER_EQUALITIES_TO_ENFORCE:
+            if sci_fits[0].header[header] != blz_fits[0].header[header]:
+                raise ValueError(
+                    "Header '{}' unmatched across science and blaze".format(
+                        header))
+
+        # If our headers are all equal, we can grab the minimum an maximum
+        # orders used in the fits table column names when doing blaze 
+        # correction. Note that these are just the minimum and maximum orders
+        # that might have *some* data, rather than the *complete* orders.
+        header = sci_fits[0].header
+        min_order = (header["HIERARCH ESO INS GRAT1 MINORD"]
+                     - header["HIERARCH ESO INS GRAT1 ZP_ORD"] + 1)
+        
+        max_order = (header["HIERARCH ESO INS GRAT1 MAXORD"]
+                     - header["HIERARCH ESO INS GRAT1 ZP_ORD"] + 1)
+
         # Determine whether this is a polarisation observation or not, as the
         # file format will be different. Polarisation observations will have
         # the 'SPU' (Spherical Polarisation Unit) optic listed.
         if sci_fits[0].header["HIERARCH ESO INS1 OPTI1 ID"] == "SPU":
             is_polarisation_ob = True
-            n_cols = 7
-            flux_col_i = 5
-            sigma_col_i = 6
         
         # Nodding observations should be listed as 'FREE'
         elif sci_fits[0].header["HIERARCH ESO INS1 OPTI1 ID"] == "FREE":
             is_polarisation_ob = False
-            n_cols = 3
-            flux_col_i = 0
-            sigma_col_i = 1
-            
+
         # Not sure what other options there are, but break just in case
         else:
             raise Exception("Unknown observation type.")
@@ -75,66 +106,74 @@ def blaze_corr_fits(
 
         # This is a little inefficient, but we're going to have 2 separate for
         # loops looping over the extensions and columns. The first (this set)
-        # will be used for setup (error checking and looking for the maximum
-        # value in counts of the blaze file to normalise it by), and the second
-        # will be used to actually do the blaze normalisation. This is mostly
-        # due to fits record arrays being a pain to work with in a vectorised
-        # way.
+        # will be used to look for the maximum value in counts of the blaze 
+        # file to normalise it by), and the second will be used to actually do
+        # the blaze normalisation. This is mostly due to fits record arrays 
+        # being a pain to work with in a vectorised way.
 
-        # First loop: error checking and finding max value in counts
-        for fits_ext in fits_ext_names:
-            # Get column names and verify they're consistent across files
-            cols_sci = sci_fits[fits_ext].data.columns.names
-            cols_blz = blz_fits[fits_ext].data.columns.names
+        # First loop: finding max value in counts, loop over every detector,
+        # and every order.
+        for det in detector_names:
+            for order_i in range(min_order, max_order+1):
+                col_name = "{:02.0f}_01_SPEC".format(order_i)
+                
+                # Skip the column if the order is missing for this detector
+                if col_name not in blz_fits[det].data.columns.names:
+                    continue
 
-            col_match = [cs == cb for (cs, cb) in zip(cols_sci, cols_blz)]
-
-            # Check for column consistency if not doing polarisation obs
-            # TODO: this step doesn't make sense for observations of extended
-            # objects (e.g. Venus) where there are multiple spectra extracted
-            # from different regions along the slit. Generalise this to check
-            # that the order and detector numbers match rather than the column
-            # names specifically.
-            if not is_polarisation_ob and not np.all(col_match):
-                raise Exception("Columns don't match!")
-
-            # Look for the maximum counts, assuming that the columns are 
-            # ordered as [SPEC, ERR, WL] and update if we find a new maximum.
-            for col in cols_blz[::3]:
-                curr_max = np.nanmax(blz_fits[fits_ext].data[col])
+                # Look for the maximum counts and update if we find a new max
+                curr_max = np.nanmax(blz_fits[det].data[col_name])
 
                 if curr_max > blaze_max:
                     blaze_max = curr_max
 
-        # Second loop: normalising science data
-        for fits_ext in fits_ext_names:
-            # Get column names
-            cols = sci_fits[fits_ext].data.columns.names
-            blz_cols = blz_fits[fits_ext].data.columns.names
+        # Second loop: normalising science data. Note that the blaze file 
+        # should only have a single wave/spec/sigma combination for each 
+        # detector/order combination, but a science file might have more in the
+        # case of extended objects (e.g. Venus) where multiple spectra are 
+        # extracted at different slit positions for each order. This is set by
+        # the n_spec parameter. 
+        # TODO: get this in a neater way from the header if possible
+        for det in detector_names:
+            for order_i in range(min_order, max_order):
+                # Construct blaze column names
+                blz_spec_col = "{:02.0f}_01_SPEC".format(order_i)
+                blz_sigma_col = "{:02.0f}_01_ERR".format(order_i)
 
-            # Blaze correct science data with normalised blaze function
-            for flux_col, err_col, blz_flux_col, blz_err_col in zip(
-                cols[flux_col_i::n_cols], cols[sigma_col_i::n_cols], 
-                blz_cols[::3], blz_cols[1::3]):
-                # Suppress division by zero and nan warnings. This should be
-                # fine so long as we use a proper bad pixel mask during 
-                # subsequent analysis.
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    # Normalise blaze by dividing by maximum
-                    blz = blz_fits[fits_ext].data[blz_flux_col] / blaze_max
-                    e_blz = blz_fits[fits_ext].data[blz_err_col] / blaze_max
-                    
-                    sci = sci_fits[fits_ext].data[flux_col].copy()
-                    e_sci = sci_fits[fits_ext].data[err_col].copy()
+                for spec_i in range(1, n_spec+1):
+                    # Construct science column names, noting that nodding and
+                    # polarimetric observations have different formats
+                    if is_polarisation_ob:
+                        sci_spec_col = "{:02.0f}_INTENS".format(order_i)
+                        sci_sigma_col = "{:02.0f}_INTENS_ERR".format(order_i)
+                    else:
+                        sci_spec_col = "{:02.0f}_{:02.0f}_SPEC".format(
+                            order_i, spec_i)
+                        sci_sigma_col = "{:02.0f}_{:02.0f}_ERR".format(
+                            order_i, spec_i)
 
-                    # Blaze correct science frame and propagate uncertainties
-                    sci_fits[fits_ext].data[flux_col] = sci / blz
-                    sci_fits[fits_ext].data[err_col] = \
-                        sci * np.sqrt((e_sci/sci)**2 + (e_blz/blz)**2)
+                    # Skip the column if the order is missing for this detector
+                    if sci_spec_col not in sci_fits[det].data.columns.names:
+                        continue
+
+                    # Suppress division by zero and nan warnings. This should
+                    # be fine so long as we use a proper bad pixel mask during 
+                    # subsequent analysis.
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        # Normalise blaze by dividing by maximum
+                        blz = blz_fits[det].data[blz_spec_col] / blaze_max
+                        e_blz = blz_fits[det].data[blz_sigma_col] / blaze_max
+                        
+                        sci = sci_fits[det].data[sci_spec_col].copy()
+                        e_sci = sci_fits[det].data[sci_sigma_col].copy()
+
+                        # Blaze correct science frame & propagate uncertainties
+                        sci_fits[det].data[sci_spec_col] = sci / blz
+                        sci_fits[det].data[sci_sigma_col] = \
+                            sci * np.sqrt((e_sci/sci)**2 + (e_blz/blz)**2)
 
         # Save updated fits file
         sci_fits.flush()
-
 
 # When called as a script, we want to accept as input a path (potentially) with
 # wildcards) and from that perform blaze correction on all files within 
@@ -151,14 +190,18 @@ if __name__ == "__main__":
     # Take as input the folder/s to consider
     data_dir = sys.argv[1]
 
-    # And the location of the blaze file as outputted from the flat reduction
+    # The location of the blaze file as outputted from the flat reduction
     blaze_fits = sys.argv[2]
 
-    # And the new extension
-    if len(sys.argv) > 3:
-        new_ext = sys.argv[3]
+    # And, optionally, n_spec: the number of spectra extracted for each order
+    # at different slit positions
+    if len(sys.argv) == 4:
+        n_spec = int(sys.argv[3])
+
+    # Default to 1 if not provided
     else:
-        new_ext = "blaze_corr"
+        print("Defaulting n_spec to 1")
+        n_spec = 1
 
     if not os.path.isfile(blaze_fits):
         raise FileNotFoundError("Specified blaze file not found.")
@@ -177,9 +220,9 @@ if __name__ == "__main__":
     for sci_fits in fits_files:
         baze_corr_fits = os.path.join(
             os.path.dirname(sci_fits),
-            blaze_fits.replace(".fits", "_{}.fits".format(new_ext)))
+            sci_fits.replace(".fits", "_{}.fits".format(NEW_FN_EXT)))
 
         print("Blaze correcting: {} --> {}".format(sci_fits, baze_corr_fits))
-        blaze_corr_fits(sci_fits, blaze_fits)
+        blaze_corr_fits(sci_fits, blaze_fits, n_spec)
 
     print("\n{} files blaze corrected successfully!".format(len(fits_files)))
