@@ -88,6 +88,10 @@ class Spectrum1D(object):
         self.detector_i = detector_i
         self.order_i = order_i
 
+        # Initialise hidden variables to keep track of unnormalised flux
+        self._unnormalised_flux = np.array([])
+        self._unnormalised_sigma =np.array([])
+
     @property
     def n_px(self):
         return self._n_px
@@ -252,6 +256,10 @@ class ObservedSpectrum(Spectrum1D):
         self.continuum_wls = continuum_wls
         self.is_continuum_normalised = is_continuum_normalised
 
+        # Initialise default uniform 1D polynomial (y intercept 1, gradient 0) 
+        # for continuum normalisation.
+        self.continuum_poly = Polynomial([1,0])
+
     @property
     def seeing_arcsec(self):
         return self._seeing_arcsec
@@ -315,14 +323,13 @@ class ObservedSpectrum(Spectrum1D):
         return "".join(info_str)
 
 
-    def do_continuum_normalise(
+    def fit_polynomial_to_continuum_wavelengths(
         self,
         region_width_px=2,
         poly_order=1,
         continuum_region_func="MEDIAN",):
-        """Continuum normalise this spectrum (in place) using a polynomial and 
-        the continuum points specified. Updates the is_continuum_normalised
-        flag afterwards.
+        """Fits a polynomial to the specified continuum points and saves the
+        polynomial coefficients.
 
         Parameters
         ----------
@@ -352,12 +359,6 @@ class ObservedSpectrum(Spectrum1D):
         # Initialise a handy descriptor for this spectrum for printing
         print_label = "(order:{:0.0f}, det:{:0.0f})".format(
             self.order_i, self.detector_i)
-
-        # First check that we haven't already continuum normalised the data
-        if self.is_continuum_normalised:
-            print("Spectrum ({}) is already continuum normalised!".format(
-                print_label))
-            return
 
         # Only do this if we have continuum wavelengths appropriate for our
         # polynomial order
@@ -401,6 +402,75 @@ class ObservedSpectrum(Spectrum1D):
         self.continuum_poly = Polynomial(coef)
         self.continuum_pixels = continuum_pixels
 
+
+    def optimise_continuum_polynomial_with_telluric_model(
+        self,
+        telluric_model_spectrum,):
+        """Uses a telluric model spectrum from Molecfit to optimise the 
+        polynomial coefficients used for continuum normalisation. This is 
+        possible as different physical process contribute to the stellar and
+        telluric spectra, allowing them to be modelled/treated separately. This
+        function should be used in an interative way to converge on the optimal
+        continuum normalisation. 
+
+        TODO: mask out strong stellar lines and regions where the telluric
+        model has a transmission of 1.0.
+
+        Parameters
+        ----------
+        telluric_model_spectrum: luciferase.spectra.TelluricSpectrum
+            Modelled telluric spectra corresponding to this spectrum. 
+        """
+        # Start with the initial guess of the coefficients from our 
+        # previously fitted linear polynomial
+        params_init = self.continuum_poly.coef
+
+        # Mask out nans and infs with default values
+        sci_flux = self._unnormalised_flux.copy()
+        sci_sigma = self._unnormalised_sigma.copy()
+
+        bad_px_mask = np.logical_or(np.isnan(sci_flux), np.isnan(sci_sigma))
+
+        sci_flux[bad_px_mask] = 1
+        sci_sigma[bad_px_mask] = 1E20
+
+        # Setup the list of parameters to pass to our fitting function
+        args = (
+            self.wave,
+            sci_flux,
+            sci_sigma,
+            telluric_model_spectrum.flux,)
+
+        # Do fit
+        ls_fit_dict = least_squares(
+            calc_continuum_optimisation_resid, 
+            params_init, 
+            jac="3-point",
+            args=args,)
+
+        # TODO: Diagnostics
+        pass
+
+        # Update continuum polynomial with the new best fit coefficients
+        self.continuum_poly = Polynomial(ls_fit_dict["x"])
+
+
+    def do_continuum_normalise(self):
+        """Continuum normalise this spectrum using our pre-computed polynomial 
+        (initially from fit_polynomial_to_continuum_wavelengths, but later
+        also from optimise_continuum_polynomial_with_telluric_model). Updates
+        the is_continuum_normalised flag afterwards. To undo, use
+        undo_continuum_normalise.
+        """
+        # Check we haven't already done the continuum normalisation
+        if self.is_continuum_normalised:
+            print("Already continuum normalised!")
+            return
+
+        # Store the unnormalised flux and uncertainty
+        self._unnormalised_flux = self.flux.copy()
+        self._unnormalised_sigma = self.sigma.copy()
+
         # Normalise by continuum and update our flux and uncertainties
         continuum = self.continuum_poly(self.wave)
 
@@ -414,7 +484,20 @@ class ObservedSpectrum(Spectrum1D):
 
         # Update flag
         self.is_continuum_normalised = True
-    
+
+
+    def undo_continuum_normalise(self):
+        """Counterpart function to do_continuum_normalise to restore the 
+        spectrum to its unnormalised state.
+        """
+        # Only proceed if our spectra is continuum normalised
+        if self.is_continuum_normalised:
+            self.flux = self._unnormalised_flux.copy()
+            self.sigma = self._unnormalised_sigma.copy()
+            self.is_continuum_normalised = False
+        else:
+            print("Spectrum not yet normalised!")
+
 
     def plot_spectrum(
         self,
@@ -987,6 +1070,7 @@ class Observation(object):
 
         # Set y limits based on median flux
         fluxes = []
+        continua = []
 
         # Loop over spectra array and plot each spectral segment
         for spec_i, spectrum in enumerate(self.spectra_1d):
@@ -1001,11 +1085,11 @@ class Observation(object):
             if plot_continuum_poly:
                 # Get continuum fit
                 continuum = spectrum.continuum_poly(spectrum.wave)
-
+                
                 # Plot spectra
                 axis.plot(
                     spectrum.wave,
-                    spectrum.flux * continuum,
+                    spectrum._unnormalised_flux,
                     linewidth=linewidth,)
 
                 # Plot continuum fit
@@ -1019,10 +1103,12 @@ class Observation(object):
                 # TODO: use actual flux values here.
                 axis.plot(
                     spectrum.wave[spectrum.continuum_pixels],
-                    (spectrum.flux * continuum)[spectrum.continuum_pixels],
+                    (spectrum._unnormalised_flux)[spectrum.continuum_pixels],
                     marker="x",
                     markeredgecolor="k",
                     linestyle="",)
+
+                continua.append(continuum)
 
             # Otherwise just plot spectra as is
             else:
@@ -1084,8 +1170,14 @@ class Observation(object):
                         arrowprops=dict(arrowstyle='->',lw=0.2),)
 
         # Set height based on median fluxes
-        fluxes = np.concatenate(fluxes)
-        axis.set_ylim(-0.1, np.nanmedian(fluxes)*y_lim_median_fac)
+        if not plot_continuum_poly:
+            fluxes = np.concatenate(fluxes)
+            axis.set_ylim(-0.1, np.nanmedian(fluxes)*y_lim_median_fac)
+        
+        # Or set height based on continuum
+        else:
+            continua = np.concatenate(continua)
+            axis.set_ylim([-0.1, np.nanmedian(continua)*y_lim_median_fac])
 
         axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=25))
         axis.xaxis.set_major_locator(plticker.MultipleLocator(base=50))
@@ -1102,13 +1194,13 @@ class Observation(object):
             plt.savefig(os.path.join(save_folder, fig_name,))
 
     
-    def continuum_normalise_spectra(
+    def fit_poly_to_spectra_continuum_wavelengths(
         self,
         region_width_px=2,
         poly_order=1,
-        continuum_region_func="MEDIAN",
-        do_plot=False,):
-        """Continuum normalise all spectra in spectra_1d.
+        continuum_region_func="MEDIAN",):
+        """Fits and saves a polynomial to the continuum wavelengths previously
+        identified.
 
         Parameters
         ----------
@@ -1122,25 +1214,39 @@ class Observation(object):
         continuum_region_func: string, default: 'median'
             Function to use to determine flux for continuum region, valid 
             options are: [MEDIAN, MEAN, MAX]
+        """
+        for spectrum in self.spectra_1d:
+            spectrum.fit_polynomial_to_continuum_wavelengths(
+                region_width_px=region_width_px,
+                poly_order=poly_order,
+                continuum_region_func=continuum_region_func,)
 
+
+    def continuum_normalise_spectra(
+        self,
+        do_plot=False,):
+        """Continuum normalise all spectra in spectra_1d. Note that this 
+        should be done *after* suitable polynomials have been fit.
+
+        Parameters
+        ----------
         do_plot: boolean, default: False
             Whether to plot a diagnostic plot after fitting the continuum.
         """
         for spectrum in self.spectra_1d:
-            spectrum.do_continuum_normalise(
-                region_width_px=region_width_px,
-                poly_order=poly_order,
-                continuum_region_func=continuum_region_func,)
+            spectrum.do_continuum_normalise()
 
         # TODO: plot a more detail diagnostic plot
         if do_plot:
             self.plot_spectra(plot_continuum_poly=True)
     
 
-    def plot_continuum_diagnostic(self,):
+    def undo_continuum_normalise_spectra(self,):
+        """Counterpart to continuum_normalise_spectra to undo continuum 
+        normalisation.
         """
-        """
-        pass
+        for spectrum in self.spectra_1d:
+            spectrum.undo_continuum_normalise()
 
 
     def identify_continuum_regions(
@@ -1184,7 +1290,7 @@ class Observation(object):
             plt.title(title_text)
 
             # Set the Y limit based on the median to avoid edge pixel spikes
-            plt.ylim(0, 2*np.nanmedian(spectrum.flux))
+            #plt.ylim(0, 4)
 
             user_coords = plt.ginput(
                 n=n_cont_region_per_spec,
@@ -1282,6 +1388,31 @@ class Observation(object):
                 continuum_wavelengths < spectrum.wave.max(),)
 
             spectrum.continuum_wls = continuum_wavelengths[valid_wls]
+
+
+    def optimise_continuum_fit_using_telluric_model(self,):
+        """Optimises the continuum fit for all spectra in spectra_1d using the
+        corresponding model telluric absorption spectrum.
+        """
+        # Only proceed if we have a telluric model and we've already done a 
+        # manual continuum normalisation
+        if len(self.spectra_1d_telluric_model) == 0:
+            raise Exception("No telluric model!")
+
+        # For every spectral segment, find best set of linear polynomial 
+        # coefficients (i.e. gradient and Y offset) to divide science spectrum
+        # by to match the telluric model
+        for spec_i, (sci_spec, tell_spec) in enumerate(
+            zip(self.spectra_1d, self.spectra_1d_telluric_model)):
+            # Update the continuum polynomial
+            sci_spec.optimise_continuum_polynomial_with_telluric_model(
+                tell_spec)
+
+            # Undo the previous continuum fit
+            sci_spec.undo_continuum_normalise()
+
+            # Now update the continuum fit itself
+            sci_spec.do_continuum_normalise()
 
 
     def save_molecfit_fits_files(
@@ -2481,5 +2612,46 @@ def calc_rv_shift_residual(
 
     if verbose:
         print("RV = {:+0.5f}, rchi^2 = {:0.5f}".format(params[0],rchi2))
+
+    return resid_vect
+
+
+def calc_continuum_optimisation_resid(
+    params,
+    sci_wave,
+    sci_flux,
+    sci_sigma,
+    telluric_model_flux,):
+    """Calculates the residuals between a continuum normalised observed science
+    spectrum and the best fit molecfit model. Called to optimise over the 
+    polynomial coefficients in params to get the best possible continuum
+    normalisation.
+
+    Parameters
+    ----------
+    params: float array
+        Contains the polynomial coefficients for use with
+        numpy.polynomial.polynomial.Polynomial.
+
+    sci_wave, sci_flux, sci_sigma: float array
+        Wavelength scale, fluxes, and uncertainties for the science spectrum.
+
+    telluric_model_flux: float array
+        Model telluric absorption normalised to 1.0.
+
+    Returns
+    -------
+    resid_vect: float array
+        Uncertainty weighted residuals vector.
+    """
+    # Calculate the continuum
+    continuum_poly = Polynomial(params)
+    continuum = continuum_poly(sci_wave)
+
+    # Continuum normalise our science flux
+    norm_sci_flux = sci_flux / continuum
+
+    # Compute residuals
+    resid_vect = (norm_sci_flux - telluric_model_flux) / sci_sigma
 
     return resid_vect
