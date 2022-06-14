@@ -1,7 +1,6 @@
 """Objects and functions for working with spectra.
 """
 import os
-import glob
 import numpy as np
 import pandas as pd
 from astropy.io import fits
@@ -15,40 +14,6 @@ from scipy.optimize import least_squares
 from numpy.polynomial.polynomial import Polynomial, polyfit
 
 VALID_NOD_POS = ["A", "B", None,]
-
-
-def load_time_series_spectra(spectra_path_with_wildcard):
-    """Imports time series spectra from globbed fits files given a filepath 
-    with wildcard.
-    """
-    # Grab filenames and sort
-    spec_seq_files = glob.glob(spectra_path_with_wildcard)
-    spec_seq_files.sort()
-
-    # Put all spectra in arrays
-    wave = []
-    spectra = []
-    e_spectra = []
-    times = []
-
-    for spec_file in spec_seq_files:
-        spec_fits = fits.open(spec_file)
-        wave.append(spec_fits[1].data["SPLICED_1D_WL"])
-        spectra.append(spec_fits[1].data["SPLICED_1D_SPEC"])
-        e_spectra.append(spec_fits[1].data["SPLICED_1D_ERR"])
-        times.append(spec_fits[0].header["DATE-OBS"].split("T")[-1].split(".")[0])
-
-    obj = fits.getval(spec_file, "OBJECT")
-
-    wave = np.array(wave)
-    spectra = np.array(spectra)
-    e_spectra = np.array(e_spectra)
-
-    # Mask spectra
-    bad_px_mask = np.logical_or(spectra > 10, spectra < 0)
-    #masked_spec = np.ma.masked_array(spectra, ~mask)
-
-    return wave, spectra, e_spectra, bad_px_mask
 
 
 class Spectrum1D(object):
@@ -257,8 +222,9 @@ class ObservedSpectrum(Spectrum1D):
         self.is_continuum_normalised = is_continuum_normalised
 
         # Initialise default uniform 1D polynomial (y intercept 1, gradient 0) 
-        # for continuum normalisation.
+        # for continuum normalisation, and continuum pixels parameter.
         self.continuum_poly = Polynomial([1,0])
+        self.continuum_pixels = []
 
     @property
     def seeing_arcsec(self):
@@ -405,21 +371,50 @@ class ObservedSpectrum(Spectrum1D):
 
     def optimise_continuum_polynomial_with_telluric_model(
         self,
-        telluric_model_spectrum,):
+        telluric_model_spectrum,
+        edge_px_to_exclude=20,
+        spec_interpolator=None,
+        rv=np.nan,
+        bcor=np.nan,
+        do_mask_uninformative_model_px=False,
+        do_mask_strong_stellar_lines=False,
+        px_absorption_threshold=0.9,):
         """Uses a telluric model spectrum from Molecfit to optimise the 
         polynomial coefficients used for continuum normalisation. This is 
         possible as different physical process contribute to the stellar and
         telluric spectra, allowing them to be modelled/treated separately. This
         function should be used in an interative way to converge on the optimal
-        continuum normalisation. 
-
-        TODO: mask out strong stellar lines and regions where the telluric
-        model has a transmission of 1.0.
+        continuum normalisation. Can also exclude strong science lines if given
+        a template spectrum interpolator.
 
         Parameters
         ----------
         telluric_model_spectrum: luciferase.spectra.TelluricSpectrum
-            Modelled telluric spectra corresponding to this spectrum. 
+            Modelled telluric spectra corresponding to this spectrum.
+
+        edge_px_to_exclude: int, default: 20
+            Pixels to exclude from each edge of the detector.
+
+        spec_interpolator: scipy.interpolate.interpolate.interp1d object
+            Interpolation object used to interpolate model stellar fluxes for
+            the purpose of masking out strong science lines. Defaults to None.
+
+        rv, bcor: float, default: np.nan
+            RV and bcor of the observation used to interpolate the model
+            stellar fluxes to the science frame.
+
+        do_mask_uninformative_model_px: boolean, default False
+            If True, will not consider Molecfit model pixels with no telluric
+            absorption (i.e. any pixels with a value of 1.0).
+
+        do_mask_strong_stellar_lines: boolean, default: False
+            If True, we will also exclude strong science lines in addition to
+            excluding the detector edges.
+
+        px_absorption_threshold: float, default: 0.9
+            Continuum normalised pixels with flux values below this will be
+            considered to belong to strong science lines and will be masked
+            out during optimisation.
         """
         # Start with the initial guess of the coefficients from our 
         # previously fitted linear polynomial
@@ -430,7 +425,32 @@ class ObservedSpectrum(Spectrum1D):
         sci_sigma = self._unnormalised_sigma.copy()
 
         bad_px_mask = np.logical_or(np.isnan(sci_flux), np.isnan(sci_sigma))
+        
+        # Mask out edge pixels
+        bad_px_mask[:edge_px_to_exclude] = True
+        bad_px_mask[-edge_px_to_exclude:] = True
 
+        # Mask out non-informative model pixels where there is no telluric 
+        # absorption.
+        if do_mask_uninformative_model_px:
+            bad_px_mask = np.logical_or(
+                bad_px_mask,
+                telluric_model_spectrum.flux==1.0,)
+
+        # Mask out strong stellar lines
+        if do_mask_strong_stellar_lines and spec_interpolator is not None:
+            # Interpolate model spectrum to science frame
+            template_flux = spec_interpolator(
+                self.wave * (1-(rv-bcor)/(const.c.si.value/1000)))
+
+            # Mask out pixels where continuum normalised stellar flux is less
+            # than our absorption threshold
+            bad_px_mask = np.logical_or(
+                bad_px_mask,
+                template_flux < px_absorption_threshold,)
+
+        # Set all bad pixels to non-NaN defaults that will exclude them from 
+        # the least squares fit
         sci_flux[bad_px_mask] = 1
         sci_sigma[bad_px_mask] = 1E20
 
@@ -466,6 +486,10 @@ class ObservedSpectrum(Spectrum1D):
         if self.is_continuum_normalised:
             print("Already continuum normalised!")
             return
+
+        # Warn the user if we're using the default polynomial
+        if np.median(self._continuum_poly.coef == 1.0):
+            print("Warning, using default continuum polynomial.")
 
         # Store the unnormalised flux and uncertainty
         self._unnormalised_flux = self.flux.copy()
@@ -1002,7 +1026,9 @@ class Observation(object):
         save_folder="plots/",
         line_annotation_fontsize="xx-small",
         alternate_annotation_height=True,
-        linewidth=0.4,):
+        linewidth=0.4,
+        x_ticks=(25,12.5),
+        x_axis_padding=5,):
         """Quickly plot all spectra in spectra_1d as a function of wavelength
         for inspection. Optionally can be saved as a pdf.
 
@@ -1059,6 +1085,12 @@ class Observation(object):
 
         linewidth: float, default: 0.4
             Linewidth for plotted spectra.
+
+        x_ticks: float tuple, default: (25, 12.5)
+            Major and minor x axis ticks respectively in Angstrom.
+
+        x_axis_padding: float, default: 5
+            Padding in Angstrom to set the x limits +/- the wavelength scale.
         """
         # Plot sequence of spectra
         if do_close_plots:
@@ -1179,8 +1211,12 @@ class Observation(object):
             continua = np.concatenate(continua)
             axis.set_ylim([-0.1, np.nanmedian(continua)*y_lim_median_fac])
 
-        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=25))
-        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=50))
+        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=x_ticks[1]))
+        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=x_ticks[0]))
+
+        axis.set_xlim(
+            self.spectra_1d[0].wave[0] - x_axis_padding,
+            self.spectra_1d[-1].wave[-1] + x_axis_padding)
 
         axis.set_xlabel(r"Wavelength (nm)")
         axis.set_ylabel("Flux")
@@ -1193,8 +1229,8 @@ class Observation(object):
                 self.object_name.replace(" ", ""))
             plt.savefig(os.path.join(save_folder, fig_name,))
 
-    
-    def fit_poly_to_spectra_continuum_wavelengths(
+
+    def fit_polynomials_for_spectra_continuum_wavelengths(
         self,
         region_width_px=2,
         poly_order=1,
@@ -1233,6 +1269,15 @@ class Observation(object):
         do_plot: boolean, default: False
             Whether to plot a diagnostic plot after fitting the continuum.
         """
+        # Only proceed if our spectra are not yet normalised
+        is_normalised = np.any([
+            spec.is_continuum_normalised for spec in self.spectra_1d])
+
+        if is_normalised:
+            print("Spectra already normalised!")
+            return
+        
+        # Otherwise normalise
         for spectrum in self.spectra_1d:
             spectrum.do_continuum_normalise()
 
@@ -1390,14 +1435,49 @@ class Observation(object):
             spectrum.continuum_wls = continuum_wavelengths[valid_wls]
 
 
-    def optimise_continuum_fit_using_telluric_model(self,):
+    def optimise_continuum_fit_using_telluric_model(
+        self,
+        edge_px_to_exclude=20,
+        do_mask_uninformative_model_px=False,
+        do_mask_strong_stellar_lines=False,
+        px_absorption_threshold=0.9,):
         """Optimises the continuum fit for all spectra in spectra_1d using the
         corresponding model telluric absorption spectrum.
+
+        Parameters
+        ----------
+        edge_px_to_exclude: int, default: 20
+            Pixels to exclude from each edge of the detector.
+
+        spec_interpolator: scipy.interpolate.interpolate.interp1d object
+            Interpolation object used to interpolate model stellar fluxes for
+            the purpose of masking out strong science lines. Defaults to None.
+
+        do_mask_uninformative_model_px: boolean, default False
+            If True, will not consider Molecfit model pixels with no telluric
+            absorption (i.e. any pixels with a value of 1.0).
+
+        do_mask_strong_stellar_lines: boolean, default: False
+            If True, we will also exclude strong science lines in addition to
+            excluding the detector edges.
+
+        px_absorption_threshold: float, default: 0.9
+            Continuum normalised pixels with flux values below this will be
+            considered to belong to strong science lines and will be masked
+            out during optimisation.
         """
         # Only proceed if we have a telluric model and we've already done a 
         # manual continuum normalisation
         if len(self.spectra_1d_telluric_model) == 0:
             raise Exception("No telluric model!")
+
+        # Can't mask stellar lines if we don't have a template interpolator or
+        # we don't have proper values for the RV and bcor
+        if do_mask_strong_stellar_lines: 
+            if self.rv_template_interpolator is None:
+                raise Exception("No template interpolator!")
+            elif np.isnan(self.rv) or np.isnan(self.bcor):
+                raise Exception("NaN values for RV or bcor.")
 
         # For every spectral segment, find best set of linear polynomial 
         # coefficients (i.e. gradient and Y offset) to divide science spectrum
@@ -1406,10 +1486,18 @@ class Observation(object):
             zip(self.spectra_1d, self.spectra_1d_telluric_model)):
             # Update the continuum polynomial
             sci_spec.optimise_continuum_polynomial_with_telluric_model(
-                tell_spec)
+                tell_spec,
+                edge_px_to_exclude=edge_px_to_exclude,
+                spec_interpolator=self.rv_template_interpolator,
+                rv=self.rv,
+                bcor=self.bcor,
+                do_mask_uninformative_model_px=do_mask_uninformative_model_px,
+                do_mask_strong_stellar_lines=do_mask_strong_stellar_lines,
+                px_absorption_threshold=px_absorption_threshold,)
 
             # Undo the previous continuum fit
-            sci_spec.undo_continuum_normalise()
+            if sci_spec.is_continuum_normalised:
+                sci_spec.undo_continuum_normalise()
 
             # Now update the continuum fit itself
             sci_spec.do_continuum_normalise()
