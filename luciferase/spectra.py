@@ -1028,7 +1028,9 @@ class Observation(object):
         alternate_annotation_height=True,
         linewidth=0.4,
         x_ticks=(25,12.5),
-        x_axis_padding=5,):
+        x_axis_padding=5,
+        annotate_arrow_height=1.01,
+        annotate_text_height=1.2):
         """Quickly plot all spectra in spectra_1d as a function of wavelength
         for inspection. Optionally can be saved as a pdf.
 
@@ -1180,23 +1182,21 @@ class Observation(object):
                     line_list["WL_vac(nm)"] < np.nanmax(spectrum.wave),)
                 line_mask = np.logical_and(depth_mask, wl_mask)
 
-                point_height = 1.1 * np.nanmedian(spectrum.flux)
-                text_height = 1.2 * point_height
-
                 for species_i, (species, wl) in enumerate(zip(
                     line_list["SpecIon"][line_mask].values, 
                     wl_new[line_mask])):
 
                     if alternate_annotation_height and species_i % 2 == 0:
-                        offset = (text_height - point_height)/4
+                        offset = (annotate_text_height
+                                  - annotate_arrow_height)/4
                     else:
                         offset = 0
 
                     # Plot text and arrow for each line
                     axis.annotate(
                         text=species,
-                        xy=(wl, point_height),
-                        xytext=(wl, text_height + offset),
+                        xy=(wl, annotate_arrow_height),
+                        xytext=(wl, annotate_text_height + offset),
                         horizontalalignment="center",
                         fontsize=line_annotation_fontsize,
                         arrowprops=dict(arrowstyle='->',lw=0.2),)

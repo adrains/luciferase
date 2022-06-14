@@ -12,8 +12,9 @@ follows:
     4) Do second RV fit, this time excluding regions affected by telluric 
        absorption using the Molecfit model and using a more focused least 
        squares approach.
-    5) Produce new input files for molecfit with better pixel masking
-    6) Run Molecfit a second time.
+    5) Optimise continuum placement using telluric model.
+    6) Produce new input files for molecfit with better pixel masking
+    7) Run Molecfit a second time.
 """
 import os
 import luciferase.spectra as lspec
@@ -23,7 +24,8 @@ import luciferase.utils as lutils
 # Setup, parameters, and filenames
 # -----------------------------------------------------------------------------
 DO_IDENTIFY_CONTINUUM_REGIONS = False
-DO_SAVE_MOLECFIT_MODEL = False
+DO_OPTIMISE_CONTINUUM_PLACEMENT = True
+DO_SAVE_MOLECFIT_MODEL = True
 PLOT_SPECTRA = True
 
 # Setup filenames
@@ -67,10 +69,12 @@ if DO_IDENTIFY_CONTINUUM_REGIONS:
 else:
     ob.load_continuum_wavelengths_from_file()
 
+ob.fit_polynomials_for_spectra_continuum_wavelengths()
 ob.continuum_normalise_spectra()
 
-# Fit RV
-ob.fit_rv(
+# Fit RV. There are two methods for this, CC for cross correlation, or LS for
+# LS. CC is recommended for doing a broad RV search initially.
+rv_fit_dict = ob.fit_rv(
     template_spectrum_fits=rv_template_path,
     segment_contamination_threshold=0.95,
     ignore_segments=[],
@@ -85,6 +89,19 @@ ob.fit_rv(
     verbose=False,
     figsize=(16,4),)
 
+# If we already have a Molecfit telluric model, we can load this in and use
+# it to optimise the placement of the stellar continuum before writing the
+# files necessary to run Molecfit again.
+if DO_OPTIMISE_CONTINUUM_PLACEMENT and os.path.exists(molecfit_model_path):
+    ob.initialise_molecfit_best_fit_model(
+        molecfit_model_fits_file=molecfit_model_path,
+        convert_um_to_nm=True,)
+
+    # Optimise continuum placement
+    ob.optimise_continuum_fit_using_telluric_model(
+        do_mask_uninformative_model_px=True,
+        do_mask_strong_stellar_lines=True,)
+
 # Save the Molecfit model
 if DO_SAVE_MOLECFIT_MODEL:
     ob.save_molecfit_fits_files(molecfit_out_path,)
@@ -92,12 +109,6 @@ if DO_SAVE_MOLECFIT_MODEL:
         molecfit_out_path,
         do_science_line_masking=True,
         do_plot_exclusion_diagnostic=True)
-
-# Load in the molecfit model
-else:
-    ob.initialise_molecfit_best_fit_model(
-        molecfit_model_fits_file=molecfit_model_path,
-        convert_um_to_nm=True,)
 
 # Plot molecfit model against spectra + linelist 
 vald_linelist = lspec.read_vald_linelist(vald_line_list_path)
