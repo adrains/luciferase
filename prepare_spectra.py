@@ -24,23 +24,48 @@ import luciferase.utils as lutils
 # Setup, parameters, and filenames
 # -----------------------------------------------------------------------------
 DO_IDENTIFY_CONTINUUM_REGIONS = False
-DO_OPTIMISE_CONTINUUM_PLACEMENT = True
-DO_SAVE_MOLECFIT_MODEL = True
+DO_OPTIMISE_CONTINUUM_PLACEMENT = False
+DO_SAVE_MOLECFIT_MODEL = False
+DO_SCIENCE_LINE_MASKING = False
 PLOT_SPECTRA = True
+SLIT_POS_SPEC_NUM = 1
+
+obj = "gj1214"
 
 # Setup filenames
 base_dir = "data_reduction"
-obj_dir = "wasp_107"
-molecfit_dir = "molecfit"
 
-sci_spec_fits = "wasp107_cr2res_obs_nodding_extracted_combined_blaze_corr.fits"
+if obj == "wasp107":
+    obj_dir = "wasp_107"
+    molecfit_dir = "molecfit"
+    sci_spec_fits = "wasp107_cr2res_obs_nodding_extracted_combined_blaze_corr.fits"
+    vald_linelist_txt = "vald_wasp107_0.05.txt"
+    molecfit_model_fits = "wasp_107_molecfit_corrected_rv.fits"
+    rv_template_fits = "template_wasp_107.fits"
 
-vald_linelist_txt = "vald_wasp107_0.05.txt"
+elif obj == "gj1214":
+    obj_dir = "gj1214"
+    molecfit_dir = "molecfit"
+    sci_spec_fits = "cr2res_obs_nodding_extractedA_blaze_corr.fits"
+    vald_linelist_txt = "vald_gj1214_0.05.txt"
+    molecfit_model_fits = "gj1214_molecfit_model_opt.fits"
+    rv_template_fits = "template_gj1214.fits"
 
-#molecfit_model_fits = "wasp_107_molecfit_model.fits"
-molecfit_model_fits = "wasp_107_molecfit_corrected_rv.fits"
+elif obj == "venus_night":
+    obj_dir = "venus"
+    molecfit_dir = "molecfit_night"
+    sci_spec_fits = "K_night_obj_collapsed_extr1D_blaze_corr.fits"
+    vald_linelist_txt = "vald_solar.txt"
+    molecfit_model_fits = "venus_molecfit_model_night_opt.fits"
+    rv_template_fits =  "template_sun.fits"
 
-rv_template_fits = "template_wasp_107.fits"
+elif obj == "venus_day":
+    obj_dir = "venus"
+    molecfit_dir = "molecfit_day"
+    sci_spec_fits = "K_day_obj_collapsed_extr1D_blaze_corr.fits"
+    vald_linelist_txt = "vald_solar.txt"
+    molecfit_model_fits = "venus_molecfit_model_day_opt.fits"
+    rv_template_fits =  "template_sun.fits"
 
 # Construct filenames
 cwd = os.getcwd()
@@ -60,7 +85,8 @@ if not os.path.isdir(molecfit_out_path):
 # -----------------------------------------------------------------------------
 # Initialise object
 ob = lspec.initialise_observation_from_crires_fits(
-    fits_file_extracted=sci_spec_path)
+    fits_file_extracted=sci_spec_path,
+    slit_pos_spec_num=SLIT_POS_SPEC_NUM,)
 
 # Do continuum fitting (either from scrath or via pre-computed params)
 if DO_IDENTIFY_CONTINUUM_REGIONS:
@@ -92,12 +118,12 @@ rv_fit_dict = ob.fit_rv(
 # If we already have a Molecfit telluric model, we can load this in and use
 # it to optimise the placement of the stellar continuum before writing the
 # files necessary to run Molecfit again.
-if DO_OPTIMISE_CONTINUUM_PLACEMENT and os.path.exists(molecfit_model_path):
+if os.path.exists(molecfit_model_path):
     ob.initialise_molecfit_best_fit_model(
         molecfit_model_fits_file=molecfit_model_path,
         convert_um_to_nm=True,)
 
-    # Optimise continuum placement
+if DO_OPTIMISE_CONTINUUM_PLACEMENT:
     ob.optimise_continuum_fit_using_telluric_model(
         do_mask_uninformative_model_px=True,
         do_mask_strong_stellar_lines=True,)
@@ -107,7 +133,7 @@ if DO_SAVE_MOLECFIT_MODEL:
     ob.save_molecfit_fits_files(molecfit_out_path,)
     ob.save_molecfit_pixel_exclude(
         molecfit_out_path,
-        do_science_line_masking=True,
+        do_science_line_masking=DO_SCIENCE_LINE_MASKING,
         do_plot_exclusion_diagnostic=True)
 
 # Plot molecfit model against spectra + linelist 
@@ -121,4 +147,5 @@ if PLOT_SPECTRA:
         do_save=True,
         figsize=(25,4),
         line_annotation_fontsize=7,
-        linewidth=0.2,)
+        linewidth=0.4,
+        y_lim_median_fac=2.5,)

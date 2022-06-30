@@ -138,7 +138,7 @@ class Spectrum1D(object):
 
     @snr.setter
     def snr(self, value):
-        self._snr = int(value)
+        self._snr = float(value)
 
     def update_snr(self):
         """Simple function to recompute SNR assuming Poisson uncertainties."""
@@ -329,8 +329,8 @@ class ObservedSpectrum(Spectrum1D):
         # Only do this if we have continuum wavelengths appropriate for our
         # polynomial order
         if len(self.continuum_wls) < (poly_order + 1):
-            print("Insufficient continuum points for spectrum ({}).".format(
-                print_label))
+            print("Insufficient continuum points ({}) for spectrum {}.".format(
+                len(self.continuum_wls), print_label))
             return
 
         # Find the closest pixel for each continuum wavelength, and then find
@@ -1028,9 +1028,11 @@ class Observation(object):
         alternate_annotation_height=True,
         linewidth=0.4,
         x_ticks=(25,12.5),
-        x_axis_padding=5,
+        x_axis_pad=5,
         annotate_arrow_height=1.01,
-        annotate_text_height=1.2):
+        annotate_text_height=1.2,
+        n_axes=1,
+        ndiv=6,):
         """Quickly plot all spectra in spectra_1d as a function of wavelength
         for inspection. Optionally can be saved as a pdf.
 
@@ -1091,8 +1093,22 @@ class Observation(object):
         x_ticks: float tuple, default: (25, 12.5)
             Major and minor x axis ticks respectively in Angstrom.
 
-        x_axis_padding: float, default: 5
+        x_axis_pad: float, default: 5
             Padding in Angstrom to set the x limits +/- the wavelength scale.
+
+        annotate_arrow_height: float, default: 1.01
+            Y height to plot the _arrows_ when annotating VALD lines.
+
+        annotate_text_height: float, default: 1.2
+            Y height to plot the _text_ when annotating VALD lines.
+
+        n_axes: int, default: 1
+            Number of separate axes to plot, spaced vertically, to better allow
+            many orders to be plotted at once.
+
+        ndiv: int, default: 6
+            Used in conjunction with n_axes to divide up the orders. Refers to
+            how many spectral segments appear on each axis.
         """
         # Plot sequence of spectra
         if do_close_plots:
@@ -1100,7 +1116,7 @@ class Observation(object):
 
         # Make a new subplot if we haven't been given a set of axes
         if fig is None and axis is None:
-            fig, axis = plt.subplots(figsize=figsize)
+            fig, axes = plt.subplots(nrows=n_axes, figsize=figsize)
 
         # Set y limits based on median flux
         fluxes = []
@@ -1108,6 +1124,12 @@ class Observation(object):
 
         # Loop over spectra array and plot each spectral segment
         for spec_i, spectrum in enumerate(self.spectra_1d):
+            # Make sure we have the right axis
+            if n_axes == 1:
+                axis = axes
+            else:
+                axis = axes[spec_i//ndiv]
+
             # Plot normalised spectra if requested
             if do_normalise:
                 norm_fac = np.nanmedian(spectrum.flux)
@@ -1201,25 +1223,40 @@ class Observation(object):
                         fontsize=line_annotation_fontsize,
                         arrowprops=dict(arrowstyle='->',lw=0.2),)
 
-        # Set height based on median fluxes
+        if n_axes == 1:
+            axes = [axes]
+        
         if not plot_continuum_poly:
             fluxes = np.concatenate(fluxes)
-            axis.set_ylim(-0.1, np.nanmedian(fluxes)*y_lim_median_fac)
-        
-        # Or set height based on continuum
         else:
             continua = np.concatenate(continua)
-            axis.set_ylim([-0.1, np.nanmedian(continua)*y_lim_median_fac])
 
-        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=x_ticks[1]))
-        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=x_ticks[0]))
+        for axis_i, axis in enumerate(axes):
+            # Set height based on median fluxes
+            if not plot_continuum_poly:
+                axis.set_ylim(-0.1,y_lim_median_fac)
+            
+            # Or set height based on continuum
+            else:
+                axis.set_ylim([-0.1, np.nanmedian(continua)*y_lim_median_fac])
 
-        axis.set_xlim(
-            self.spectra_1d[0].wave[0] - x_axis_padding,
-            self.spectra_1d[-1].wave[-1] + x_axis_padding)
+            axis.xaxis.set_minor_locator(
+                plticker.MultipleLocator(base=x_ticks[1]))
+            axis.xaxis.set_major_locator(
+                plticker.MultipleLocator(base=x_ticks[0]))
 
+            if n_axes == 1:
+               axis.set_xlim(
+                    self.spectra_1d[0].wave[0] - x_axis_pad,
+                    self.spectra_1d[-1].wave[-1] + x_axis_pad)
+            else:
+                axis.set_xlim(
+                    self.spectra_1d[axis_i*ndiv].wave[0] - x_axis_pad,
+                    self.spectra_1d[axis_i*ndiv+ndiv-1].wave[-1] + x_axis_pad)
+
+            axis.set_ylabel("Flux")
         axis.set_xlabel(r"Wavelength (nm)")
-        axis.set_ylabel("Flux")
+           
 
         fig.tight_layout()
 
@@ -1228,6 +1265,8 @@ class Observation(object):
             fig_name = "spectra_{}.pdf".format(
                 self.object_name.replace(" ", ""))
             plt.savefig(os.path.join(save_folder, fig_name,))
+            plt.savefig(os.path.join(
+                save_folder, fig_name.replace("pdf", "png"),), dpi=200,)
 
 
     def fit_polynomials_for_spectra_continuum_wavelengths(
@@ -1691,6 +1730,11 @@ class Observation(object):
         hdul_atm.append(table_hdu_atm)
         hdul_atm.writeto(atmosphere_save_path, overwrite=True)
 
+        hdul_atm.close()
+        hdul_output.close()
+        hdul_winc.close()
+        hdul_atm.close()
+
         # And finally save the basic pixel exclude file with only edge pixels.
         # To also mask out strong science lines, run this separately.
         self.save_molecfit_pixel_exclude(
@@ -1823,17 +1867,20 @@ class Observation(object):
         hdul_excl.append(table_hdu_pexcl)
         hdul_excl.writeto(pixel_save_path, overwrite=True)
 
+        hdul_excl.close()
+
         # Optionally plot a diagnostic
         if do_plot_exclusion_diagnostic:
             self.plot_spectra()
 
             # TODO: include this all in plotting function
-            plt.plot(
-                wave,
-                model_flux,
-                linewidth=0.5,
-                color="black",
-                linestyle="--",)
+            if do_science_line_masking:
+                plt.plot(
+                    wave,
+                    model_flux,
+                    linewidth=0.5,
+                    color="black",
+                    linestyle="--",)
 
             for px_min, px_max in zip(px_excl_min, px_excl_max):
                 plt.axvspan(
@@ -2274,6 +2321,8 @@ def initialise_observation_from_crires_fits(
                 # First check this order exists for this detector
                 if ("{:02.0f}{}".format(order, wl_col_suffix) 
                     not in hdu_data.columns.names):
+                    print("Det {}, Order {} missing, skipping".format(
+                        det_i+1, order))
                     continue
 
                 wave = hdu_data["{:02.0f}{}".format(order, wl_col_suffix)]
