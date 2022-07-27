@@ -378,7 +378,8 @@ class ObservedSpectrum(Spectrum1D):
         bcor=np.nan,
         do_mask_uninformative_model_px=False,
         do_mask_strong_stellar_lines=False,
-        px_absorption_threshold=0.9,):
+        px_absorption_threshold=0.9,
+        uncontaminated_threshold=0.999):
         """Uses a telluric model spectrum from Molecfit to optimise the 
         polynomial coefficients used for continuum normalisation. This is 
         possible as different physical process contribute to the stellar and
@@ -435,7 +436,7 @@ class ObservedSpectrum(Spectrum1D):
         if do_mask_uninformative_model_px:
             bad_px_mask = np.logical_or(
                 bad_px_mask,
-                telluric_model_spectrum.flux==1.0,)
+                telluric_model_spectrum.flux > uncontaminated_threshold,)
 
         # Mask out strong stellar lines
         if do_mask_strong_stellar_lines and spec_interpolator is not None:

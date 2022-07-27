@@ -25,6 +25,9 @@ from astropy.io import fits
 import os
 import subprocess
 
+# SWATH width for extraction. Old default was 800.
+SWATH_WIDTH = 400
+
 # Get current working directory
 cwd = os.getcwd()
 
@@ -131,7 +134,9 @@ for nod_set_i in range(n_sci//nAB//2):
     # And finally write the a file containing esorex reduction commands
     with open(reduce_script, 'a') as ww:
         ww.write("cd {}\n".format(os.path.join(cwd, dir)))
-        esorex_cmd = ('esorex cr2res_obs_nodding --extract_swath_width=800'
-                      + ' --extract_oversample=12 --extract_height=30 '
-                      + sof_file + '\n')
+        esorex_cmd = (
+            'esorex cr2res_obs_nodding '
+            + '--extract_swath_width={} '.format(SWATH_WIDTH)
+            + '--extract_oversample=12 --extract_height=30 '
+            + sof_file + '\n')
         ww.write(esorex_cmd)

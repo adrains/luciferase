@@ -23,6 +23,9 @@ import glob
 import subprocess
 from astropy.io import fits
 
+# SWATH width for extraction. Old default was 800.
+SWATH_WIDTH = 400
+
 # Get grating setting
 wl_setting = sys.argv[1]
 
@@ -35,17 +38,35 @@ else:
 # Get current working directory
 cwd = os.getcwd()
 
-bpm_file = "cr2res_cal_dark_{}_1.42705x{}_bpm.fits".format(
-    wl_setting, ndit)
+# New flats are 2 seconds, old flats are 1.42705 seconds check. We'd do this
+# automatically, but there have been issues previously with exposure time 
+# rounding for the 1.42705 second files
+FLAT_EXPS = [2, 1.42705]
+bpm_exists = False
 
-DARK_BPM = os.path.join(cwd, bpm_file)
+for flat_exp in FLAT_EXPS:
+    bpm_file = "cr2res_cal_dark_{}_{}x{}_bpm.fits".format(
+        wl_setting, flat_exp, ndit)
+
+    DARK_BPM = os.path.join(cwd, bpm_file)
+
+    # If BPM exists, note
+    if os.path.isfile(DARK_BPM):
+        bpm_exists = True
+        break
+
 MASTER_FLAT = os.path.join(cwd, "cr2res_cal_flat_Open_master_flat.fits")
 TRACE_WAVE = "/home/tom/pCOMM/cr2re-calib/{}_tw.fits".format(wl_setting)
 
 # No point continuing if our calibration files don't exist
-if (not os.path.isfile(DARK_BPM) or not os.path.isfile(MASTER_FLAT)
-    or not os.path.isfile(TRACE_WAVE)):
-    raise Exception("Calibration files not found.")
+if not bpm_exists:
+    raise Exception("BPM file not found.")
+
+if not os.path.isfile(MASTER_FLAT):
+    raise Exception("Master flat not found.")
+
+if not os.path.isfile(TRACE_WAVE):
+    raise Exception("Trace wave not found.")
 
 # Get a list of just the observations at our grating 
 fits_fns = glob.glob("CRIRE.*.fits")
@@ -115,7 +136,9 @@ with open(obs_sof, 'w') as sof:
 # And finally write the a file containing esorex reduction commands
 with open(shell_script, 'a') as ww:
     ww.write("cd {}\n".format(os.path.join(cwd, wl_setting)))
-    esorex_cmd = ('esorex cr2res_obs_nodding --extract_swath_width=800'
-                    + ' --extract_oversample=12 --extract_height=30 '
-                    + obs_sof + '\n')
+    esorex_cmd = (
+        'esorex cr2res_obs_nodding '
+        + '--extract_swath_width={} '.format(SWATH_WIDTH)
+        + '--extract_oversample=12 --extract_height=30 '
+        + obs_sof + '\n')
     ww.write(esorex_cmd)

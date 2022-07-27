@@ -24,13 +24,14 @@ import luciferase.utils as lutils
 # Setup, parameters, and filenames
 # -----------------------------------------------------------------------------
 DO_IDENTIFY_CONTINUUM_REGIONS = False
-DO_OPTIMISE_CONTINUUM_PLACEMENT = False
-DO_SAVE_MOLECFIT_MODEL = False
+DO_OPTIMISE_CONTINUUM_PLACEMENT = True
+DO_SAVE_MOLECFIT_MODEL = True
 DO_SCIENCE_LINE_MASKING = False
+DO_MASK_UNINFORMATIVE_MODEL_PX = True
 PLOT_SPECTRA = True
 SLIT_POS_SPEC_NUM = 1
 
-obj = "gj1214"
+obj = "HD1835"
 
 # Setup filenames
 base_dir = "data_reduction"
@@ -65,6 +66,14 @@ elif obj == "venus_day":
     sci_spec_fits = "K_day_obj_collapsed_extr1D_blaze_corr.fits"
     vald_linelist_txt = "vald_solar.txt"
     molecfit_model_fits = "venus_molecfit_model_day_opt.fits"
+    rv_template_fits =  "template_sun.fits"
+
+elif obj == "HD1835":
+    obj_dir = "HD1835"
+    molecfit_dir = "molecfit"
+    sci_spec_fits = "cr2res_obs_nodding_extractedA_blaze_corr.fits"
+    vald_linelist_txt = "vald_solar_yjhk.txt"
+    molecfit_model_fits = "BEST_FIT_MODEL.fits"
     rv_template_fits =  "template_sun.fits"
 
 # Construct filenames
@@ -125,7 +134,7 @@ if os.path.exists(molecfit_model_path):
 
 if DO_OPTIMISE_CONTINUUM_PLACEMENT:
     ob.optimise_continuum_fit_using_telluric_model(
-        do_mask_uninformative_model_px=True,
+        do_mask_uninformative_model_px=DO_MASK_UNINFORMATIVE_MODEL_PX,
         do_mask_strong_stellar_lines=True,)
 
 # Save the Molecfit model
