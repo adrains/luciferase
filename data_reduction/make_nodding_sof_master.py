@@ -38,10 +38,11 @@ else:
 # Get current working directory
 cwd = os.getcwd()
 
-# New flats are 2 seconds, old flats are 1.42705 seconds check. We'd do this
-# automatically, but there have been issues previously with exposure time 
-# rounding for the 1.42705 second files
-FLAT_EXPS = [2, 1.42705]
+# Flats have variable lengths. We'd do this automatically, but there have been
+# issues previously with exposure time rounding for the 1.42705 second files...
+# so a hacky approach for now. K band has 2 sec as new default (formerly 
+# 1.42705 sec), and Y band has 5 sec as default.
+FLAT_EXPS = [5, 2, 1.42705]
 bpm_exists = False
 
 for flat_exp in FLAT_EXPS:
