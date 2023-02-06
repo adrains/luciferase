@@ -1,5 +1,16 @@
 """Script to manually perform blaze correction on 1D extracted nodded spectra,
-given the appropriate calibration blaze flat, and save as a new fits file.
+given the appropriate calibration blaze flat, and save as a new fits file. This
+is part of a series of python scripts to assist with reducing raw CRIRES+ data,
+which should be run in the following order:
+
+    1 - make_calibration_sof.py             [reducing calibration files]
+    2 - make_nodding_sof_master.py          [reducing master AB nodded spectra]
+    3 - make_nodding_sof_split_nAB.py       [reducing nodding time series]
+    4 - blaze_correct_nodded_spectra.py     [blaze correcting all spectra]
+    5 - make_diagnostic_reduction_plots.py  [creating multipage PDF diagnostic]
+
+Note that this does *not* call esorex, as currently its blaze correction
+routine only runs alongside its splicing routine.
 
 Run as
 ------
@@ -16,13 +27,11 @@ happening on the command line (versus in python).
 Blaze corrected spectra are saved in the same location as the original science
 file, only now with a new extension (by default _baze_corr).
 """
-from multiprocessing.sharedctypes import Value
 import os
 import sys
 import glob
 import subprocess
 import numpy as np
-import matplotlib.pylab as plt
 from astropy.io import fits
 
 # This is the default list of files within the provided directory to correct
@@ -175,6 +184,9 @@ def blaze_corr_fits(
         # Save updated fits file
         sci_fits.flush()
 
+# -----------------------------------------------------------------------------
+# Run blaze correction
+# -----------------------------------------------------------------------------
 # When called as a script, we want to accept as input a path (potentially) with
 # wildcards) and from that perform blaze correction on all files within 
 # matching the FILE_PATTERNS listed above.

@@ -1,74 +1,115 @@
-"""Script to prepare SOF files for reducing master nodding reductions. Files
-are saved to a subdirectory with the grating setting name.
+"""Script to prepare SOF files and shell script for reduction of the master set
+of CRIRES+ nodded spectra. This is part of a series of python scripts to assist
+with reducing raw CRIRES+ data, which should be run in the following order:
 
-Note that currently this script assumes that all files in the directory were
-taken with the same instrument settings (i.e. grating).
+    1 - make_calibration_sof.py             [reducing calibration files]
+    2 - make_nodding_sof_master.py          [reducing master AB nodded spectra]
+    3 - make_nodding_sof_split_nAB.py       [reducing nodding time series]
+    4 - blaze_correct_nodded_spectra.py     [blaze correcting all spectra]
+    5 - make_diagnostic_reduction_plots.py  [creating multipage PDF diagnostic]
+
+This script assumes that the raw calibration data has already been reduced
+using make_calibration_sof.py and prepares one SOF file and a single shell 
+script to run the science reduction. We assume that all raw data and reduced
+calibration data is located in the same directory and was taken by the same 
+instrument/grating settings. 
+
+We preferentially use the BPM generated from the flats, rather than the darks.
+This is because in the IR the darks aren't truly dark due to thermal emission,
+and this causes issues with the global outlier detection used by default in the
+YJHK bands. As such, it is more robust to use the BPM generated from the flats
+while also setting a high BPM kappa threshold when calling cr2res_cal_dark.
+This ensures we only ever use the flat BPM, and our master dark isn't affected
+by erroneous bad pixel flags.
+
+Note that static trace wave files are inappropriate to use for extracting
+science data as they do not account for shifts in the wavelength scale due to 
+warming/cooling of the CRIRES instrument (as happened in late 2022). Static
+detector linearity files are appropriate so long as the SNR of our observations
+do not exceed SNR~200.
 
 Run as
 ------
-python make_nodding_sof_master.py [setting] [NDIT]
+python make_nodding_sof_master.py [setting]
 
 Where [setting] is the grating setting as listed in the fits headers.
 
 Output
 ------
-1x sof for darks
-1x sofs for flats
-1x reduce_raw_cals.sh shell script
+This script outputs a sof file for the master reduction, and and associated .sh
+file to call esorex to begin the reduction. Note that we do not need to provide
+a master dark to the reduction as the nodding process obviates the necessity.
+Both the SOF file and shell script are created in a new subdirector named after
+the wavelength setting.
+
+file/path/[setting]/[setting].sof
+    file/path/sci_frame_1.fits    OBS_NODDING_OTHER
+    ...
+    file/path/sci_frame_n.fits    OBS_NODDING_OTHER
+    file/path/trace_wave.fits     CAL_FLAT_TW_MERGED
+    static/detlin_coeffs.fits     CAL_DETLIN_COEFFS
+    file/path/dark_bpm.fits       CAL_FLAT_BPM
+    file/path/master_flat.fits    CAL_FLAT_MASTER
+
+file/path/reduce_master_[setting].sh
+    #!/bin/bash
+    cd file/path/[setting]/
+    esorex cr2res_obs_nodding --extract_swath_width=400 --extract_oversample=12
+        --extract_height=30 file/path/[setting]/[setting].sof
 """
 import sys
-import numpy as np
 import os
 import glob
 import subprocess
 from astropy.io import fits
 
-# SWATH width for extraction. Old default was 800.
-SWATH_WIDTH = 400
-
+# -----------------------------------------------------------------------------
+# Settings & setup
+# -----------------------------------------------------------------------------
 # Get grating setting
 wl_setting = sys.argv[1]
-
-# Get NDIT if provided, otherwise assume NDIT=1
-if len(sys.argv) > 2:
-    ndit = sys.argv[2]
-else:
-    ndit = 1
 
 # Get current working directory
 cwd = os.getcwd()
 
-# Flats have variable lengths. We'd do this automatically, but there have been
-# issues previously with exposure time rounding for the 1.42705 second files...
-# so a hacky approach for now. K band has 2 sec as new default (formerly 
-# 1.42705 sec), and Y band has 5 sec as default.
-FLAT_EXPS = [5, 2, 1.42705]
-bpm_exists = False
-
-for flat_exp in FLAT_EXPS:
-    bpm_file = "cr2res_cal_dark_{}_{}x{}_bpm.fits".format(
-        wl_setting, flat_exp, ndit)
-
-    DARK_BPM = os.path.join(cwd, bpm_file)
-
-    # If BPM exists, note
-    if os.path.isfile(DARK_BPM):
-        bpm_exists = True
-        break
-
+DETLIN_COEFF = "/home/tom/pCOMM/cr2res_cal_detlin_coeffs.fits"
 MASTER_FLAT = os.path.join(cwd, "cr2res_cal_flat_Open_master_flat.fits")
-TRACE_WAVE = "/home/tom/pCOMM/cr2re-calib/{}_tw.fits".format(wl_setting)
+FLAT_BPM = os.path.join(cwd, "cr2res_cal_flat_Open_bpm.fits")
+TRACE_WAVE = os.path.join(cwd, "cr2res_cal_flat_tw_merged.fits")
 
 # No point continuing if our calibration files don't exist
-if not bpm_exists:
-    raise Exception("BPM file not found.")
-
 if not os.path.isfile(MASTER_FLAT):
     raise Exception("Master flat not found.")
+
+if not os.path.isfile(FLAT_BPM):
+    raise Exception("Flat BPM not found.")
 
 if not os.path.isfile(TRACE_WAVE):
     raise Exception("Trace wave not found.")
 
+# Swath width in spectral dimension for extraction with reduce algorithm
+SWATH_WIDTH = 400           # Default: 800
+
+# Factor by which to oversample the extraction
+EXTRACT_OVERSAMPLE = 12     # Default: 7
+
+# Amount of slit to extract
+EXTRACT_HEIGHT = 30         # Default: -1 (i.e. full slit)
+
+# Detector linearity is computed from a series of flats with a range of NDIT in
+# three different grating settings to illuminate all pixels. This process takes
+# around ~8 hours and the resulting calibration file has SNR~200. Note that for
+# science files with SNR significantly above this, the linearisation process
+# will actually *degrade* the data quality. Linearity is primarily a concern
+# for science cases where one is interested in the relative depths of 
+# absorption features rather than their locations (i.e. an abundance analysis
+# would suffer more than a simply cross correlation). The use of detlin is
+# *not* recommended for calibration frames.
+use_detlin = True
+
+# -----------------------------------------------------------------------------
+# Read in files
+# -----------------------------------------------------------------------------
 # Get a list of just the observations at our grating 
 fits_fns = glob.glob("CRIRE.*.fits")
 fits_fns.sort()
@@ -100,6 +141,9 @@ elif n_a_frames != n_b_frames:
     raise Exception("Unmatched set of AB pairs, #A = {}, #B = {}".format(
         n_a_frames, n_b_frames))
 
+# -----------------------------------------------------------------------------
+# Initialise new shell script
+# -----------------------------------------------------------------------------
 # Check the new subdirector exists
 if not os.path.isdir(wl_setting):
     os.mkdir(wl_setting)
@@ -121,6 +165,9 @@ cmd = "chmod +x {}".format(shell_script)
 process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
 output, error = process.communicate()
 
+# -----------------------------------------------------------------------------
+# Write new shell script
+# -----------------------------------------------------------------------------
 obs_sof = os.path.join(cwd, wl_setting, "{}.sof".format(wl_setting))
 
 with open(obs_sof, 'w') as sof:
@@ -129,17 +176,22 @@ with open(obs_sof, 'w') as sof:
         obs_fn_path = os.path.join(cwd, obs_fn)
         sof.writelines("{}\tOBS_NODDING_OTHER\n".format(obs_fn_path))
 
-    # Then write bad pixel mask, master flat, and wave trace wave
-    sof.writelines("{}\tCAL_DARK_BPM\n".format(DARK_BPM))
+    # Then write trace wave, detlin, bpm, and master flat
+    sof.writelines("{}\tCAL_FLAT_TW_MERGED\n".format(TRACE_WAVE))
+
+    if use_detlin:
+        sof.writelines("{}\tCAL_DETLIN_COEFFS\n".format(DETLIN_COEFF))
+
+    sof.writelines("{}\tCAL_FLAT_BPM\n".format(FLAT_BPM))
     sof.writelines("{}\tCAL_FLAT_MASTER\n".format(MASTER_FLAT))
-    sof.writelines("{}\tUTIL_WAVE_TW\n".format(TRACE_WAVE))
 
 # And finally write the a file containing esorex reduction commands
 with open(shell_script, 'a') as ww:
     ww.write("cd {}\n".format(os.path.join(cwd, wl_setting)))
     esorex_cmd = (
         'esorex cr2res_obs_nodding '
-        + '--extract_swath_width={} '.format(SWATH_WIDTH)
-        + '--extract_oversample=12 --extract_height=30 '
+        + '--extract_swath_width={:0.0f} '.format(SWATH_WIDTH)
+        + '--extract_oversample={:0.0f} '.format(EXTRACT_OVERSAMPLE)
+        + '--extract_height={:0.0f} '.format(EXTRACT_HEIGHT)
         + obs_sof + '\n')
     ww.write(esorex_cmd)

@@ -1,5 +1,14 @@
 """Script to plot a diagnostic plot to easily inspect how a CRIRES reduction
-went. The diagnostic plot consists of the trace waves from the A and B frames
+went. This is part of a series of python scripts to assist with reducing raw
+CRIRES+ data, which should be run in the following order:
+
+    1 - make_calibration_sof.py             [reducing calibration files]
+    2 - make_nodding_sof_master.py          [reducing master AB nodded spectra]
+    3 - make_nodding_sof_split_nAB.py       [reducing nodding time series]
+    4 - blaze_correct_nodded_spectra.py     [blaze correcting all spectra]
+    5 - make_diagnostic_reduction_plots.py  [creating multipage PDF diagnostic]
+
+The diagnostic plot consists of the trace waves from the A and B frames
 overplotted on their respective images; as well as the overplotted A, B, and
 combined spectra for each detector/order. This is saved as a single PDF in the
 same directory as the reduced data. This script can be called on multiple 
@@ -25,7 +34,6 @@ provided [run_on_blaze_corr_spec] = False.
 import os
 import sys
 import glob
-from matplotlib.style import use
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -220,7 +228,7 @@ for folder in folders:
 
     spec_i = 0
 
-    # Plot each order
+    # Plot each order: TODO: A/B/combined indexing might be different
     for order_i in range(n_orders):
         for det_i in range(3):
             # Not all orders are available for all detectors. Abort if either:

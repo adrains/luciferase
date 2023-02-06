@@ -1,10 +1,27 @@
-"""Originally written by Alexis Lavail, modified by Adam Rains.
+"""Script to prepare SOF files and shell script for reduction of time series
+CRIRES+ nodded spectra. This is part of a series of python scripts to assist
+with reducing raw CRIRES+ data, which should be run in the following order:
 
-Script to generate a series of SOF files for CRIRES+ reductions in nodding mode
-for time-series observations.
+    1 - make_calibration_sof.py             [reducing calibration files]
+    2 - make_nodding_sof_master.py          [reducing master AB nodded spectra]
+    3 - make_nodding_sof_split_nAB.py       [reducing nodding time series]
+    4 - blaze_correct_nodded_spectra.py     [blaze correcting all spectra]
+    5 - make_diagnostic_reduction_plots.py  [creating multipage PDF diagnostic]
 
-Run as:
-    python3 nodding_make_sof_split_nAB.py [nAB] [master_sof]
+This script assumes that the raw calibration data *and* the master AB nodded 
+spectra has already been reduced using make_calibration_sof.py and 
+make_nodding_sof_master.py respectively. It prepares one SOF file per time step
+(each placed within a separate subfolder) and a single shell script to run the 
+time-series science reduction. We assume that all raw data and reduced 
+calibration data is located in the same directory and was taken by the same 
+instrument/grating settings. We reference the SOF created for the master
+reduction--specifically the calibration files listed within--when creating our
+SOFs here, which is why this script requires make_nodding_sof_master.py to have
+been run previously.
+
+Run as
+------
+python nodding_make_sof_split_nAB.py [nAB] [master_sof]
 
 Where you replace [nAB] with the number of nodding observations you would like
 to reduce together. E.G. nAB=1 will combine the nearest AB/BA pair in time, 
@@ -16,8 +33,35 @@ Creates a nod.sof SOF file and a reduce_[nAB]xAB.sh script that reduces your
 nodding observations for each nodding set, and places each in a separate 
 subfolder for set/timestep with format [nAB]xAB_[ii]/ where ii is the nodding
 set.
+
+Output
+------
+This script outputs a sof file for *each* set of AB frames to a new subfolder,
+and a single .sh file to call esorex to begin the reductions for *all* sets of
+AB frames. Note that, like the master reductions, we don't need to provide a
+master dark frame since the process of nodding obviates the need.
+
+[nAB]_[nod_set_i]/[nAB]_[nod_set_i].sof
+    file/path/[nAB]_[nod_set_i]/sci_frame_a_1.fits    OBS_NODDING_OTHER
+    file/path/[nAB]_[nod_set_i]/sci_frame_b_1.fits    OBS_NODDING_OTHER
+    ...
+    file/path/[nAB]_[nod_set_i]/sci_frame_a_n.fits    OBS_NODDING_OTHER
+    file/path/[nAB]_[nod_set_i]/sci_frame_b_n.fits    OBS_NODDING_OTHER
+    file/path/trace_wave.fits                         CAL_FLAT_TW_MERGED
+    static/detlin_coeffs.fits                         CAL_DETLIN_COEFFS
+    file/path/dark_bpm.fits                           CAL_FLAT_BPM
+    file/path/master_flat.fits                        CAL_FLAT_MASTER
+
+reduce_[nAB]xAB.sh
+    #!/bin/bash
+    cd file/path/[nAB]_00/
+    esorex cr2res_obs_nodding --extract_swath_width=400 --extract_oversample=12
+        --extract_height=30 file/path/[nAB]_00/[nAB]_00.sof
+    ...
+    cd file/path/[nAB]_NN/
+    esorex cr2res_obs_nodding --extract_swath_width=400 --extract_oversample=12
+        --extract_height=30 file/path/[nAB]_NN/[nAB]_NN.sof
 """
-from functools import reduce
 import sys
 import numpy as np
 import glob
@@ -25,9 +69,9 @@ from astropy.io import fits
 import os
 import subprocess
 
-# SWATH width for extraction. Old default was 800.
-SWATH_WIDTH = 400
-
+# -----------------------------------------------------------------------------
+# Settings & setup
+# -----------------------------------------------------------------------------
 # Get current working directory
 cwd = os.getcwd()
 
@@ -41,6 +85,18 @@ master_sof = sys.argv[2]
 if ".sof" not in master_sof:
     print("Are you sure {} is a .sof file?".format(master_sof))
 
+# Swath width in spectral dimension for extraction with reduce algorithm
+SWATH_WIDTH = 400           # Default: 800
+
+# Factor by which to oversample the extraction
+EXTRACT_OVERSAMPLE = 12     # Default: 7
+
+# Amount of slit to extract
+EXTRACT_HEIGHT = 30         # Default: -1 (i.e. full slit)
+
+# -----------------------------------------------------------------------------
+# Read in files
+# -----------------------------------------------------------------------------
 # Get the list of science fits files
 files_all = np.sort(glob.glob('CR*fits'))
 
@@ -64,10 +120,12 @@ elif (n_sci // 2) % nAB != 0:
 if not os.path.isfile(master_sof):
     raise FileNotFoundError("No master SOF file, aborting.")
 else:
-    # Open the master SOF and grab last three lines which will be the 
-    # calibration files
+    # Open the master SOF and grab only the lines containing calibration files.
+    # These will be the lines *without* 'OBS_NODDING_OTHER'
     with open(master_sof, "r") as cal:
-        cal_lines = cal.readlines()[-3:]
+        cal_lines_all = cal.readlines()
+        cal_lines = \
+            [cl for cl in cal_lines_all if "OBS_NODDING_OTHER" not in cl]
 
 # Sort the science observations into either A or B frames
 sci_A, sci_B = [], []
@@ -83,6 +141,9 @@ for sci_i in range(n_sci):
 if len(sci_A) != len(sci_B):
     raise Exception("Warning! # A frames =/= # B frames, aborting.")
 
+# -----------------------------------------------------------------------------
+# Initialise new shell script
+# -----------------------------------------------------------------------------
 # Before we start looping, archive the old reduce.sh script if it exists
 reduce_script = "reduce_{}xAB.sh".format(nAB)
 
@@ -99,6 +160,9 @@ cmd = "chmod +x {}".format(reduce_script)
 process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
 output, error = process.communicate()
 
+# -----------------------------------------------------------------------------
+# Write SOF and update shell script for each AB pair
+# -----------------------------------------------------------------------------
 print("{} science files found, #A nod frames == #B nod frames.".format(n_sci))
 print("Generating SOFs for {} timesteps with nAB={} per step.\n".format(
     n_sci//nAB//2, nAB))
@@ -136,7 +200,8 @@ for nod_set_i in range(n_sci//nAB//2):
         ww.write("cd {}\n".format(os.path.join(cwd, dir)))
         esorex_cmd = (
             'esorex cr2res_obs_nodding '
-            + '--extract_swath_width={} '.format(SWATH_WIDTH)
-            + '--extract_oversample=12 --extract_height=30 '
+            + '--extract_swath_width={:0.0f} '.format(SWATH_WIDTH)
+            + '--extract_oversample={:0.0f} '.format(EXTRACT_OVERSAMPLE)
+            + '--extract_height={:0.0f} '.format(EXTRACT_HEIGHT)
             + sof_file + '\n')
         ww.write(esorex_cmd)
