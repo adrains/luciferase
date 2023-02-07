@@ -128,7 +128,10 @@ if len(sys.argv) > 2:
                         for fn in EXTRACTED_FILES]
     else:
         pdf_base = "reduction_diagnostic"
-
+else:
+    run_on_blaze_corr_spec = False
+    pdf_base = "reduction_diagnostic"
+    
 # Figure out just how many folder's we're working with
 folders = glob.glob(data_dir)
 folders.sort()

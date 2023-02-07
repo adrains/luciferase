@@ -34,7 +34,7 @@ science frames when downloading from the ESO archive. In this case, they can be
 downloaded manually by querying the night in question using a specific grating.
 These calibrations are taken under the program ID 60.A-9051(A). For simplicity,
 the settings for querying should be:
- - DATE OBS     --> YYYY MM DD (the morning after)
+ - DATE OBS     --> YYYY MM DD (sometimes the night, otherwise morning after)
  - DPR CATG     --> CALIB
  - INS WLEN ID  --> [wl_setting]
 
