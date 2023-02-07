@@ -21,7 +21,7 @@ been run previously.
 
 Run as
 ------
-python make_nodding_make_sof_split_nAB.py [nAB] [master_sof]
+python make_nodding_sof_split_nAB.py [nAB] [master_sof]
 
 Where you replace [nAB] with the number of nodding observations you would like
 to reduce together. E.G. nAB=1 will combine the nearest AB/BA pair in time, 
