@@ -279,13 +279,20 @@ for folder in folders:
                     label = "{}:{:0.0f}".format(
                                 label, obs.spectra_1d[spec_i].order_i)
                     
+                    # Mask slit function to avoid spikes
+                    slit_func = obs.spectra_1d[spec_i].slit_func.copy()
+                    #slit_func[slit_func > 1] = np.nan
+
                     sf_line, = axes[n_ax_base-1, det_i].plot(
                         xx,
-                        obs.spectra_1d[spec_i].slit_func,
+                        slit_func,
                         linestyle=fmts[obs_i],
                         linewidth=0.2,
                         label=label,
                         alpha=0.8,)
+
+                    # Set limit
+                    axes[n_ax_base-1, det_i].set_ylim([0, 0.4])
 
                     # Label
                     y_max = np.max(obs.spectra_1d[spec_i].slit_func)
@@ -408,15 +415,15 @@ for folder in folders:
 
     plt.suptitle(title)
 
-    # Only show if we're plotting a single PDF
-    if len(folders) == 1:
-        plt.show()
-
     # Save plot
     pdf_name = os.path.join(folder, "reduction_diagnostic.pdf")
     all_diagnostic_pdfs.append(pdf_name)
 
     plt.savefig(pdf_name)
+
+    # Only show if we're plotting a single PDF
+    if len(folders) == 1:
+        plt.show()
 
 # All plots are made, if we made more than one stitch them together
 # https://stackoverflow.com/questions/3444645/merge-pdf-files

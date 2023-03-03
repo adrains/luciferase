@@ -7,7 +7,8 @@ def fit_seeing_to_slit_func(
     slit_func,
     arcsec_per_px=0.059,
     resampling_fac=12,
-    slit_height_arcsec=10,):
+    slit_height_arcsec=10,
+    do_mask_slit_func=True,):
     """Function to fit a 1D Gaussian to CRIRES+ slit func data.
 
     Parameters
@@ -26,6 +27,9 @@ def fit_seeing_to_slit_func(
     slit_height_arcsec: float, default: 10
         Height of the **full** slit. Not currently used.
 
+    do_mask_slit_func: boolean, default: True
+        Mask out artefacts in the slit function during fitting.
+
     Returns
     -------
     fwhm: float
@@ -35,6 +39,11 @@ def fit_seeing_to_slit_func(
     fitter = modeling.fitting.LevMarLSQFitter()
 
     gaussian_model = modeling.models.Gaussian1D()
+
+    # Mask the slit function during fitting to avoid weird spikes/artefacts
+    if do_mask_slit_func:
+        slit_func = slit_func.copy()
+        slit_func[slit_func > 1] = np.nan
 
     # Setup x array in units of arcsec
     n_px = len(slit_func)

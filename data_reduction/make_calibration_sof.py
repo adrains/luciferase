@@ -86,6 +86,7 @@ import os
 import glob
 import subprocess
 import pandas as pd
+import matplotlib.pyplot as plt
 from astropy.io import fits
 
 # -----------------------------------------------------------------------------
@@ -206,14 +207,45 @@ flat_ndits = set(cal_frames[is_flat]["ndit"])
 wave_une_ndits = set(cal_frames[is_wave_une]["ndit"])
 wave_fpet_ndits = set(cal_frames[is_wave_fpet]["ndit"])
 
-if len(flat_exps) > 1 or len(flat_ndits) > 1:
-    raise Exception("There should only be one flat exp/NDIT settting")
+if  len(flat_ndits) > 1:
+    raise Exception("There should only be one flat NDIT settting")
 if len(wave_une_exps) > 1 or len(wave_une_ndits) > 1:
     raise Exception("There should only be one wave Une exp/NDIT settting")
 if len(wave_fpet_exps) > 1 or len(wave_fpet_ndits) > 1:
     raise Exception("There should only be one wave FPET exp/NDIT settting")
 
-flat_exp = list(flat_exps)[0]
+# If we have multiples exposures for the flats, raise a warning, plot a
+# diagnostic, and continue with the higher exposure. The user can then quickly
+# check the plot for saturation and hopefully keep things the same.
+if len(flat_exps) > 1 or len(flat_ndits) > 1:
+    print('Warning, multiple sets of flats with exps: {}'.format(flat_exps))
+    print("Have adopted higher exp. Check flat_comparison.pdf for saturation.")
+
+    # Grab one of each flat (since we've sorted by filename, we should be safe
+    # to grab the first and last file)
+    fns = cal_frames[is_flat]["fn"].values[[0,-1]]
+    exps = cal_frames[is_flat]["exp"].values[[0,-1]]
+
+    # Plot a comparison for easy reference to check for saturation
+    fig, axes = plt.subplots(2,3)
+    for flat_i in range(2):
+        with fits.open(fns[flat_i]) as flat:
+            for chip_i in np.arange(1,4):
+                xx = axes[flat_i, chip_i-1].imshow(flat[chip_i].data)
+                fig.colorbar(xx, ax=axes[flat_i, chip_i-1])
+
+            axes[flat_i, 0].set_ylabel("Exp = {}".format(exps[flat_i]))
+
+    plt.savefig("flat_comparison.pdf")
+    plt.close("all")
+
+    # Grab the larger exposure
+    flat_exp = \
+        list(flat_exps)[np.argmax(np.array(list(flat_exps)).astype(float))]
+
+else:
+    flat_exp = list(flat_exps)[0]
+
 wave_une_exp = list(wave_une_exps)[0]
 wave_fpet_exp = list(wave_fpet_exps)[0]
 
