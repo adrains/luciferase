@@ -60,7 +60,7 @@ print("Sigma clipping and cleaning data...")
 obs_spec_clipped, bad_px_mask = tu.sigma_clip_observations(
     obs_spec=obs_spec,
     bad_px_replace_val="interpolate",
-    time_steps=transit_info["jd"].values,)
+    time_steps=transit_info["jd_mid"].values,)
 
 print("{:,} bad pixels found.".format(np.sum(bad_px_mask)))
 
@@ -71,7 +71,7 @@ tu.save_transit_info_to_fits(
     sigmas=sigmas,
     detectors=detectors,
     orders=orders,
-    transit_df=transit_info,
-    planet_df=syst_info,
+    transit_info=transit_info,
+    syst_info=syst_info,
     fits_save_dir=save_path,
     star_name=star_name,)

@@ -414,10 +414,126 @@ def cross_correlate_nodded_spectra():
     """
     pass
 
-# -----------------------------------------------------------------------------
-# Model Functions
-# -----------------------------------------------------------------------------
-pass
+
+def doppler_shift(x, y, gamma, y2):
+    """Doppler shift a provided flux array. Note that this function currently
+    mirrors the ends for pixels not in the original array.
+
+    TODO: replace mirroring with NaNs using standard scipy interpolation.
+
+    Parameters
+    ----------
+    x: 1D float array
+        Wavelength vector of shape [n_wave].
+
+    y: 1D float array
+        Flux vector of shape [n_wave].
+
+    gamma: float
+       Unitless Doppler shift, where a positive value of gamma means red shift.
+
+    y2: 1D float array
+        Flux derivative of shape [n_wave].
+
+    Returns
+    -------
+    flux_rv_shifted: 1D float array
+        Doppler shifted flux vector of shape [n_wave].
+    """
+    # Positive gamma means red shift
+    n = len(x)
+
+    # TODO: Nik's original function allowed for y2 to not have the same length
+    # as x, but it seems that would never be the case? This assertion is here
+    # to check this.
+    assert len(x) == len(y) and len(y) == len(y2)
+
+    # Compute steps in wavelength and padding in pixels
+    dx1 = x[1] - x[0]
+    pad1 = np.max(np.ceil(-gamma*x[0]/dx1), 0)
+
+    dx2 = x[-1] - x[-2]
+    pad2 = np.max(np.ceil(gamma*x[-1]/dx2), 0)
+
+    # Pad arrays to avoid extrapolation
+    # For the spectrum mirror points relative to the ends
+    if pad1 == 0 and pad2 == 0:
+        xx = x
+        yy = y
+        yy2 = y2
+
+    # Mirror the *end* of the array
+    elif pad1 == 0 and pad2 > 0:
+        x_pad = x[-1] + (np.arange(pad2)+1)*dx2
+        xx = np.concatenate((x, x_pad))
+
+        y_pad = y[n-np.arange(pad2)-2]
+        yy = np.concatenat((y, y_pad))
+        
+        yy2_pad = -y2[-np.arange(pad2)-2]
+        yy2 = np.concatenate((y2, yy2_pad))
+
+    # Mirror the *start* of the array
+    elif pad1 > 0 and pad2 == 0:
+        x_pad = x[0] - (pad1-np.arange(pad1))*dx1
+        xx = np.concatenate((x_pad, x))
+
+        y_pad = y[pad1-np.arange(pad1)]
+        yy = np.arange((y_pad, y))
+
+        yy2_pad = -y2[pad1-np.arange(pad1)]
+        yy2 = np.concatenate((yy2_pad, y2))
+
+    # Mirror *both* ends of the array
+    elif pad1 > 0 and pad2 > 0:
+        x_pad_start = x[0]-(pad1-np.arange(pad1))*dx1
+        x_pad_end = x[n-1]+(np.arange(pad2)+1)*dx2
+        xx = np.concatenate((x_pad_start, x, x_pad_end))
+
+        y_pad_start = y[pad1-np.arange(pad1)]
+        y_pad_end = y[n-np.arange(pad2)-2]
+        yy = np.concatenate((y_pad_start, y, y_pad_end))
+
+        yy2_pad_start = -y2[pad1-np.arange(pad1)]
+        yy2_pad_end = -y2[n-np.arange(pad2)-2]
+        yy2 = np.concatenate((yy2_pad_start, y2, yy2_pad_end))
+
+    # Bezier interpolation
+    flux_rv_shifted = bezier_interp(xx, yy, yy2, x*(1.0+gamma))
+
+    return flux_rv_shifted
+
+    """
+    if len(y2) == n:
+    
+    else:
+        # Compute steps in wavelength and padding in pixels
+        dx1 = x[1]-x[0]
+        pad1 = fix(gamma*x[0]/dx1)<0           # TODO <>
+        dx2 = x[n-1]-x[n-2]
+        pad2 = fix(gamma*x[n-1]/dx2)>0         # TODO <>
+
+        # Pad arrays to avoid extrapolation
+        # For the spectrum mirror points relative to the ends
+        if pad1 == 0 and pad2 == 0:
+            xx=x
+            yy=y
+        elif pad1 == 0 and pad2 > 0:
+            xx=[x,x[n-1]+(np.arange(pad2)+1)*dx2]
+            yy=[y,y[n-np.arange(pad2)-2]]
+
+        elif pad1 > 0 and pad2 == 0:
+            xx=[x[0 ]-(pad1-np.arange(pad1))*dx1,x]
+            yy=[y[pad1-np.arange(pad1)],y]
+
+        elif pad1 > 0 and pad2 > 0:
+            xx=[x[0 ]-(pad1-np.arange(pad1))*dx1,x,x[n-1]+(np.arange(pad2)+1)*dx2]
+            yy=[y[pad1-np.arange(pad1)],y,y[n-np.arange(pad2)-2]]
+
+        # Bezier interpolation
+        yy2 = bezier_init(xx,yy,)
+        rr = bezier_interp(xx, yy, yy2, x*(1.0+gamma))
+    """
 
 # -----------------------------------------------------------------------------
 # Preparation/Import Functions
@@ -547,14 +663,20 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
     # Now that we have our raw fits file in the correct nodding position, grab
     # all of the header information we need
     with fits.open(raw_fits_path) as fits_file:
-        mjd1 = fits_file[0].header["MJD-OBS"]
-        exptime1 = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
+        # Extract and compute times at start, mid, and end points
+        exptime = fits_file[0].header["HIERARCH ESO DET SEQ1 EXPTIME"]
+        mjd_start = fits_file[0].header["MJD-OBS"]
+        mjd_mid = mjd_start + (exptime / 3600 / 24)/2
+        mjd_end = mjd_start + (exptime / 3600 / 24)
+
+        jd_start = 2400000.5 + mjd_start
+        jd_mid = 2400000.5 + mjd_mid
+        jd_end = 2400000.5 + mjd_end
+
+        # Get the start and end airmasses, + compute the midpoint
         airm_start = fits_file[0].header["HIERARCH ESO TEL AIRM START"]
         airm_end = fits_file[0].header["HIERARCH ESO TEL AIRM END"]
-        
-        airmass = (airm_start+airm_end)*0.5 # Determine airmass at midpoint
-        mjd = mjd1 + (exptime1 / 3600 / 24)/2  # Determine MJD at exp mid point
-        jd = 2400000.5 + mjd                # Convert to Julian Date
+        airmass_mid = (airm_start+airm_end)*0.5
 
         ra2000 = fits_file[0].header["RA"]
         de2000 = fits_file[0].header["DEC"]
@@ -582,7 +704,7 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
         #  - https://docs.astropy.org/en/stable/coordinates/velocities.html
         bary_corr = sc.radial_velocity_correction(
             kind="barycentric",
-            obstime=Time(mjd, format="mjd"),
+            obstime=Time(mjd_mid, format="mjd"),
             location=vlt,)
 
         bary_corr = -bary_corr.to(u.km/u.s)
@@ -590,13 +712,13 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
         # Calculate the heliocentric correction
         hel_corr = sc.radial_velocity_correction(
             kind="heliocentric",
-            obstime=Time(mjd, format="mjd"),
+            obstime=Time(mjd_mid, format="mjd"),
             location=vlt,)
 
         hel_corr = -hel_corr.to(u.km/u.s)
 
         # Compute gamma, the unitless doppler shift (vel/c_light)
-        gamma = -bary_corr / const.c.cgs.to(u.km/u.s)
+        #gamma = -bary_corr / const.c.cgs.to(u.km/u.s)
 
     # Now that we've grabbed all the header information, go back to the 
     # redued file for the actual spectra
@@ -665,12 +787,16 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
         "order_nums":order_nums,
         "ra":ra2000,
         "dec":de2000,
-        "mjd":mjd,
-        "jd":jd,
-        "airmass":airmass,
+        "exptime_sec":exptime,
+        "mjd_start":mjd_start,
+        "mjd_mid":mjd_mid,
+        "mjd_end":mjd_end,
+        "jd_start":jd_start,
+        "jd_mid":jd_mid,
+        "jd_end":jd_end,
+        "airmass":airmass_mid,
         "bcor":bary_corr.value,
         "hcor":hel_corr.value,
-        "gamma":gamma.value,
         "nod_pos":nod_pos,
         "raw_file":raw_fits_path,
     }
@@ -747,8 +873,9 @@ def extract_nodding_time_series(
     orders = []     # [n_spec]
 
     # Initialise pandas data frame for time series results
-    df_cols = ["mjd", "jd", "phase", "airmass", "bcor", "hcor", "gamma", "ra", 
-        "dec", "nod_pos", "raw_file"]
+    df_cols = ["mjd_start", "mjd_mid", "mjd_end", "jd_start", "jd_mid", 
+        "jd_end", "airmass", "bcor", "hcor", "ra", "dec", "exptime_sec", 
+        "nod_pos", "raw_file"]
 
     transit_df = pd.DataFrame(
         data=np.full((n_files, len(df_cols)), np.nan),
@@ -776,17 +903,8 @@ def extract_nodding_time_series(
         orders.append(nod_pos_dict["order_nums"])
 
         # Update dataframe
-        transit_df.loc[file_i, "mjd"] = nod_pos_dict["mjd"]
-        transit_df.loc[file_i, "jd"] = nod_pos_dict["jd"]
-        #transit_df.loc[file_i, "phase"] = nod_pos_dict["phase"]
-        transit_df.loc[file_i, "airmass"] = nod_pos_dict["airmass"]
-        transit_df.loc[file_i, "bcor"] = nod_pos_dict["bcor"]
-        transit_df.loc[file_i, "hcor"] = nod_pos_dict["hcor"]
-        transit_df.loc[file_i, "gamma"] = nod_pos_dict["gamma"]
-        transit_df.loc[file_i, "mjd"] = nod_pos_dict["mjd"]
-        transit_df.loc[file_i, "ra"] = nod_pos_dict["dec"]
-        transit_df.loc[file_i, "nod_pos"] = nod_pos_dict["nod_pos"]
-        transit_df.loc[file_i, "raw_file"] = nod_pos_dict["raw_file"]
+        for col in df_cols:
+            transit_df.loc[file_i, col] = nod_pos_dict[col]
 
     # All done, convert everything to numpy format
     waves = np.stack(waves)
@@ -796,7 +914,7 @@ def extract_nodding_time_series(
     orders = np.vstack(orders)
 
     # Sort arrays on MJDs
-    sorted_i = np.argsort(transit_df["mjd"].values)
+    sorted_i = np.argsort(transit_df["mjd_mid"].values)
 
     waves = waves[sorted_i]
     fluxes = fluxes[sorted_i]
@@ -805,7 +923,7 @@ def extract_nodding_time_series(
     orders = orders[sorted_i]
 
     # Sort dataframe
-    transit_df.sort_values("mjd", inplace=True)
+    transit_df.sort_values("mjd_mid", inplace=True)
 
     # Reassign indices so they are in chronological order
     transit_df.reset_index(drop=True, inplace=True)
@@ -820,8 +938,8 @@ def save_transit_info_to_fits(
     sigmas,
     detectors,
     orders,
-    transit_df,
-    planet_df,
+    transit_info,
+    syst_info,
     fits_save_dir,
     star_name,):
     """Saves prepared wavelength, spectra, sigma, detector, order, transit, and
@@ -857,12 +975,12 @@ def save_transit_info_to_fits(
         Array associating spectral segments to CRIRES+ order number of shape 
         [n_spec].
     
-    transit_df: pandas DataFrame
+    transit_info: pandas DataFrame
         Pandas DataFrame with header/computed information about each timestep.
         Has columns: [mjd, jd, phase, airmass, bcor, hcor, gamma, ra, dec, 
         nod_pos, raw_file] and is of length [n_phase].
 
-    planet_df: pandas DataFrame
+    syst_info: pandas DataFrame
         TODO
 
     fits_save_dir: string
@@ -902,16 +1020,16 @@ def save_transit_info_to_fits(
     # HDU 4: orders
     order_img =  fits.PrimaryHDU(orders)
     order_img.header["EXTNAME"] = (
-        "Orders", "CRIRES+ grating order associated with each spectal segment")
+        "ORDERS", "CRIRES+ grating order associated with each spectal segment")
     hdu.append(order_img)
 
     # HDU 5: table of observational information for each phase
-    transit_tab = fits.BinTableHDU(Table.from_pandas(transit_df))
+    transit_tab = fits.BinTableHDU(Table.from_pandas(transit_info))
     transit_tab.header["EXTNAME"] = ("TRANSIT_INFO", "Observation info table")
     hdu.append(transit_tab)
     
     # HDU 6: table of planet system information
-    planet_tab = fits.BinTableHDU(Table.from_pandas(planet_df))
+    planet_tab = fits.BinTableHDU(Table.from_pandas(syst_info.reset_index()))
     planet_tab.header["EXTNAME"] = ("SYST_INFO", "Table of planet info")
     hdu.append(planet_tab)
 
@@ -989,6 +1107,9 @@ def load_transit_info_from_fits(fits_load_dir, star_name,):
         transit_info = Table(fits_file["TRANSIT_INFO"].data).to_pandas()
         syst_info = Table(fits_file["SYST_INFO"].data).to_pandas()
 
+        # Set header for syst_info
+        syst_info.set_index("parameter", inplace=True)
+
     # All done, return
     return waves, obs_spec, sigmas, detectors, orders, transit_info, \
         syst_info
@@ -1002,35 +1123,46 @@ def save_transit_model_results_to_fits():
 
 def calculate_transit_timestep_info(transit_info, syst_info,):
     """Iterate over each time step and compute planet phase, planet XYZ
-    position, planet XYZ velocities, and associated mu value. These values are
-    then added to each row in our transit_info DataFrame.
+    position, planet XYZ velocities, and associated mu value at the start, mid-
+    point, and end of each exposure. These values are then added to each row in
+    our transit_info DataFrame.
 
     Parameters
     ----------
     transit_info: pandas DataFrame
         Pandas DataFrame with header/computed information about each timestep.
-        Has columns: [mjd, jd, phase, airmass, bcor, hcor, gamma, ra, dec, 
-        nod_pos, raw_file] and is of length [n_phase].
+        Has columns:
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file',] and is of length [n_phase].
 
     syst_info: pandas DataFrame
-        Pandas DataFrame containing star/planet/system information imported
-        using load_planet_properties(). Has columns:
-
-        [parameter, value, sigma, reference, comment]
-        
-        and rows:
-
-        [m_star_msun, r_star_rsun, k_star_mps, a_planet_au, e_planet,
-         i_planet_deg, omega_lan_planet_deg, w_ap_planet_deg, k_planet_mps,
-         jd0_days, period_planet_days, transit_dur_hours, m_planet_mearth,
-         r_planet_rearth]
+        DataFrame containing planet/star/system properties. The data frame has
+        columns ['value', 'sigma', 'reference', 'comment'] and indices:
+        ['m_star_msun', 'r_star_rsun', 'k_star_mps', 'dist_pc', 'vsini',
+         'rv_star', 'ldc_init_a1', 'ldc_init_a2', 'ldc_init_a3', 'ldc_init_a4',
+         'a_planet_au', 'e_planet', 'i_planet_deg', 'omega_planet_deg',
+         'w_planet_deg', 'k_star_mps', 'transit_dur_hours', 'jd0_days', 
+         'period_planet_days', 'm_planet_mearth', 'r_planet_rearth', 
+         'r_planet_atmo_r_earth'].
 
     Updates
     -------
     transit_info: pandas DataFrame
-        Adds columns: 
-        [phase, is_in_transit, r_x, r_y, r_z, v_x, v_y, v_z, 
-         planet_doppler_shift, mu, mu_weight]
+        DataFrame containing information associated with each transit time
+        step. This DataFrame has columns:
+
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file', 'phase_start', 'is_in_transit_start', 'r_x_start',
+         'r_y_start', 'r_z_start', 'v_x_start', 'v_y_start', 'v_z_start',
+         's_projected_start', 'scl_start', 'mu_start',
+         'planet_area_frac_start', 'phase_mid', 'is_in_transit_mid',
+         'r_x_mid', 'r_y_mid', 'r_z_mid', 'v_x_mid', 'v_y_mid', 'v_z_mid',
+         's_projected_mid', 'scl_mid', 'mu_mid', 'planet_area_frac_mid',
+         'phase_end', 'is_in_transit_end', 'r_x_end', 'r_y_end', 'r_z_end',
+         'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
+         'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
     """
     # -------------------------------------------------------------------------
     # Error Checking
@@ -1073,192 +1205,221 @@ def calculate_transit_timestep_info(transit_info, syst_info,):
     r_planet = (syst_info.loc["r_planet_rearth", "value"]*R_EARTH 
         / (syst_info.loc["r_star_rsun", "value"]*R_SUN))
 
-    # Calculate the phase of the planet as phase = (JD - JD_0) / period
-    phases = ((transit_info["jd"].values-syst_info.loc["jd0_days", "value"])
-        /syst_info.loc["period_planet_days", "value"])
-    
-    # Ensure -0.5 < phase < 0.5
-    phases -= phases.astype(int)
-
-    phase_gt_half_i = np.squeeze(np.argwhere(phases > 0.5))
-
-    if len(phase_gt_half_i) > 0:
-        phases[phase_gt_half_i] = phases[phase_gt_half_i] - 1.0
-
-    # Initialise cartesian coordinate arrays
-    r_x = np.zeros(n_phase)
-    r_y = np.zeros(n_phase)
-    r_z = np.zeros(n_phase)
-
-    v_x = np.zeros(n_phase)
-    v_y = np.zeros(n_phase)
-    v_z = np.zeros(n_phase)
-
-    s_projected = np.zeros(n_phase)
-
-    # Initialise scale factor proportional to the blocking area of the planet
-    #   1 when the planet shaddow is fully within the stellar disk
-    #   0 when the planet is out of transit
-    # Otherwise the fraction of the planet shadow area with the stellar disk.
-    mu_wgt = np.zeros(n_phase)
-
-    # Intialise scaling factor to use when computing an effective mu to adopt
-    # during during ingress/egress. During this time we compute an effective s
-    # value equal to halfway between the limb of the star and innermost edge of
-    # the planet, and compute scl = s_new / s_old which we use to scale x and z
-    # when computing mu. scl = 1 at all other times.
-    scl = np.ones(n_phase)
+    # We want to compute timestep information for the start, mid, and end of
+    # the exposure. This is mostly to allow us to check delta rv_planet across
+    # the exposure to see how broadened the planet spectrum will be.
+    epochs = ["start", "mid", "end"]
 
     # -------------------------------------------------------------------------
-    # Loop over all time steps
+    # Loop over epochs (i.e. start, mid, and end)
     # -------------------------------------------------------------------------
-    for phase_i in range(0, n_phase):
-        # Compute the mean anomaly of the orbit at this phase. This parameter
-        # is the sole parameter that changes from time step to time step.
-        ma_planet_rad = 2*np.pi*(phases[phase_i]-0.25) - w_ap_planet_rad
+    for epoch in epochs:
+        # Grab the JD values for this epoch
+        jds = transit_info["jd_{}".format(epoch)].values
 
-        # Convert orbital elements to cartesian coordinates and velocities
-        # This function expects units of Msun, radians, and AU for its params.
-        r_xyz, v_xyz = compute_orbit_cartesian_pos_and_vel(
-            M_star=syst_info.loc["m_star_msun", "value"],
-            a=syst_info.loc["a_planet_au", "value"],
-            e=syst_info.loc["e_planet", "value"],
-            I=i_planet_rad,
-            O=omega_lan_planet_rad,
-            w=w_ap_planet_rad,
-            M=ma_planet_rad,
-            M_planet=m_planet_msun,
-            error=1E-8)
+        # Calculate the phase of the planet as phase = (JD - JD_0) / period
+        phases = ((jds - syst_info.loc["jd0_days", "value"])
+            /syst_info.loc["period_planet_days", "value"])
+        
+        # Ensure -0.5 < phase < 0.5
+        phases -= phases.astype(int)
 
-        # Convert position vector (initially in AU) to R_star units
-        r_xyz = r_xyz * AU/(syst_info.loc["r_star_rsun", "value"]*R_SUN)
+        phase_gt_half_i = np.squeeze(np.argwhere(phases > 0.5))
 
-        # Convert velocity vector (initially in AU/(2*pi*year)) to km/s
-        v_xyz = v_xyz *2.*np.pi*AU/(365.25*60*60*24)*1E-5
+        if len(phase_gt_half_i) > 0:
+            phases[phase_gt_half_i] = phases[phase_gt_half_i] - 1.0
 
-        # Save positional and velocity vectors
-        r_x[phase_i] = r_xyz[0]
-        r_y[phase_i] = r_xyz[1]
-        r_z[phase_i] = r_xyz[2]
+        # Initialise cartesian coordinate arrays
+        r_x = np.zeros(n_phase)
+        r_y = np.zeros(n_phase)
+        r_z = np.zeros(n_phase)
 
-        v_x[phase_i] = v_xyz[0]
-        v_y[phase_i] = v_xyz[1]
-        v_z[phase_i] = v_xyz[2]
+        v_x = np.zeros(n_phase)
+        v_y = np.zeros(n_phase)
+        v_z = np.zeros(n_phase)
 
-        # Calculate the projected position of the planet s = sqrt(x^2 + z^2).
-        # We'll use this to work out if the planet is in transit or not.
-        s = np.sqrt(r_xyz[0]**2 + r_xyz[2]**2)
+        s_projected = np.zeros(n_phase)
 
-        s_projected[phase_i] = s
+        # Initialise scale factor proportional to blocking area of the planet
+        #   1 when the planet shaddow is fully within the stellar disk
+        #   0 when the planet is out of transit
+        # Otherwise = fraction of the planet shadow area with the stellar disk.
+        planet_area_frac = np.zeros(n_phase)
+
+        # Intialise scaling factor to use when computing an effective mu to
+        # adopt during during ingress/egress. During this time we compute an
+        # effective s value equal to halfway between the limb of the star and 
+        # innermost edge of the planet, and compute scl = s_new / s_old which 
+        # we use to scale x and z when computing mu, scl = 1 at all other times
+        scl = np.ones(n_phase)
 
         # ---------------------------------------------------------------------
-        # Compute fraction of the planet currently in transit
+        # Loop over all phases
         # ---------------------------------------------------------------------
-        # Planet not in transit, no light blocked
-        if s > 1.0 + r_planet:
-            area_frac = 0
+        desc = "Calculating for {} phases for {} exp".format(n_phase, epoch)
 
-        # Planet in *full* transit, complete blocking
-        elif s < 1.0 - r_planet:
-            area_frac = 1
+        for phase_i in tqdm(range(0, n_phase), desc=desc, leave=False):
+            # Compute the mean anomaly of the orbit at this phase. This
+            # is the sole parameter that changes from time step to time step.
+            ma_planet_rad = 2*np.pi*(phases[phase_i]-0.25) - w_ap_planet_rad
 
-        # Planet in ingress or egress, partial blocking
-        # Find the area blocked by treating as the intersection of two circles:
-        #   https://mathworld.wolfram.com/Circle-CircleIntersection.html.
-        #
-        # Circle A is star, radius = R = 1
-        #   x^2 + y^2 = R^2 = 1
-        #
-        # Circle B is planet, radius = r_planet = r
-        #   (x-d)^2 + y^2 = r^2
-        #
-        # Combine equations and solve for x, knowing that R=1 and d=s.
-        #   x   = (d^2 - r^2 + R^2) / (2d)
-        #       = (s^2 - r^2 + 1) / (2s)
-        #
-        # Area of one circular segment is given by:
-        #   A(R', d')       = R'^2 cos^-1(d'/R') - d' sqrt(R'^2 - d'^2)
-        #
-        # The area in transit can be found by calculating the area of the 
-        # asymmetric circular "lens" composed of two circular segments.
-        # Where d_1 = x, d_2 = (d-x) = (s-x), R = 1. Thus:
-        #   A_1(R, d_1)     = R^2 cos^-1(d_1/R) - d_1 sqrt(R^2 - d_1^2)
-        #                   = cos^1 (x) - x sqrt(1 - x^2)
-        #   A_2(r, d_2)     = r^2 cos^-1((s-x)/r) - (s-x) sqrt(r^2 - (s-x)^2)
-        #
-        #   A               = A_1 + A_2
-        #
-        # And finally, the *fractional* area
-        #   A_frac = A / (2* pi * r^2)
-        else:
-            # Calculate x
-            x = (s**2 - r_planet**2 + 1) / (2*s)
-            
-            # Calculate the area of both circle sections
-            a_1 = np.arccos(x) - x * np.sqrt(1 - x**2)
-            a_2 = (r_planet**2 *np.arccos((s-x)/r_planet) 
-                - (s-x) * np.sqrt(r_planet**2 - (s-x)**2))
-            
-            # Calculate total area
-            a_blocked = a_1 + a_2
+            # Convert orbital elements to cartesian coordinates and velocities
+            # This function expects units of Msun, radians, & AU for its params
+            r_xyz, v_xyz = compute_orbit_cartesian_pos_and_vel(
+                M_star=syst_info.loc["m_star_msun", "value"],
+                a=syst_info.loc["a_planet_au", "value"],
+                e=syst_info.loc["e_planet", "value"],
+                I=i_planet_rad,
+                O=omega_lan_planet_rad,
+                w=w_ap_planet_rad,
+                M=ma_planet_rad,
+                M_planet=m_planet_msun,
+                error=1E-8)
 
-            # Calculate the fractional area of the planet transiting
-            area_frac = a_blocked / (np.pi * r_planet**2)
-            
-            # Since s & mu refer to the *centre* of the planet, we need to 
-            # compute a new centre point for use during ingress/egress. This
-            # new point is simply halfway between the innermost edge of the 
-            # planet and the limb of the star.
-            s_new = (s - r_planet + 1) / 2
+            # Convert position vector (initially in AU) to R_star units
+            r_xyz = r_xyz * AU/(syst_info.loc["r_star_rsun", "value"]*R_SUN)
 
-            # We assume that x and z scale the same way, so when computing mu
-            # we scale x and z based on the fractional change in s.
-            scl[phase_i] = s_new / s
-
-        # Store the fractional blocked area
-        mu_wgt[phase_i] = area_frac
-
-    # -------------------------------------------------------------------------
-    # Compute final params and update DataFrame
-    # -------------------------------------------------------------------------
-    # Calculate the unitless doppler shift for the planet RV (vel/c_light)
-    doppler_shift = v_y/(C_LIGHT*1.E-5)
-
-    # Calculate the time steps where the planet is in transit
-    #is_in_transit = np.sqrt(r_x**2*scl**2 + r_z**2*scl**2) < (1.0 + r_planet)
-    is_in_transit = s_projected < (1.0 + r_planet)
+            # Convert velocity vector (initially in AU/(2*pi*year)) to km/s
+            v_xyz = v_xyz *2.*np.pi*AU/(365.25*60*60*24)*1E-5
     
-    # Calculate mu as mu = sqrt(1 - x^2 - y^2). See Mandel & Agol 2001:
-    # https://ui.adsabs.harvard.edu/abs/2002ApJ...580L.171M/abstract
-    # However, during ingress and egress this becomes
-    #   mu = sqrt(1 - (scl * x)^2 - (scl * y)^2)
-    # with scl = 1 at all other times.
-    with np.errstate(invalid="ignore"):
-        mus = np.sqrt((1.0 - (scl*r_x)**2 - (scl*r_z)**2))
+            # Save positional and velocity vectors
+            r_x[phase_i] = r_xyz[0]
+            r_y[phase_i] = r_xyz[1]
+            r_z[phase_i] = r_xyz[2]
 
-    # Reset the non-transiting mu values to zero
-    mus[~is_in_transit] = 0
+            v_x[phase_i] = v_xyz[0]
+            v_y[phase_i] = v_xyz[1]
+            v_z[phase_i] = v_xyz[2]
 
-    # Update our DataFrame
-    transit_info["phase"] = phases
-    transit_info["is_in_transit"] = is_in_transit
+            # Calculate planet projected position s = sqrt(x^2 + z^2).
+            # We'll use this to work out if the planet is in transit or not.
+            s = np.sqrt(r_xyz[0]**2 + r_xyz[2]**2)
 
-    transit_info["r_x"] = r_x
-    transit_info["r_y"] = r_y
-    transit_info["r_z"] = r_z
+            s_projected[phase_i] = s
 
-    transit_info["v_x"] = v_x
-    transit_info["v_y"] = v_y
-    transit_info["v_z"] = v_z
+            # -----------------------------------------------------------------
+            # Compute fraction of the planet currently in transit
+            # -----------------------------------------------------------------
+            # Planet not in transit, no light blocked
+            if s > 1.0 + r_planet:
+                area_frac = 0
 
-    transit_info["s_projected"] = s_projected
+            # Planet in *full* transit, complete blocking
+            elif s < 1.0 - r_planet:
+                area_frac = 1
 
-    transit_info["scl"] = scl
+            # Planet in ingress or egress, partial blocking
+            # Find the area blocked by treating as the intersection of two 
+            # circles:
+            #   https://mathworld.wolfram.com/Circle-CircleIntersection.html.
+            #
+            # Circle A is star, radius = R = 1
+            #   x^2 + y^2 = R^2 = 1
+            #
+            # Circle B is planet, radius = r_planet = r
+            #   (x-d)^2 + y^2 = r^2
+            #
+            # Combine equations and solve for x, knowing that R=1 and d=s.
+            #   x   = (d^2 - r^2 + R^2) / (2d)
+            #       = (s^2 - r^2 + 1) / (2s)
+            #
+            # Area of one circular segment is given by:
+            #   A(R', d')       = R'^2 cos^-1(d'/R') - d' sqrt(R'^2 - d'^2)
+            #
+            # The area in transit can be found by calculating the area of the 
+            # asymmetric circular "lens" composed of two circular segments.
+            # Where d_1 = x, d_2 = (d-x) = (s-x), R = 1. Thus:
+            #   A_1(R, d_1)   = R^2 cos^-1(d_1/R) - d_1 sqrt(R^2 - d_1^2)
+            #                 = cos^1 (x) - x sqrt(1 - x^2)
+            #   A_2(r, d_2)   = r^2 cos^-1((s-x)/r) - (s-x) sqrt(r^2 - (s-x)^2)
+            #
+            #   A             = A_1 + A_2
+            #
+            # And finally, the *fractional* area
+            #   A_frac = A / (2* pi * r^2)
+            else:
+                # Calculate x
+                x = (s**2 - r_planet**2 + 1) / (2*s)
+                
+                # Calculate the area of both circle sections
+                a_1 = np.arccos(x) - x * np.sqrt(1 - x**2)
+                a_2 = (r_planet**2 *np.arccos((s-x)/r_planet) 
+                    - (s-x) * np.sqrt(r_planet**2 - (s-x)**2))
+                
+                # Calculate total area
+                a_blocked = a_1 + a_2
 
-    transit_info["planet_doppler_shift"] = doppler_shift
+                # Calculate the fractional area of the planet transiting
+                area_frac = a_blocked / (np.pi * r_planet**2)
+                
+                # Since s & mu refer to the *centre* of the planet, we need to 
+                # compute a new centre point for use during ingress/egress.
+                # This new point is simply halfway between the innermost edge 
+                # of the planet and the limb of the star.
+                s_new = (s - r_planet + 1) / 2
 
-    transit_info["mu"] = mus
-    transit_info["mu_weight"] = mu_wgt
+                # We assume that x and z scale the same way, so when computing
+                # mu we scale x and z based on the fractional change in s.
+                scl[phase_i] = s_new / s
+
+            # Store the fractional blocked area
+            planet_area_frac[phase_i] = area_frac
+
+            # -----------------------------------------------------------------
+            # Update DataFrame
+            # -----------------------------------------------------------------
+            # Calculate the time steps where the planet is in transit
+            is_in_transit = s_projected < (1.0 + r_planet)
+            
+            # Calculate mu as mu = sqrt(1 - x^2 - y^2). See Mandel & Agol 2001:
+            # https://ui.adsabs.harvard.edu/abs/2002ApJ...580L.171M/abstract
+            # However, during ingress and egress this becomes
+            #   mu = sqrt(1 - (scl * x)^2 - (scl * y)^2)
+            # with scl = 1 at all other times.
+            with np.errstate(invalid="ignore"):
+                mus = np.sqrt((1.0 - (scl*r_x)**2 - (scl*r_z)**2))
+
+            # Reset the non-transiting mu values to zero    TODO is nan better?
+            mus[~is_in_transit] = 0
+
+            # Update our DataFrame
+            transit_info["phase_{}".format(epoch)] = phases
+            transit_info["is_in_transit_{}".format(epoch)] = is_in_transit
+
+            transit_info["r_x_{}".format(epoch)] = r_x
+            transit_info["r_y_{}".format(epoch)] = r_y
+            transit_info["r_z_{}".format(epoch)] = r_z
+
+            transit_info["v_x_{}".format(epoch)] = v_x
+            transit_info["v_y_{}".format(epoch)] = v_y
+            transit_info["v_z_{}".format(epoch)] = v_z
+
+            transit_info["s_projected_{}".format(epoch)] = s_projected
+
+            transit_info["scl_{}".format(epoch)] = scl
+
+            transit_info["mu_{}".format(epoch)] = mus
+            transit_info["planet_area_frac_{}".format(epoch)] = \
+                planet_area_frac
+
+    # -------------------------------------------------------------------------
+    # Finally compute our velocities at the midpoint
+    # -------------------------------------------------------------------------
+    # Calculate our velocity shifts for each phase
+    #   γ_j = (v_bary + v_star) / c
+    #   β_j = (v_bary + v_star + vsini * x_planet) / c
+    #   δ_j = (v_bary + v_star + v^i_planet) / c
+    # TODO Check signs and units
+    star_rv_bcor = transit_info["bcor"] + syst_info.loc["rv_star", "value"]
+    vsini_planet_epoch = syst_info.loc["rv_star", "value"] * r_x
+
+    gamma = -star_rv_bcor / const.c.cgs.to(u.km/u.s)
+    beta = -(star_rv_bcor + vsini_planet_epoch) / const.c.cgs.to(u.km/u.s)
+    delta = -(star_rv_bcor + v_y) / const.c.cgs.to(u.km/u.s)
+
+    transit_info["gamma"] = gamma
+    transit_info["beta"] = beta
+    transit_info["delta"] = delta
 
     # All done!
 
@@ -1373,7 +1534,9 @@ def interpolate_wavelength_scale(
     obs = fluxes.copy()
 
     # Loop over all spectral segments
-    for spec_i in range(0, n_spec):
+    desc = "Interpolating wavelengths for {} spectral segments".format(n_spec)
+
+    for spec_i in tqdm(range(0, n_spec), desc=desc, leave=False):
         # Find the common minimum and maximum wavelengths
         wl_min = np.max(wave_adopted[:, spec_i, 0])
         wl_max = np.min(wave_adopted[:,spec_i, -1])
@@ -1468,7 +1631,9 @@ def sigma_clip_observations(
     obs_spec_clipped = obs_spec.copy()
 
     # Iterate over spectral pixels, and clip along the phase dimension
-    for spec_i in range(0, n_spec):
+    desc = "Cleaning/clipping {} spectral segments".format(n_spec)
+
+    for spec_i in tqdm(range(0, n_spec), desc=desc, leave=False):
         for px_i in range(0, n_wave):
             flux = obs_spec[:, spec_i, px_i]
 

@@ -5,7 +5,7 @@ import glob
 from astropy.io import fits
 from astropy.time import Time
 from astropy import units as u
-from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.coordinates import AltAz, SkyCoord, EarthLocation
 
 def sort_spectra_by_time(spectra_path_with_wildcard):
     """Imports time series spectra from globbed fits files given a filepath 
@@ -33,7 +33,8 @@ def compute_barycentric_correction(
     time_mid,
     site="Paranal", 
     disable_auto_max_age=False,
-    overrid_iers=False):
+    overrid_iers=False,
+    print_info=False,):
     """Compute the barycentric corrections for a set of stars
 
     In late 2019 issues were encountered accessing online files related to the
@@ -45,7 +46,7 @@ def compute_barycentric_correction(
     Parameters
     ----------
     ra: string
-        Right ascension in degrees.
+        Right ascension in degrees. TODO check that we actually want hour angle
     
     dec: string
         Declination in degrees.
@@ -82,12 +83,19 @@ def compute_barycentric_correction(
         iers_conf.reload()
 
     # Get the onsky coordinates
-    sc = SkyCoord(ra=ra, dec=dec, unit=(u.hourangle, u.deg))
+    sc = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
 
     # Compute the barycentric correction for the star
     time = Time(float(time_mid), format="mjd")
-    barycorr = sc.radial_velocity_correction(obstime=time, location=loc)  
+    barycorr = sc.radial_velocity_correction(obstime=time, location=loc)
     bcor = barycorr.to(u.km/u.s).value
+
+    if print_info:
+        sc_altaz = sc.transform_to(AltAz(obstime=time,location=loc))
+        fmt_str = ("MJD = {:0.4f}, Altitude = {:0.2f}, Airmass = {:0.2f}"
+                   ", Bcor = {:0.2f}")
+        print(fmt_str.format(
+            time_mid, sc_altaz.alt, sc_altaz.secz, barycorr.to(u.km/u.s)))
 
     return bcor
 
