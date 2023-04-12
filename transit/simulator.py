@@ -1212,7 +1212,10 @@ def simulate_transit_multiple_epochs(
     do_equidistant_lambda_sampling_before_broadening,
     fill_throughput_value,
     tau_fill_value,
-    planet_transmission_boost_fac,):
+    planet_transmission_boost_fac,
+    do_use_uniform_stellar_spec,
+    do_use_uniform_telluric_spec,
+    do_use_uniform_planet_spec,):
     """Simulates an entire transit with many epochs using multiple calls to
     simulate_transit_single_epoch. See docstrings of calc_model_flux and
     simulate_transit_single_epoch for more detail.
@@ -1281,6 +1284,20 @@ def simulate_transit_multiple_epochs(
         Whether to artificially boost the strength of planetary absorption by
         some factor for testing. By default set to 1 (i.e. disabled).
 
+    do_use_uniform_stellar_spec: boolean
+        If True, the imported MARCS stellar spectrum is set to its median
+        value. Note that this will cause limb darkening to cease to be
+        meaningful, so only use this for testing.
+    
+    do_use_uniform_telluric_spec: boolean
+        If True, the imported telluric spectrum is set to have 100% 
+        transmittance. Note that this will remove any airmass dependence, so
+        only use this for testing.
+
+    do_use_uniform_planet_spec: boolean
+        If True, the imported planet spectrum is set to have 100% 
+        transmittance.
+
     Returns
     -------
     fluxes_model, snr: float array
@@ -1293,16 +1310,25 @@ def simulate_transit_multiple_epochs(
         wave_min=wl_min,
         wave_max=wl_max,)
     
+    if do_use_uniform_stellar_spec:
+        fluxes_marcs = np.ones_like(fluxes_marcs) * np.nanmedian(fluxes_marcs)
+    
     # Import planet flux
     wave_planet, trans_planet = load_planet_spectrum(
         wave_file=planet_wave_fits,
         spec_file=planet_spec_fits,)
     
+    if do_use_uniform_planet_spec:
+        trans_planet = np.ones_like(trans_planet)
+    
     # Load telluric spectrum
-    telluric_wave, telluric_tau, calc_telluric_tau = load_telluric_spectrum(
+    telluric_wave, telluric_tau, _ = load_telluric_spectrum(
         molecfit_fits=molecfit_fits,
         tau_fill_value=tau_fill_value,)
     
+    if do_use_uniform_telluric_spec:
+        telluric_tau = np.zeros_like(telluric_tau)
+
     # Initialise output flux array
     shape = (len(transit_info), wave_observed.shape[0], wave_observed.shape[1])
     fluxes_model_all = np.zeros(shape)
@@ -1311,6 +1337,8 @@ def simulate_transit_multiple_epochs(
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}...".format(epoch_i))
+        #if epoch_i < 20:
+         #   continue
         flux_counts, snr = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,

@@ -941,7 +941,7 @@ def save_transit_info_to_fits(
     transit_info,
     syst_info,
     fits_save_dir,
-    star_name,):
+    label,):
     """Saves prepared wavelength, spectra, sigma, detector, order, transit, and
     planet information in a single multi-extension fits file ready for use for
     modelling with the Aronson method.
@@ -976,19 +976,37 @@ def save_transit_info_to_fits(
         [n_spec].
     
     transit_info: pandas DataFrame
-        Pandas DataFrame with header/computed information about each timestep.
-        Has columns: [mjd, jd, phase, airmass, bcor, hcor, gamma, ra, dec, 
-        nod_pos, raw_file] and is of length [n_phase].
+        DataFrame containing information associated with each transit time
+        step. This DataFrame has columns:
+
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file', 'phase_start', 'is_in_transit_start', 'r_x_start',
+         'r_y_start', 'r_z_start', 'v_x_start', 'v_y_start', 'v_z_start',
+         's_projected_start', 'scl_start', 'mu_start',
+         'planet_area_frac_start', 'phase_mid', 'is_in_transit_mid',
+         'r_x_mid', 'r_y_mid', 'r_z_mid', 'v_x_mid', 'v_y_mid', 'v_z_mid',
+         's_projected_mid', 'scl_mid', 'mu_mid', 'planet_area_frac_mid',
+         'phase_end', 'is_in_transit_end', 'r_x_end', 'r_y_end', 'r_z_end',
+         'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
+         'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
 
     syst_info: pandas DataFrame
-        TODO
+        DataFrame containing planet/star/system properties. The data frame has
+        columns ['value', 'sigma', 'reference', 'comment'] and indices:
+        ['m_star_msun', 'r_star_rsun', 'k_star_mps', 'dist_pc', 'vsini',
+         'rv_star', 'ldc_init_a1', 'ldc_init_a2', 'ldc_init_a3', 'ldc_init_a4',
+         'a_planet_au', 'e_planet', 'i_planet_deg', 'omega_planet_deg',
+         'w_planet_deg', 'k_star_mps', 'transit_dur_hours', 'jd0_days', 
+         'period_planet_days', 'm_planet_mearth', 'r_planet_rearth', 
+         'r_planet_atmo_r_earth'].
 
     fits_save_dir: string
         Directory to save the resulting fits file to.
 
-    star_name: string
-        Name of the star to be included in the filename of format
-        transit_data_{}.fits where {} is the star name.
+    label: string
+        Label to be included in the filename of format
+        transit_data_{}.fits where {} is the label.
     """
     # Intialise HDU List
     hdu = fits.HDUList()
@@ -1034,9 +1052,9 @@ def save_transit_info_to_fits(
     hdu.append(planet_tab)
 
     # Done, save
-    star_name = star_name.replace(" ", "").replace("-", "")
+    label = label.replace(" ", "").replace("-", "")
     fits_file = os.path.join(
-        fits_save_dir, "transit_data_{}.fits".format(star_name))
+        fits_save_dir, "transit_data_{}.fits".format(label))
     hdu.writeto(fits_file, overwrite=True)
 
 

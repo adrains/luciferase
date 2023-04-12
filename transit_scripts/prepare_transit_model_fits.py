@@ -74,4 +74,4 @@ tu.save_transit_info_to_fits(
     transit_info=transit_info,
     syst_info=syst_info,
     fits_save_dir=save_path,
-    star_name=star_name,)
+    label=star_name,)
