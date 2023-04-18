@@ -707,7 +707,9 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
             obstime=Time(mjd_mid, format="mjd"),
             location=vlt,)
 
-        bary_corr = -bary_corr.to(u.km/u.s)
+        # Note that we just store the barycentric correction for now, and deal
+        # with the +/- sign convention later when constructing doppler shifts.
+        bary_corr = bary_corr.to(u.km/u.s)
 
         # Calculate the heliocentric correction
         hel_corr = sc.radial_velocity_correction(
@@ -715,10 +717,7 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
             obstime=Time(mjd_mid, format="mjd"),
             location=vlt,)
 
-        hel_corr = -hel_corr.to(u.km/u.s)
-
-        # Compute gamma, the unitless doppler shift (vel/c_light)
-        #gamma = -bary_corr / const.c.cgs.to(u.km/u.s)
+        hel_corr = hel_corr.to(u.km/u.s)
 
     # Now that we've grabbed all the header information, go back to the 
     # redued file for the actual spectra
@@ -1423,23 +1422,46 @@ def calculate_transit_timestep_info(transit_info, syst_info,):
     # -------------------------------------------------------------------------
     # Finally compute our velocities at the midpoint
     # -------------------------------------------------------------------------
-    # Calculate our velocity shifts for each phase
+    # Calculate our unitless doppler shifts for each phase, assuming that any
+    # velocity is positive when in the direction of the star:
     #   γ_j = (v_bary + v_star) / c
     #   β_j = (v_bary + v_star + vsini * x_planet) / c
     #   δ_j = (v_bary + v_star + v^i_planet) / c
-    # TODO Check signs and units
-    star_rv_bcor = transit_info["bcor"] + syst_info.loc["rv_star", "value"]
+    #
+    # These doppler shifts are applied to a wavelength vector as:
+    #   λ_new = (1 +/- doppler_shift) * λ_old
+    #
+    # Notes on our velocity conventions:
+    # - Planet velocity starts neg (towards us), and becomes pos (away from us)
+    # - vsini requires an assumption of whether the planet is orbiting in plane
+    #   (same sign convention as planet) or out of plane (anything from no 
+    #   no effect to the opposite sign convention). For simplicity, vsini can
+    #   be assumed = 0.
+    # - Since the Aronson method only cares about *changes* in velocity, the
+    #   stellar RV itself can be ignored, in which case the model velocity
+    #   frame is the stellar frame, rather than the rest-frame.
+    # - The barycentric velocity by default has the *opposite* sign to the
+    #   stellar RV (per checking ADR's plumage code which was compared to Gaia 
+    #   DR2). That is a positive barcentric velocity implies the Earth is
+    #   moving towards the star, and we need to subtract this value to put
+    #   things in the barycentric/rest frame.
+    # - The doppler shift should be *positive* (1 + doppler_shift) * λ_old when
+    #   *correcting* a velocity to the rest-frame.
+    # - The doppler shift should be *negative* (1 - doppler_shift) * λ_old when
+    #   *shifting* out of the (adopted) rest/reference-frame.
+    star_rv_bcor = -1* transit_info["bcor"] + syst_info.loc["rv_star", "value"]
     vsini_planet_epoch = syst_info.loc["rv_star", "value"] * r_x
 
-    gamma = -star_rv_bcor / const.c.cgs.to(u.km/u.s)
-    beta = -(star_rv_bcor + vsini_planet_epoch) / const.c.cgs.to(u.km/u.s)
-    delta = -(star_rv_bcor + v_y) / const.c.cgs.to(u.km/u.s)
+    gamma = star_rv_bcor / const.c.cgs.to(u.km/u.s)
+    beta = (star_rv_bcor + vsini_planet_epoch) / const.c.cgs.to(u.km/u.s)
+    delta = (star_rv_bcor + v_y) / const.c.cgs.to(u.km/u.s)
 
     transit_info["gamma"] = gamma
     transit_info["beta"] = beta
     transit_info["delta"] = delta
 
-    # All done!
+    # All done, nothing to return since we've added all computed values to
+    # our transit_info DataFrame
 
 
 def compute_detector_limits(fluxes):

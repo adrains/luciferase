@@ -92,7 +92,11 @@ def read_marcs_spectrum(
         mu_min = 0
         intens_min = 0
 
-        desc = "Reading MARCS File"
+        if wave_min is not None and wave_max is not None:
+            desc = "Reading MARCS File ({} < lambda < {} A)".format(
+                wave_min, wave_max)
+        else:
+            desc = "Reading MARCS File"
 
         for line_str in tqdm(all_lines, desc=desc, leave=False):
             # Split on whitespace
@@ -869,12 +873,15 @@ def simulate_transit_single_epoch(
 
     We use a slightly different formalism to the Aronson Method here, in that
     we model:
-     - The stellar flux
-     - The stellar flux blocked assuming an entirely opaque planet
-     - The stellar flux transmitted through the planet atmosphere
-     - The planet transmittance
+     - The stellar flux (doppler shift gamma)
+     - The stellar flux blocked assuming an entirely opaque planet (beta)
+     - The stellar flux transmitted through the planet atmosphere (beta)
+     - The planet transmittance (delta)
      - The optical depth of telluric absorption
-    with each component shifted to the appropriate radial velocity.
+    with each component shifted to the appropriate radial velocity listed in
+    brackets. Note that when simulating a transit, we are shifting from the
+    barcentric/rest-frame to the stellar frame, so we use the convention
+    wave_stellar = (1 - doppler_shift) * wave_rest.
 
     Note that we use the broadening functions from PyAstronomy:
      - https://pyastronomy.readthedocs.io/en/latest/pyaslDoc/aslDoc/broad.html
@@ -983,7 +990,7 @@ def simulate_transit_single_epoch(
 
     # Doppler shift stellar flux to velocity γ_j
     stellar_flux_rv_shift = interpolate_spectrum(
-        wave_new=wave_marcs*(1+transit_epoch["gamma"]),
+        wave_new=wave_marcs*(1-transit_epoch["gamma"]),
         wave_old=wave_marcs,
         flux_old=fluxes_disk_scaled,
         fill_value=1.0,)
@@ -1015,7 +1022,7 @@ def simulate_transit_single_epoch(
 
         # Doppler shift planet flux
         planet_flux_rv_shift = interpolate_spectrum(
-            wave_new=wave_planet*(1+transit_epoch["beta"]),
+            wave_new=wave_planet*(1-transit_epoch["delta"]),
             wave_old=wave_planet,
             flux_old=trans_planet,
             fill_value=1.0,)
@@ -1080,7 +1087,7 @@ def simulate_transit_single_epoch(
 
         # Doppler shift stellar flux to velocity β_j
         flux_shadow_opaque_rv_shift = interpolate_spectrum(
-            wave_new=wave_marcs*(1+transit_epoch["beta"]),
+            wave_new=wave_marcs*(1-transit_epoch["beta"]),
             wave_old=wave_marcs,
             flux_old=flux_shadow_opaque,
             fill_value=1.0,)
@@ -1111,7 +1118,7 @@ def simulate_transit_single_epoch(
 
         # Doppler shift stellar flux to velocity β_j
         flux_shadow_atmo_rv_shift = interpolate_spectrum(
-            wave_new=wave_marcs*(1+transit_epoch["beta"]),
+            wave_new=wave_marcs*(1-transit_epoch["beta"]),
             wave_old=wave_marcs,
             flux_old=flux_shadow_atmo,
             fill_value=1.0,)
@@ -1304,6 +1311,10 @@ def simulate_transit_multiple_epochs(
         Modelled flux and SNR arrays corresponding to wavelengths of shape 
         [n_phase, n_spec, n_wave].
     """
+    # Input checking
+    if wl_min > np.min(wave_observed) or wl_max < np.max(wave_observed):
+        raise ValueError("MARCS wl bounds do not cover observed wl scale.")
+    
     # Import MARCS fluxes (ergs/cm^2/s/Å/μ)
     wave_marcs, _, _, mus_marcs, fluxes_marcs = read_marcs_spectrum(
         filepath=marcs_fits,
@@ -1337,8 +1348,6 @@ def simulate_transit_multiple_epochs(
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}...".format(epoch_i))
-        #if epoch_i < 20:
-         #   continue
         flux_counts, snr = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
