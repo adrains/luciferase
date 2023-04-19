@@ -933,11 +933,12 @@ def extract_nodding_time_series(
 
 def save_transit_info_to_fits(
     waves,
-    obs_spec,
-    sigmas,
+    obs_spec_list,
+    sigmas_list,
+    n_transits,
     detectors,
     orders,
-    transit_info,
+    transit_info_list,
     syst_info,
     fits_save_dir,
     label,):
@@ -945,27 +946,33 @@ def save_transit_info_to_fits(
     planet information in a single multi-extension fits file ready for use for
     modelling with the Aronson method.
 
-    Fits structure:
+    HDUs common to all transits:
         HDU 0 (image): 'WAVES' [n_phase, n_spec, n_wave]
-        HDU 1 (image): 'OBS_SPEC' [n_phase, n_spec, n_wave]
-        HDU 2 (image): 'SIGMAS' [n_phase, n_spec, n_wave]
-        HDU 3 (image): 'DETECTORS' [n_spec]
-        HDU 4 (image): 'ORDERS' [n_spec]
-        HDU 5 (table): 'TRANSIT_INFO' [n_phase]
-        HDU 6 (table): 'SYST_INFO'
+        HDU 1 (image): 'DETECTORS' [n_spec]
+        HDU 2 (image): 'ORDERS' [n_spec]
+        HDU 3 (table): 'SYST_INFO'
+
+    Plus a set of the following for each transit, where X is the transit count:
+        HDU 4 (image): 'OBS_SPEC_X' [n_phase, n_spec, n_wave]
+        HDU 5 (image): 'SIGMAS_X' [n_phase, n_spec, n_wave]
+        HDU 6 (table): 'TRANSIT_INFO_X' [n_phase]
 
     Parameters
     ----------
     waves: float array
         Wavelength scales for each timestep of shape [n_phase, n_spec, n_px].
     
-    obs_spec: float array
-        Observed spectra array for each timestep of shape 
-        [n_phase, n_spec, n_px].
+    obs_spec_list: list of 3D float arrays
+        List of observed spectra (length n_transits), with one 3D float array
+        transit of shape  [n_phase, n_spec, n_px].
     
-    sigmas: float array
-        Uncertainty array for each timestep of shape [n_phase, n_spec, n_px].
+    sigmas: list of 3D float arrays
+        List of observed sigmas (length n_transits), with one 3D float array
+        transit of shape  [n_phase, n_spec, n_px].
     
+    n_transits: int
+        The number of transits to be saved.
+
     detectors: int array
         Array associating spectral segments to CRIRES+ detector number of shape 
         [n_spec].
@@ -974,9 +981,10 @@ def save_transit_info_to_fits(
         Array associating spectral segments to CRIRES+ order number of shape 
         [n_spec].
     
-    transit_info: pandas DataFrame
-        DataFrame containing information associated with each transit time
-        step. This DataFrame has columns:
+    transit_info_list: list of pandas DataFrame
+        List of transit info (length n_transits) DataFrames containing 
+        information associated with each transit time step. Each DataFrame has
+        columns:
 
         ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
          'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
@@ -1018,58 +1026,69 @@ def save_transit_info_to_fits(
     wave_img.header["EXTNAME"] = ("WAVES", "Wavelength scale")
     hdu.append(wave_img)
 
-    # HDU 1: observed spectra
-    spec_img =  fits.PrimaryHDU(obs_spec)
-    spec_img.header["EXTNAME"] = ("OBS_SPEC", "Observed spectra")
-    hdu.append(spec_img)
-
-    # HDU 2: observed spectra uncertainties
-    sigmas_img =  fits.PrimaryHDU(sigmas)
-    sigmas_img.header["EXTNAME"] = ("SIGMAS", "Observed spectra uncertainties")
-    hdu.append(sigmas_img)
-
-    # HDU 3: detectors
+    # HDU 1: detectors
     detector_img =  fits.PrimaryHDU(detectors)
     detector_img.header["EXTNAME"] = (
         "DETECTORS", "CRIRES+ detector associated with each spectal segment")
     hdu.append(detector_img)
 
-    # HDU 4: orders
+    # HDU 2: orders
     order_img =  fits.PrimaryHDU(orders)
     order_img.header["EXTNAME"] = (
         "ORDERS", "CRIRES+ grating order associated with each spectal segment")
     hdu.append(order_img)
 
-    # HDU 5: table of observational information for each phase
-    transit_tab = fits.BinTableHDU(Table.from_pandas(transit_info))
-    transit_tab.header["EXTNAME"] = ("TRANSIT_INFO", "Observation info table")
-    hdu.append(transit_tab)
-    
-    # HDU 6: table of planet system information
+    # HDU 3: table of planet system information
     planet_tab = fits.BinTableHDU(Table.from_pandas(syst_info.reset_index()))
     planet_tab.header["EXTNAME"] = ("SYST_INFO", "Table of planet info")
     hdu.append(planet_tab)
 
+    # Loop over all transits
+    for transit_i in range(n_transits):
+        # HDU 4 + transit_i*3: observed spectra
+        spec_img =  fits.PrimaryHDU(obs_spec_list[transit_i])
+        spec_img.header["EXTNAME"] = (
+            "OBS_SPEC_{}".format(transit_i), "Observed spectra")
+        hdu.append(spec_img)
+
+        # HDU 5 + transit_i*3: observed spectra uncertainties
+        sigmas_img =  fits.PrimaryHDU(sigmas_list[transit_i])
+        sigmas_img.header["EXTNAME"] = (
+            "SIGMAS_{}".format(transit_i), "Observed spectra uncertainties")
+        hdu.append(sigmas_img)
+
+        # HDU 6 + transit_i*3: table of information for each phase
+        transit_tab = fits.BinTableHDU(
+            Table.from_pandas(transit_info_list[transit_i]))
+        transit_tab.header["EXTNAME"] = (
+            "TRANSIT_INFO_{}".format(transit_i), "Observation info table")
+        hdu.append(transit_tab)
+
     # Done, save
     label = label.replace(" ", "").replace("-", "")
     fits_file = os.path.join(
-        fits_save_dir, "transit_data_{}.fits".format(label))
+        fits_save_dir, "transit_data_{}_n{}.fits".format(label, n_transits))
     hdu.writeto(fits_file, overwrite=True)
 
 
-def load_transit_info_from_fits(fits_load_dir, star_name,):
+def load_transit_info_from_fits(fits_load_dir, star_name, n_transit,):
     """Loads wavelength, spectra, sigma, detector, order, transit, and planet
     information from a single multi-extension fits file ready for use for
     modelling with the Aronson method.
+
+    The filename should have format transit_data_X_nY.fits where X is the star
+    name, and Y is the number of transits saved in the file.
     
-    Fits structure:
+    HDUs common to all transits:
         HDU 0 (image): 'WAVES' [n_phase, n_spec, n_wave]
-        HDU 1 (image): 'OBS_SPEC' [n_phase, n_spec, n_wave]
-        HDU 2 (image): 'SIGMAS' [n_phase, n_spec, n_wave]
-        HDU 3 (image): 'DETECTORS' [n_spec]
-        HDU 4 (image): 'ORDERS' [n_spec]
-        HDU 5 (table): 'TRANSIT_INFO' [n_phase]
-        HDU 6 (table): 'SYST_INFO'
+        HDU 1 (image): 'DETECTORS' [n_spec]
+        HDU 2 (image): 'ORDERS' [n_spec]
+        HDU 3 (table): 'SYST_INFO'
+
+    Plus a set of the following for each transit, where X is the transit count:
+        HDU 4 (image): 'OBS_SPEC_X' [n_phase, n_spec, n_wave]
+        HDU 5 (image): 'SIGMAS_X' [n_phase, n_spec, n_wave]
+        HDU 6 (table): 'TRANSIT_INFO_X' [n_phase]
 
     Parameters
     ----------
@@ -1077,20 +1096,23 @@ def load_transit_info_from_fits(fits_load_dir, star_name,):
         Directory to load the fits file from.
 
     star_name: string
-        Name of the star to be included in the filename of format
-        transit_data_{}.fits where {} is the star name.
+        Name of the star to be included in the filename. 
+
+    n_transit: int
+        Number of transits saved to this fits file.
 
     Returns
     -------
     waves: float array
         Wavelength scales for each timestep of shape [n_phase, n_spec, n_px].
     
-    obs_spec: float array
-        Observed spectra array for each timestep of shape 
-        [n_phase, n_spec, n_px].
+    obs_spec_list: list of 3D float arrays
+        List of observed spectra (length n_transits), with one 3D float array
+        transit of shape  [n_phase, n_spec, n_px].
     
-    sigmas: float array
-        Uncertainty array for each timestep of shape [n_phase, n_spec, n_px].
+    sigmas_list: list of 3D float arrays
+        List of observed sigmas (length n_transits), with one 3D float array
+        transit of shape  [n_phase, n_spec, n_px].
     
     detectors: int array
         Array associating spectral segments to CRIRES+ detector number of shape 
@@ -1100,36 +1122,68 @@ def load_transit_info_from_fits(fits_load_dir, star_name,):
         Array associating spectral segments to CRIRES+ order number of shape 
         [n_spec].
     
-    transit_df: pandas DataFrame
-        Pandas DataFrame with header/computed information about each timestep.
-        Has columns: [mjd, jd, phase, airmass, bcor, hcor, gamma, ra, dec, 
-        nod_pos, raw_file] and is of length [n_phase].
+    transit_info_list: list of pandas DataFrames
+        List of transit info (length n_transits) DataFrames containing 
+        information associated with each transit time step. Each DataFrame has
+        columns:
 
-    planet_df: pandas DataFrame
-        TODO
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file', 'phase_start', 'is_in_transit_start', 'r_x_start',
+         'r_y_start', 'r_z_start', 'v_x_start', 'v_y_start', 'v_z_start',
+         's_projected_start', 'scl_start', 'mu_start',
+         'planet_area_frac_start', 'phase_mid', 'is_in_transit_mid',
+         'r_x_mid', 'r_y_mid', 'r_z_mid', 'v_x_mid', 'v_y_mid', 'v_z_mid',
+         's_projected_mid', 'scl_mid', 'mu_mid', 'planet_area_frac_mid',
+         'phase_end', 'is_in_transit_end', 'r_x_end', 'r_y_end', 'r_z_end',
+         'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
+         'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
+
+    syst_info: pandas DataFrame
+        DataFrame containing planet/star/system properties. The data frame has
+        columns ['value', 'sigma', 'reference', 'comment'] and indices:
+        ['m_star_msun', 'r_star_rsun', 'k_star_mps', 'dist_pc', 'vsini',
+         'rv_star', 'ldc_init_a1', 'ldc_init_a2', 'ldc_init_a3', 'ldc_init_a4',
+         'a_planet_au', 'e_planet', 'i_planet_deg', 'omega_planet_deg',
+         'w_planet_deg', 'k_star_mps', 'transit_dur_hours', 'jd0_days', 
+         'period_planet_days', 'm_planet_mearth', 'r_planet_rearth', 
+         'r_planet_atmo_r_earth'].
     """
     # Load in the fits file
     fits_file = os.path.join(
-        fits_load_dir, "transit_data_{}.fits".format(star_name))
+        fits_load_dir, "transit_data_{}_n{}.fits".format(star_name, n_transit))
 
     with fits.open(fits_file, mode="readonly") as fits_file:
-        # Load all image data
+        # Load data constant across transits
         waves = fits_file["WAVES"].data.astype(float)
-        obs_spec = fits_file["OBS_SPEC"].data.astype(float)
-        sigmas = fits_file["SIGMAS"].data.astype(float)
         detectors = fits_file["DETECTORS"].data.astype(float)
         orders = fits_file["ORDERS"].data.astype(float)
-
-        # Load table data
-        transit_info = Table(fits_file["TRANSIT_INFO"].data).to_pandas()
         syst_info = Table(fits_file["SYST_INFO"].data).to_pandas()
 
         # Set header for syst_info
         syst_info.set_index("parameter", inplace=True)
 
+        # Load per-transit HDUs
+        obs_spec_list = []
+        sigmas_list = []
+        transit_info_list = []
+        
+        for transit_i in range(n_transit):
+            spec_hdu = "OBS_SPEC_{}".format(transit_i)
+            sigma_hdu = "SIGMAS_{}".format(transit_i)
+            transit_tab_hdu = "TRANSIT_INFO_{}".format(transit_i)
+
+            obs_spec = fits_file[spec_hdu].data.astype(float)
+            sigmas = fits_file[sigma_hdu].data.astype(float)
+            transit_info = Table(fits_file[transit_tab_hdu].data).to_pandas()
+
+            obs_spec_list.append(obs_spec)
+            sigmas_list.append(sigmas)
+            transit_info_list.append(transit_info)
+
     # All done, return
-    return waves, obs_spec, sigmas, detectors, orders, transit_info, \
-        syst_info
+    return waves, obs_spec_list, sigmas_list, detectors, orders, \
+        transit_info_list, syst_info
 
 
 def save_transit_model_results_to_fits():
