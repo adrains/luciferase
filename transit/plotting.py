@@ -11,46 +11,78 @@ def plot_iteration():
     pass
  
 
-def plot_all_input_spectra(waves, fluxes_all, jds):
-    """Function to plot spectra at all phases and colour code by timestep.
+def plot_all_input_spectra(
+    waves,
+    fluxes_all_list,
+    transit_info_list,
+    n_transits):
+    """Function to plot spectra at all phases and colour code by timestep, with
+    each transit plotted in its own panel.
 
     Parameters
     ----------
-    wave_observed: 2D float array
+    waves: 2D float array
         Wavelength scale of shape [n_spec, n_wave].
 
-    fluxes_model: 3D float array
-        Flux array corresponding to wavelengths of shape 
-        [n_phase, n_spec, n_wave].
+    fluxes_all_list: list of 3D float array
+        List of length n_transits of flux arrays corresponding to wavelengths
+        of shape [n_phase, n_spec, n_wave].
     
-    jds: 1D float array
-        Array of timesteps.
+    transit_info_list: list of pandas DataFrames
+        List of transit info (length n_transits) DataFrames containing 
+        information associated with each transit time step. Each DataFrame has
+        columns:
+
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file', 'phase_start', 'is_in_transit_start', 'r_x_start',
+         'r_y_start', 'r_z_start', 'v_x_start', 'v_y_start', 'v_z_start',
+         's_projected_start', 'scl_start', 'mu_start',
+         'planet_area_frac_start', 'phase_mid', 'is_in_transit_mid',
+         'r_x_mid', 'r_y_mid', 'r_z_mid', 'v_x_mid', 'v_y_mid', 'v_z_mid',
+         's_projected_mid', 'scl_mid', 'mu_mid', 'planet_area_frac_mid',
+         'phase_end', 'is_in_transit_end', 'r_x_end', 'r_y_end', 'r_z_end',
+         'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
+         'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
+
+    n_transits: int
+        Number of transits the data represents.
     """
     plt.close("all")
-    fig, ax = plt.subplots(figsize=(15, 5))
+    fig, axes = plt.subplots(
+        nrows=n_transits, figsize=(15, 5), sharex=True, sharey=True,)
 
-    mid_jd = np.mean(jds)
-    hours = (jds - mid_jd) * 24
+    if n_transits == 1:
+        axes = [axes]
 
-    # Setup colour bar
-    norm = plt.Normalize(np.min(hours), np.max(hours))
-    cmap = plt.get_cmap("plasma")
-    colours = cmap(norm(hours))
+    for transit_i in range(n_transits):
+        # Get colour bar info
+        jds = transit_info_list[transit_i]["jd_mid"].values
+        mid_jd = np.mean(jds)
+        hours = (jds - mid_jd) * 24
 
-    cmap = cm.ScalarMappable(norm=norm, cmap=cm.plasma)
+        # Setup colour bar
+        norm = plt.Normalize(np.min(hours), np.max(hours))
+        cmap = plt.get_cmap("plasma")
+        colours = cmap(norm(hours))
 
-    for phase_i in range(64):
-        for wave_i in range(len(waves)):
-            ax.plot(
-                waves[wave_i],
-                fluxes_all[phase_i, wave_i],
-                color=colours[phase_i],
-                linewidth=0.5,
-                label=phase_i,)
+        cmap = cm.ScalarMappable(norm=norm, cmap=cm.plasma)
 
-    ax.set_xlabel("Wavelength")
-    ax.set_ylabel("Flux (counts)")
+        n_phase = fluxes_all_list[transit_i].shape[0]
 
-    cb = fig.colorbar(cmap)
-    cb.set_label("Time from mid-point (hr)")
+        for phase_i in range(n_phase):
+            for wave_i in range(len(waves)):
+                axes[transit_i].plot(
+                    waves[wave_i],
+                    fluxes_all_list[transit_i][phase_i, wave_i],
+                    color=colours[phase_i],
+                    linewidth=0.5,
+                    label=phase_i,)
+
+        axes[transit_i].set_ylabel("Flux (counts)")
+
+        cb = fig.colorbar(cmap, ax=axes[transit_i])
+        cb.set_label("Time from mid-point (hr)")
+
+    axes[-1].set_xlabel("Wavelength")
     plt.tight_layout()
