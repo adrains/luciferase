@@ -381,8 +381,10 @@ def bezier_interp(x_a, y_a, y2_a, x_interp,):
     # serves to clip it to 0 and the len(x_a)-1.
     k_low = np.searchsorted(x_a, x_interp)
 
-    # Restrict the maximum value of k_low to be len(x_a) - 1
-    k_low[k_low == len(x_a)] = len(x_a) - 1
+    # Restrict the maximum value of k_low to be len(x_a) - 2, such that we can
+    # k_high can be the final value of the array.
+    k_low = np.clip(k_low, a_min=None, a_max=(len(x_a) - 2))
+    #k_low[k_low == len(x_a)] = len(x_a) - 2
 
     # For the *upper* indices we simply index this by 1
     k_high = k_low + 1
@@ -448,12 +450,12 @@ def doppler_shift(x, y, gamma, y2):
     # to check this.
     assert len(x) == len(y) and len(y) == len(y2)
 
-    # Compute steps in wavelength and padding in pixels
+    # Compute steps in wavelength and padding in pixels, clip to be > 0
     dx1 = x[1] - x[0]
-    pad1 = np.max(np.ceil(-gamma*x[0]/dx1), 0)
+    pad1 = int(np.max([np.ceil(-gamma*x[0]/dx1), 0]))
 
     dx2 = x[-1] - x[-2]
-    pad2 = np.max(np.ceil(gamma*x[-1]/dx2), 0)
+    pad2 = int(np.max([np.ceil(gamma*x[-1]/dx2), 0]))
 
     # Pad arrays to avoid extrapolation
     # For the spectrum mirror points relative to the ends
@@ -468,7 +470,7 @@ def doppler_shift(x, y, gamma, y2):
         xx = np.concatenate((x, x_pad))
 
         y_pad = y[n-np.arange(pad2)-2]
-        yy = np.concatenat((y, y_pad))
+        yy = np.concatenate((y, y_pad))
         
         yy2_pad = -y2[-np.arange(pad2)-2]
         yy2 = np.concatenate((y2, yy2_pad))
@@ -479,7 +481,7 @@ def doppler_shift(x, y, gamma, y2):
         xx = np.concatenate((x_pad, x))
 
         y_pad = y[pad1-np.arange(pad1)]
-        yy = np.arange((y_pad, y))
+        yy = np.concatenate((y_pad, y))
 
         yy2_pad = -y2[pad1-np.arange(pad1)]
         yy2 = np.concatenate((yy2_pad, y2))
@@ -946,6 +948,9 @@ def save_transit_info_to_fits(
     planet information in a single multi-extension fits file ready for use for
     modelling with the Aronson method.
 
+    The filename will have format transit_data_X_nY.fits where X is the star
+    name/label, and Y is the number of transits saved in the file.
+
     HDUs common to all transits:
         HDU 0 (image): 'WAVES' [n_phase, n_spec, n_wave]
         HDU 1 (image): 'DETECTORS' [n_spec]
@@ -1071,13 +1076,13 @@ def save_transit_info_to_fits(
     hdu.writeto(fits_file, overwrite=True)
 
 
-def load_transit_info_from_fits(fits_load_dir, star_name, n_transit,):
+def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
     """Loads wavelength, spectra, sigma, detector, order, transit, and planet
     information from a single multi-extension fits file ready for use for
     modelling with the Aronson method.
 
     The filename should have format transit_data_X_nY.fits where X is the star
-    name, and Y is the number of transits saved in the file.
+    name/label, and Y is the number of transits saved in the file.
     
     HDUs common to all transits:
         HDU 0 (image): 'WAVES' [n_phase, n_spec, n_wave]
@@ -1096,7 +1101,7 @@ def load_transit_info_from_fits(fits_load_dir, star_name, n_transit,):
         Directory to load the fits file from.
 
     star_name: string
-        Name of the star to be included in the filename. 
+        Label to be included in the filename.
 
     n_transit: int
         Number of transits saved to this fits file.
@@ -1151,7 +1156,7 @@ def load_transit_info_from_fits(fits_load_dir, star_name, n_transit,):
     """
     # Load in the fits file
     fits_file = os.path.join(
-        fits_load_dir, "transit_data_{}_n{}.fits".format(star_name, n_transit))
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
 
     with fits.open(fits_file, mode="readonly") as fits_file:
         # Load data constant across transits
@@ -1504,7 +1509,7 @@ def calculate_transit_timestep_info(transit_info, syst_info,):
     # - The doppler shift should be *negative* (1 - doppler_shift) * λ_old when
     #   *shifting* out of the (adopted) rest/reference-frame.
     star_rv_bcor = -1* transit_info["bcor"] + syst_info.loc["rv_star", "value"]
-    vsini_planet_epoch = syst_info.loc["rv_star", "value"] * r_x
+    vsini_planet_epoch = syst_info.loc["vsini", "value"] * r_x
 
     gamma = star_rv_bcor / const.c.cgs.to(u.km/u.s)
     beta = (star_rv_bcor + vsini_planet_epoch) / const.c.cgs.to(u.km/u.s)
