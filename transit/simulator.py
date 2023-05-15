@@ -600,7 +600,8 @@ def apply_instrumental_transfer_function(
     wave,
     flux,
     throughput_json_path,
-    fill_throughput_value=0,):
+    fill_throughput_value=0,
+    apply_blaze=True,):
     """Apply the CRIRES+ instrumental transfer function for the telescope, 
     enslitted fraction, instrument throughput, grating + blaze efficiency, and 
     detector efficiency. Note that we do *not* account for the atmospheric
@@ -618,6 +619,9 @@ def apply_instrumental_transfer_function(
         Default througput value to fill undefined wavelength points. Default is
         0, meaning that we assume no transmission for undefined values.
 
+    apply_blaze: boolean, default: True
+        Whether or not to apply the grating/blaze throughput.
+
     Returns
     -------
     flux_scaled: 1D float array
@@ -627,11 +631,17 @@ def apply_instrumental_transfer_function(
     throughput_df = load_crires_throughput_json(throughput_json_path,)
 
     # Multiply throughputs (all except atmosphere)
-    total_throughput = (throughput_df["grating eff. incl. blaze"]
-        * throughput_df["eff.telescope"]
-        * throughput_df["enslitted energy fraction"]
-        * throughput_df["eff.detector"]
-        * throughput_df["eff.instrument"])
+    if apply_blaze:
+        total_throughput = (throughput_df["grating eff. incl. blaze"]
+            * throughput_df["eff.telescope"]
+            * throughput_df["enslitted energy fraction"]
+            * throughput_df["eff.detector"]
+            * throughput_df["eff.instrument"])
+    else:
+        total_throughput = (throughput_df["eff.telescope"]
+            * throughput_df["enslitted energy fraction"]
+            * throughput_df["eff.detector"]
+            * throughput_df["eff.instrument"])
     
     # Interpolate throughput
     calc_throughput = interp1d(
@@ -864,7 +874,8 @@ def simulate_transit_single_epoch(
     throughput_json_path,
     do_equidistant_lambda_sampling_before_broadening=True,
     fill_throughput_value=0,
-    planet_transmission_boost_fac=1,):
+    planet_transmission_boost_fac=1,
+    apply_blaze_function=True,):
     """Simulate a single epoch of a planet during transit by modelling the
     stellar, planetary, and telluric components. This function takes into
     account the different velocities of each component, instrumental/velocity
@@ -963,6 +974,9 @@ def simulate_transit_single_epoch(
     planet_transmission_boost_fac: float, default: 1
         Whether to artificially boost the strength of planetary absorption by
         some factor for testing. By default set to 1 (i.e. disabled).
+
+    apply_blaze_function: boolean, default: True
+        Whether or not to apply the blaze function.
 
     Returns
     -------
@@ -1179,7 +1193,8 @@ def simulate_transit_single_epoch(
         wave=wave_observed,
         flux=flux_model_ob,
         throughput_json_path=throughput_json_path,
-        fill_throughput_value=fill_throughput_value,)
+        fill_throughput_value=fill_throughput_value,
+        apply_blaze=apply_blaze_function,)
 
     # Convert ergs/s to counts/sec
     flux_counts_per_sec = convert_flux_to_counts(
@@ -1222,7 +1237,8 @@ def simulate_transit_multiple_epochs(
     planet_transmission_boost_fac,
     do_use_uniform_stellar_spec,
     do_use_uniform_telluric_spec,
-    do_use_uniform_planet_spec,):
+    do_use_uniform_planet_spec,
+    apply_blaze_function,):
     """Simulates an entire transit with many epochs using multiple calls to
     simulate_transit_single_epoch. See docstrings of calc_model_flux and
     simulate_transit_single_epoch for more detail.
@@ -1305,6 +1321,9 @@ def simulate_transit_multiple_epochs(
         If True, the imported planet spectrum is set to have 100% 
         transmittance.
 
+    apply_blaze_function: boolean
+        Whether or not to apply the blaze function.
+
     Returns
     -------
     fluxes_model, snr: float array
@@ -1366,7 +1385,8 @@ def simulate_transit_multiple_epochs(
                 do_equidistant_lambda_sampling_before_broadening,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
-            planet_transmission_boost_fac=planet_transmission_boost_fac,)
+            planet_transmission_boost_fac=planet_transmission_boost_fac,
+            apply_blaze_function=apply_blaze_function,)
         
         fluxes_model_all[epoch_i] = flux_counts
         snr_model_all[epoch_i] = snr

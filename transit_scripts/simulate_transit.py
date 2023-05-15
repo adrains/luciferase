@@ -48,6 +48,8 @@ fill_throughput_value = 1
 
 tau_fill_value = 0
 
+apply_blaze_function = False
+
 # -----------------------------------------------------------------------------
 # Test/troubleshooting settings
 # -----------------------------------------------------------------------------
@@ -92,7 +94,8 @@ for transit_i in range(N_TRANSIT):
         planet_transmission_boost_fac=planet_transmission_boost_fac,
         do_use_uniform_stellar_spec=do_use_uniform_stellar_spec,
         do_use_uniform_telluric_spec=do_use_uniform_telluric_spec,
-        do_use_uniform_planet_spec=do_use_uniform_planet_spec,)
+        do_use_uniform_planet_spec=do_use_uniform_planet_spec,
+        apply_blaze_function=apply_blaze_function,)
     
     model_flux_list.append(fluxes_model_all)
     snr_model_list.append(snr_model_all)
