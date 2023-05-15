@@ -5,6 +5,7 @@ data file has already been prepared using prepare_transit_model_fits.py.
 import numpy as np
 import transit.model as tmod
 import transit.utils as tu
+import astropy.constants as const
 
 # -----------------------------------------------------------------------------
 # Read in pre-prepared fits file
@@ -33,28 +34,40 @@ if run_on_sub_slice:
     waves = waves[segment_mask]
     obs_spec = obs_spec[:,segment_mask]
 
+# HACK to put mu_wgt in Nik's format. TODO discuss with Nik the correct
+# formalism, specifically whether mu_wgt should be normalised or not.
+R_SUN = const.R_sun.cgs.value
+R_EARTH = const.R_earth.cgs.value
+
+r_planet = (syst_info.loc["r_planet_rearth", "value"]*R_EARTH
+    / (syst_info.loc["r_star_rsun", "value"]*R_SUN))
+
+transit_info["planet_area_frac_mid"] = \
+    transit_info["planet_area_frac_mid"].values * (np.pi * r_planet**2)
+
 # -----------------------------------------------------------------------------
 # Inverse model settings
 # -----------------------------------------------------------------------------
 lambda_treg_star = 1
-lambda_treg_tau = None      #1E-3
-lambda_treg_planet = None   #1E5
+lambda_treg_tau = None      # 1E-3
+lambda_treg_planet = None   # 1E5
 tau_nr_tolerance = 1E-5
 model_converge_tolerance = 1E-5
-max_iter = 4000
+max_iter = 3000
 do_plot = False
 print_every_n_iterations = 1
 
-# Set a reasonable limit for the maximum fluxes
-max_flux = 2*np.max(fluxes_list[0])
+# Set a reasonable limit for the maximum fluxes. Recommend not to use currently
+# it seems to prevent the model fully exploring the parameter space.
+max_flux = None # 2*np.max(fluxes_list[0])
 
 # Limits (low, high). Set to (None, None) for no limits. Note that to prevent
 # division by zero and overflow errors min telluric_trans should be > 0.
-stellar_flux_limits = (1E-5, max_flux)
-telluric_trans_limits = (4.5E-5, max_flux)          # Max optical depth ~10
+stellar_flux_limits = (1E-5, None)
+telluric_trans_limits = (4.5E-5, None)          # Max optical depth ~10
 telluric_tau_limits = (0, -np.log(4.5E-5))
 planet_trans_limits = (1E-5, None)
-scale_limits = (1E-5, None)
+scale_limits = (1E-5, 1)
 model_limits = (1E-5, None)
 
 # -----------------------------------------------------------------------------
@@ -81,7 +94,15 @@ flux, trans, tau, scale, model, mask = tmod.run_transit_model(
     print_every_n_iterations=print_every_n_iterations,)
 
 # Save the results
-pass
+tu.save_transit_model_results_to_fits(
+    fits_load_dir="",
+    label=file_label,
+    n_transit=n_transit,
+    flux=flux,
+    trans=trans,
+    tau=tau,
+    scale=scale,
+    mask=mask,)
 
 # Diagnostic plots
 pass

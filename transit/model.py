@@ -82,7 +82,7 @@ def update_stellar_flux(
     transit_info,
     syst_info,
     lambda_treg,
-    stellar_flux_limits,):
+    flux_limits,):
     """
     Updates stellar flux and its derivative in the *stellar* frame.
 
@@ -142,7 +142,7 @@ def update_stellar_flux(
         Tikhonov regularisation parameter lambda. Defaults to None, in
         which case no regularisation is applied.
 
-    stellar_flux_limits: float/None tuple
+    flux_limits: float/None tuple
         Lower and upper limits to enforce for the modelled stellar flux as
         (flux_low, flux_high) where a value of None for either the lower or
         upper limit is used to not apply a limit.
@@ -232,11 +232,15 @@ def update_stellar_flux(
         else:
             new_flux = r/b
 
-        # Clip fluxes
-        flux[spec_i] = np.clip(
-            a=new_flux,
-            a_min=stellar_flux_limits[0],
-            a_max=stellar_flux_limits[1],)
+        # [Optional] Clip fluxes
+        if flux_limits[0] is not None or flux_limits[1] is not None:
+            new_flux[:] = np.clip(
+                a=new_flux,
+                a_min=flux_limits[0],
+                a_max=flux_limits[1],)
+        
+        # Update flux by reference
+        flux[spec_i] = new_flux
 
         # Update flux derivative
         flux_2[spec_i] = tu.bezier_init(waves[spec_i], flux[spec_i])
@@ -486,7 +490,7 @@ def update_transmission(
     transit_info,
     syst_info,
     lambda_treg,
-    planet_trans_limits,):
+    trans_limits,):
     """
     Updates the exoplanet transmission and its derivative in-place. To do this,
     we shift things into the planet rv frame.
@@ -542,7 +546,7 @@ def update_transmission(
     lambda_treg: float or None
         Tikhonov regularisation parameter lambda. Set to None for no smoothing.
 
-    planet_trans_limits: float/None tuple
+    trans_limits: float/None tuple
         Lower and upper limits to enforce for the modelled planet transmission
         (trans_low, trans_high) where a value of None for either the lower or
         upper limit is used to not apply a limit.
@@ -657,11 +661,15 @@ def update_transmission(
         else:
             new_trans = r/b
 
-        # Enforce limits
-        trans[spec_i] = np.clip(
-            a=new_trans,
-            a_min=planet_trans_limits[0],
-            a_max=planet_trans_limits[1],)
+        # [Optional] Enforce limits
+        if trans_limits[0] is not None or trans_limits[1] is not None:
+            new_trans[:] = np.clip(
+                a=new_trans,
+                a_min=trans_limits[0],
+                a_max=trans_limits[1],)
+            
+        # Update transmission by reference
+        trans[spec_i] = new_trans
 
         # Update the derivative
         trans_2[spec_i] = tu.bezier_init(waves[spec_i], trans[spec_i])
@@ -728,17 +736,22 @@ def update_scaling(
         b[phase_i] += np.sum(scaled_model**2)
 
     # Calculcate the new scale vector
+    scale_old = scale.copy()
     scale_new = a/b
 
     # Normalize to avoid degeneracy between flux and scaling
     scale_new /= np.max(scale_new)
 
-    # Enforce scale limits
-    scale[:] = np.clip(
-        a=scale_new, a_min=scale_limits[0], a_max=scale_limits[1])
+    # [Optional] Enforce scale limits
+    if scale_limits[0] is not None or scale_limits[1] is not None:
+        scale_new = np.clip(
+            a=scale_new, a_min=scale_limits[0], a_max=scale_limits[1])
+
+    # Update scale by reference
+    scale[:] = scale_new
 
     # Compute the fractional change in scale to update the model
-    scale_fac = scale_new / scale
+    scale_fac = scale_new / scale_old
 
     # Tile this to shape [n_phase, n_spec, n_wave], update model by reference
     sf = np.tile(scale_fac, n_spec*n_wave).reshape((n_wave, n_spec, n_phase)).T
@@ -836,7 +849,7 @@ def create_transit_model_array(
     a_limb = syst_info.loc[ldc_cols, "value"].values
 
     mus = transit_info["mu_mid"].values
-    mu_wgt = transit_info["planet_area_frac_mid"]
+    mu_wgt = transit_info["planet_area_frac_mid"].values
 
     airmasses = transit_info["airmass"].values
 
@@ -900,10 +913,13 @@ def create_transit_model_array(
             model[phase_i, spec_i] = (scale[phase_i] * (f1-intens) 
                 * np.exp(-tau[spec_i]*airmasses[phase_i]))
 
-    # Enforce positive model (TODO: run this by Nik)
-    model[:] = np.clip(a=model, a_min=model_limits[0], a_max=model_limits[1],)
+    # [Optional] Enforce model limits
+    if model_limits[0] is not None or model_limits[1] is not None:
+        model[:] = \
+            np.clip(a=model, a_min=model_limits[0], a_max=model_limits[1],)
 
     return model
+
 
 def run_transit_model_iteration(
     waves,
@@ -932,9 +948,14 @@ def run_transit_model_iteration(
     lambda_treg_tau,
     lambda_treg_planet,
     is_first,):
-    """Called to iterate aronson method, which involves updating each of our
-    result arrays (flux, tau, transmission, ldc, model, scale, and 
-    derivatives). All arrays updated in place.
+    """Runs a single iteration of our inverse model. Each iteration does the
+    following:
+     1) Update stellar flux, flux derivative, and model.
+     2) Update tau, tau derivative, and model.
+     3) Update scaling and model.
+     4) Update planet transmission, derivative, and model.
+
+    All arrays are updated in-place.
 
     Parameters
     ----------
@@ -1038,13 +1059,6 @@ def run_transit_model_iteration(
     n_spec = obs_spec.shape[1]
     airmasses = transit_info["airmass"].values
 
-    # Prepare 2nd derivatives for telluric spectra interpolations
-    # TODO Surely this isn't needed either, the reinitialisation that is?
-    # tau_2 = tau.copy()
-
-    for spec_i in range(0, n_spec):
-        tau_2[spec_i] = tu.bezier_init(waves[spec_i], tau[spec_i],)
-
     # -------------------------------------------------------------------------
     # Update stellar flux & model by reference
     # -------------------------------------------------------------------------
@@ -1068,7 +1082,7 @@ def run_transit_model_iteration(
         transit_info=transit_info,
         syst_info=syst_info,
         lambda_treg=lambda_treg_star,
-        stellar_flux_limits=stellar_flux_limits,)
+        flux_limits=stellar_flux_limits,)
 
     model[:,:,:] = create_transit_model_array(
         waves=waves,
@@ -1109,25 +1123,15 @@ def run_transit_model_iteration(
         tolerance=tau_nr_tolerance,
         telluric_tau_limits=telluric_tau_limits,)
 
+    # Update tau derivative from our new tau array
+    for spec_i in range(0, n_spec):
+        tau_2[spec_i] = tu.bezier_init(waves[spec_i], tau[spec_i],)
+
     # -------------------------------------------------------------------------
     # Update scaling & model by reference
     # -------------------------------------------------------------------------
     print("- Updating scaling...")
     update_scaling(model, obs_spec, scale, scale_limits)
-
-    # TODO: is this necessary? We update the model by reference in the scaling
-    # function right at the end?
-    model[:,:,:] = create_transit_model_array(
-        waves=waves,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        model_limits=model_limits,)
 
     # -------------------------------------------------------------------------
     # Update transmission & model by reference
@@ -1147,7 +1151,19 @@ def run_transit_model_iteration(
         transit_info=transit_info,
         syst_info=syst_info,
         lambda_treg=lambda_treg_planet,
-        planet_trans_limits=planet_trans_limits,)
+        trans_limits=planet_trans_limits,)
+
+    model[:,:,:] = create_transit_model_array(
+        waves=waves,
+        flux=flux,
+        flux_2=flux_2,
+        tau=tau,
+        trans=trans,
+        trans_2=trans_2,
+        scale=scale,
+        transit_info=transit_info,
+        syst_info=syst_info,
+        model_limits=model_limits,)
 
     # All done, nothing to return since we modified in place
 
@@ -1310,10 +1326,12 @@ def run_transit_model(
     flux = obs_spec[airmass_min_i,:,:]/np.exp(-tau*airmasses[airmass_min_i])
 
     # Clip fluxes
-    flux[:] = np.clip(
-        a=flux,
-        a_min=stellar_flux_limits[0],
-        a_max=stellar_flux_limits[1],)
+    if (stellar_flux_limits[0] is not None 
+        or stellar_flux_limits[1] is not None):
+        flux[:] = np.clip(
+            a=flux,
+            a_min=stellar_flux_limits[0],
+            a_max=stellar_flux_limits[1],)
 
     # -------------------------------------------------------------------------
     # Derivatives
@@ -1398,7 +1416,7 @@ def run_transit_model(
     # Print initial error + info
     # -------------------------------------------------------------------------
     init_error = np.sum(mask*np.abs(obs_spec-model))/np.sum(mask)
-    print("-"*120, "\nModelling: Initial Values\n", "-"*120, sep="",)
+    print("-"*140, "\nModelling: Initial Values\n", "-"*140, sep="",)
     print("Initial error: {}\n".format(init_error))
             
     names = ["obs_spec", "model", "flux", "tau", "trans", "scale"]
@@ -1429,7 +1447,7 @@ def run_transit_model(
     hit_max_iterations = False
     
     while (not has_converged) and (not hit_max_iterations):
-        print("-"*120, "\nIteration #{}\n".format(iter_count), "-"*120, sep="")
+        print("-"*160, "\nIteration #{}\n".format(iter_count), "-"*160, sep="")
         # Save previous estimates for comparison
         flux_old = flux.copy()
         tau_old = tau.copy()
@@ -1478,11 +1496,11 @@ def run_transit_model(
                 std_array = np.nanstd(array)
                 n_nans = np.sum(np.isnan(array))
                 print("{: <8} -->".format(name),
-                    " min = {:10.4f},".format(min_array),
-                    " median = {:10.4f},".format(median_array),
-                    " mean = {:15.4f},".format(mean_array),
-                    " std = {:15.4f},".format(std_array),
-                    " max = {:15.4f},".format(max_array),
+                    " min = {:20.4f},".format(min_array),
+                    " median = {:20.4f},".format(median_array),
+                    " mean = {:20.4f},".format(mean_array),
+                    " std = {:20.4f},".format(std_array),
+                    " max = {:20.4f},".format(max_array),
                     " # nans = {}".format(n_nans),
                     sep="",)
 

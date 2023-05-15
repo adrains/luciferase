@@ -1100,7 +1100,7 @@ def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
     fits_load_dir: string
         Directory to load the fits file from.
 
-    star_name: string
+    label: string
         Label to be included in the filename.
 
     n_transit: int
@@ -1191,10 +1191,74 @@ def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
         transit_info_list, syst_info
 
 
-def save_transit_model_results_to_fits():
+def save_transit_model_results_to_fits(
+    fits_load_dir,
+    label,
+    n_transit,
+    flux,
+    trans,
+    tau,
+    scale,
+    mask,):
+    """Function to save the output of a modelling run to the same fits file
+    used to initialise it.
+    
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    flux: 2D float array
+        Fitted model stellar flux of shape [n_spec, n_px].
+
+    trans: 2D float array
+        Fitted model planet transmission of shape [n_spec, n_px].
+
+    tau: 2D float array
+        Fitted model telluric tau of shape [n_spec, n_px].
+
+    scale: 1D float array
+        Fitted model scale parameter of shape [n_phase].
+
+    model: 3D float array
+        Fitted model (star + tellurics + planet) matrix of shape
+        [n_phase, n_spec, n_px].
+
+    mask: 3D float array
+        Mask array of shape [n_phase, n_spec, n_px]. Contains either 0 or 1.
     """
-    """
-    pass
+    # Pair the extensions with their data
+    extensions = {
+        "MODEL_FLUX":(flux, "Fitted Aronson stellar fluxes."),
+        "MODEL_TRANS":(trans, "Fitted Aronson planet transmission."),
+        "MODEL_TAU":(tau, "Fitted Aronson telluric tau."),
+        "MODEL_SCALE":(scale, "Fitted Aronson model scale."),
+        "MODEL_MASK":(mask, "Fitted Aronson mask."),
+    }
+
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="update") as fits_file:
+        for extname in extensions.keys():
+            # First check if the HDU already exists
+            if extname in fits_file:
+                fits_file[extname].data = extensions[extname][0]
+            
+            # Not there, make and append
+            else:
+                hdu = fits.PrimaryHDU(extensions[extname][0])
+                hdu.header["EXTNAME"] = (extname, extensions[extname][1])
+                fits_file.append(hdu)
+
+            fits_file.flush()
 
 
 def calculate_transit_timestep_info(transit_info, syst_info,):
