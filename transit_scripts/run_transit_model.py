@@ -5,6 +5,7 @@ data file has already been prepared using prepare_transit_model_fits.py.
 import numpy as np
 import transit.model as tmod
 import transit.utils as tu
+import transit.plotting as tplt
 import astropy.constants as const
 
 # -----------------------------------------------------------------------------
@@ -49,8 +50,8 @@ transit_info["planet_area_frac_mid"] = \
 # Inverse model settings
 # -----------------------------------------------------------------------------
 lambda_treg_star = 1
-lambda_treg_tau = None      # 1E-3
-lambda_treg_planet = None   # 1E5
+lambda_treg_tau = 100      # 1E-3
+lambda_treg_planet = 1   # 1E5
 tau_nr_tolerance = 1E-5
 model_converge_tolerance = 1E-5
 max_iter = 3000
@@ -69,6 +70,27 @@ telluric_tau_limits = (0, -np.log(4.5E-5))
 planet_trans_limits = (1E-5, None)
 scale_limits = (1E-5, 1)
 model_limits = (1E-5, None)
+
+# -----------------------------------------------------------------------------
+# Debugging settings
+# -----------------------------------------------------------------------------
+# Load in the flux, tau, and trans vectors used to simulate this transit
+component_flux, component_tau, component_trans = \
+    tu.load_simulated_transit_components_from_fits(
+        fits_load_dir=save_path,
+        label=file_label,
+        n_transit=n_transit,)
+
+fixed_flux = component_flux[segment_mask]
+fixed_tau = component_tau[segment_mask]
+fixed_trans = component_trans[segment_mask]
+fixed_scale = np.ones(obs_spec.shape[0])
+
+# Setting any of these to true will fix that particular vector during fitting
+do_fix_flux_vector = False
+do_fix_tau_vector = False
+do_fix_trans_vector = False
+do_fix_scale_vector = False
 
 # -----------------------------------------------------------------------------
 # Running modelling
@@ -91,7 +113,15 @@ flux, trans, tau, scale, model, mask = tmod.run_transit_model(
     model_limits=model_limits,
     max_iter=max_iter,
     do_plot=do_plot,
-    print_every_n_iterations=print_every_n_iterations,)
+    print_every_n_iterations=print_every_n_iterations,
+    do_fix_flux_vector=do_fix_flux_vector,
+    do_fix_trans_vector=do_fix_trans_vector,
+    do_fix_tau_vector=do_fix_tau_vector,
+    do_fix_scale_vector=do_fix_scale_vector,
+    fixed_flux=fixed_flux,
+    fixed_trans=fixed_trans,
+    fixed_tau=fixed_tau,
+    fixed_scale=fixed_scale,)
 
 # Save the results
 tu.save_transit_model_results_to_fits(
@@ -105,4 +135,4 @@ tu.save_transit_model_results_to_fits(
     mask=mask,)
 
 # Diagnostic plots
-pass
+tplt.plot_component_spectra(waves, flux, tau, trans,)

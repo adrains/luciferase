@@ -48,7 +48,7 @@ def plot_all_input_spectra(
     n_transits: int
         Number of transits the data represents.
     """
-    plt.close("all")
+    #plt.close("all")
     fig, axes = plt.subplots(
         nrows=n_transits, figsize=(15, 5), sharex=True, sharey=True,)
 
@@ -85,4 +85,57 @@ def plot_all_input_spectra(
         cb.set_label("Time from mid-point (hr)")
 
     axes[-1].set_xlabel("Wavelength")
+    plt.tight_layout()
+
+
+def plot_component_spectra(waves, fluxes, telluric_tau, planet_trans,):
+    """Plots fluxes, telluric transmission, and planet transmission in
+    respective subplots. Can be used for both Aronson fitted results, or
+    simulated components.
+
+    Parameters
+    ----------
+    waves: float array
+        Wavelength scale of shape [n_spec, n_px].
+
+    fluxes: 2D float array
+        Model stellar flux component of shape [n_spec, n_px].
+
+    telluric_tau: 2D float array
+        Model telluric tau component of shape [n_spec, n_px].
+
+    planet_trans: 2D float array
+        Model planet transmission component of shape [n_spec, n_px].
+    """
+    # Intialise subplots
+    fig, (ax_flux, ax_tell, ax_trans) = plt.subplots(
+        nrows=3,
+        ncols=1,
+        figsize=(15, 5),
+        sharex=True,)
+
+    # Plot each spectral segment
+    for spec_i in range(waves.shape[0]):
+        ax_flux.plot(
+            waves[spec_i],
+            fluxes[spec_i],
+            linewidth=0.4,
+            color="r")
+        
+        ax_tell.plot(
+            waves[spec_i],
+            np.exp(-telluric_tau[spec_i]),
+            linewidth=0.4,
+            color="b")
+        
+        ax_trans.plot(
+            waves[spec_i],
+            planet_trans[spec_i],
+            linewidth=0.4,
+            color="g")
+
+    ax_flux.set_title("Stellar flux")
+    ax_tell.set_title("Telluric Transmission")
+    ax_trans.set_title("Planet Transmission")
+    ax_trans.set_xlabel(r"Wavelength (${\rm \AA}$)")
     plt.tight_layout()

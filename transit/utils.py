@@ -1191,6 +1191,105 @@ def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
         transit_info_list, syst_info
 
 
+def save_simulated_transit_components_to_fits(
+    fits_load_dir,
+    label,
+    n_transit,
+    flux,
+    tau,
+    trans,):
+    """Function to save the component flux, telluric tau, and planet 
+    transmission vectors to the same fits file as the individual epochs.
+    
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    flux: 2D float array
+        Model stellar flux component of shape [n_spec, n_px].
+
+    tau: 2D float array
+        Model telluric tau component of shape [n_spec, n_px].
+
+    trans: 2D float array
+        Model planet transmission component of shape [n_spec, n_px].
+    """
+    # Pair the extensions with their data
+    extensions = {
+        "COMPONENT_FLUX":(flux, "Flux component of simulated transit."),
+        "COMPONENT_TAU":(tau, "Telluric tau component of simulated transit."),
+        "COMPONENT_TRANS":(trans, "Planet component of simulated transit."),
+    }
+
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="update") as fits_file:
+        for extname in extensions.keys():
+            # First check if the HDU already exists
+            if extname in fits_file:
+                fits_file[extname].data = extensions[extname][0]
+            
+            # Not there, make and append
+            else:
+                hdu = fits.PrimaryHDU(extensions[extname][0])
+                hdu.header["EXTNAME"] = (extname, extensions[extname][1])
+                fits_file.append(hdu)
+
+            fits_file.flush()
+
+
+def load_simulated_transit_components_from_fits(
+    fits_load_dir,
+    label,
+    n_transit,):
+    """Function to load the component flux, telluric tau, and planet 
+    transmission vectors from a fits file.
+    
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    Returns
+    ----------
+    component_flux: 2D float array
+        Model stellar flux component of shape [n_spec, n_px].
+
+    component_tau: 2D float array
+        Model telluric tau component of shape [n_spec, n_px].
+
+    component_trans: 2D float array
+        Model planet transmission component of shape [n_spec, n_px].
+    """
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="readonly") as fits_file:
+        # Load data constant across transits
+        component_flux = fits_file["COMPONENT_FLUX"].data.astype(float)
+        component_tau = fits_file["COMPONENT_TAU"].data.astype(float)
+        component_trans = fits_file["COMPONENT_TRANS"].data.astype(float)
+
+    # All done, return
+    return component_flux, component_tau, component_trans
+
+
 def save_transit_model_results_to_fits(
     fits_load_dir,
     label,
@@ -1202,7 +1301,7 @@ def save_transit_model_results_to_fits(
     mask,):
     """Function to save the output of a modelling run to the same fits file
     used to initialise it.
-    
+
     Parameters
     ----------
     fits_load_dir: string

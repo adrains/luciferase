@@ -43,7 +43,7 @@ instr_resolving_power = 100000
 r_tel_prim = 8.2 / 2
 r_tel_cen_ob = 1 / 2
 
-do_equidistant_lambda_sampling_before_broadening = True
+do_equid_lambda_resample = True
 fill_throughput_value = 1
 
 tau_fill_value = 0
@@ -59,7 +59,7 @@ do_use_uniform_telluric_spec = False
 do_use_uniform_planet_spec = False
 
 # Set this to values > 1 to increase the planetary absorption
-planet_transmission_boost_fac = 1000
+planet_transmission_boost_fac = 1
 
 # -----------------------------------------------------------------------------
 # Running things
@@ -73,29 +73,29 @@ line = "-"*80
 # Run separately for each transit
 for transit_i in range(N_TRANSIT):
     print(line, "\nModelling transit #{}\n".format(transit_i), line, sep="")
-    fluxes_model_all, snr_model_all = sim.simulate_transit_multiple_epochs(
-        wave_observed=waves*10,
-        syst_info=syst_info,
-        transit_info=transit_info_list[transit_i],
-        marcs_fits=marcs_fits,
-        planet_wave_fits=planet_wave_fits,
-        planet_spec_fits=planet_spec_fits,
-        molecfit_fits=molecfit_fits,
-        throughput_json_path=throughput_json_path,
-        wl_min=wl_min,
-        wl_max=wl_max,
-        instr_resolving_power=instr_resolving_power,
-        r_tel_prim=r_tel_prim,
-        r_tel_cen_ob=r_tel_cen_ob,
-        do_equidistant_lambda_sampling_before_broadening=\
-            do_equidistant_lambda_sampling_before_broadening,
-        fill_throughput_value=fill_throughput_value,
-        tau_fill_value=tau_fill_value,
-        planet_transmission_boost_fac=planet_transmission_boost_fac,
-        do_use_uniform_stellar_spec=do_use_uniform_stellar_spec,
-        do_use_uniform_telluric_spec=do_use_uniform_telluric_spec,
-        do_use_uniform_planet_spec=do_use_uniform_planet_spec,
-        apply_blaze_function=apply_blaze_function,)
+    fluxes_model_all, snr_model_all, component_vectors = \
+        sim.simulate_transit_multiple_epochs(
+            wave_observed=waves*10,
+            syst_info=syst_info,
+            transit_info=transit_info_list[transit_i],
+            marcs_fits=marcs_fits,
+            planet_wave_fits=planet_wave_fits,
+            planet_spec_fits=planet_spec_fits,
+            molecfit_fits=molecfit_fits,
+            throughput_json_path=throughput_json_path,
+            wl_min=wl_min,
+            wl_max=wl_max,
+            instr_resolving_power=instr_resolving_power,
+            r_tel_prim=r_tel_prim,
+            r_tel_cen_ob=r_tel_cen_ob,
+            do_equid_lambda_resample=do_equid_lambda_resample,
+            fill_throughput_value=fill_throughput_value,
+            tau_fill_value=tau_fill_value,
+            planet_transmission_boost_fac=planet_transmission_boost_fac,
+            do_use_uniform_stellar_spec=do_use_uniform_stellar_spec,
+            do_use_uniform_telluric_spec=do_use_uniform_telluric_spec,
+            do_use_uniform_planet_spec=do_use_uniform_planet_spec,
+            apply_blaze_function=apply_blaze_function,)
     
     model_flux_list.append(fluxes_model_all)
     snr_model_list.append(snr_model_all)
@@ -103,14 +103,21 @@ for transit_i in range(N_TRANSIT):
     # Save our simulated fluxes in the same format as we would real data
     sigmas_model_list.append(np.zeros_like(fluxes_model_all))
 
-# Plot
+# Plot the simulated spectra
 tplt.plot_all_input_spectra(
     waves=waves,
     fluxes_all_list=model_flux_list,
     transit_info_list=transit_info_list,
     n_transits=N_TRANSIT,)
 
-# Save results
+# Plot the component spectra
+tplt.plot_component_spectra(
+    waves=waves,
+    fluxes=component_vectors["stellar_flux"],
+    telluric_tau=component_vectors["telluric_tau"],
+    planet_trans=component_vectors["planet_trans"],)
+
+# Save results to new fits file
 tu.save_transit_info_to_fits(
     waves=waves,
     obs_spec_list=model_flux_list,
@@ -122,3 +129,12 @@ tu.save_transit_info_to_fits(
     syst_info=syst_info,
     fits_save_dir=save_path,
     label=label,)
+
+# Add the component spectra
+tu.save_simulated_transit_components_to_fits(
+    fits_load_dir=save_path,
+    label=label,
+    n_transit=N_TRANSIT,
+    flux=component_vectors["stellar_flux"],
+    tau=component_vectors["telluric_tau"],
+    trans=component_vectors["planet_trans"],)

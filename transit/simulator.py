@@ -857,6 +857,68 @@ def calc_model_flux(
 # -----------------------------------------------------------------------------
 # Simulate
 # -----------------------------------------------------------------------------
+def shift_spec_and_convert_to_instrumental_scale(
+    wave_old,
+    flux_old,
+    wave_obs,
+    doppler_shift,
+    instr_resolving_power,
+    do_equid_lambda_resample,):
+    """Function to doppler shift spectrum, broaden to instrumental R, and 
+    interpolate to the instrumental scale.
+
+    Parameters
+    ----------
+    wave_old, flux_old: float array
+        Original wavelength scale and flux vector.
+    
+    wave_obs: 1D or 2D float array
+        Observed/instrumental wavelength scale of shape [n_wave] for a single 
+        spectral segment, or [n_spec, n_wave] in the case of multiple orders or
+        detectors.
+
+    doppler_shift: float
+        Unitless doppler shift.
+
+    instr_resolving_power: float
+        Instrumental resolving power to simulate.
+
+    do_equid_lambda_resample: boolean, default: True
+        Whether to resample wavelength and flux arrays onto a new wavelength
+        scale with equidistant lambda sampling prior to broadening. This is
+        required for using instrBroadGaussFast.
+    
+    Returns
+    -------
+    flux_obs: float array
+        Flux vector corresponding to wave_obs.
+    """
+    # Doppler shift flux
+    if doppler_shift != 0:
+        flux_rv_shift = interpolate_spectrum(
+            wave_new=wave_old*(1-doppler_shift),
+            wave_old=wave_old,
+            flux_old=flux_old,
+            fill_value=1.0,)
+    else:
+        flux_rv_shift = flux_old.copy()
+
+    # Broaden flux to instrumental resolution
+    flux_instr = instrBroadGaussFast(
+        wvl=wave_old,
+        flux=flux_rv_shift,
+        resolution=instr_resolving_power,
+        equid=do_equid_lambda_resample,)
+
+    # Interpolate stellar flux to instrumental wavelength scale
+    flux_obs = interpolate_spectrum(
+        wave_new=wave_obs,
+        wave_old=wave_old,
+        flux_old=flux_instr,)
+    
+    return flux_obs
+
+
 def simulate_transit_single_epoch(
     wave_observed,
     syst_info,
@@ -872,10 +934,11 @@ def simulate_transit_single_epoch(
     r_tel_prim,
     r_tel_cen_ob,
     throughput_json_path,
-    do_equidistant_lambda_sampling_before_broadening=True,
+    do_equid_lambda_resample=True,
     fill_throughput_value=0,
     planet_transmission_boost_fac=1,
-    apply_blaze_function=True,):
+    apply_blaze_function=True,
+    constant_gain=2,):
     """Simulate a single epoch of a planet during transit by modelling the
     stellar, planetary, and telluric components. This function takes into
     account the different velocities of each component, instrumental/velocity
@@ -962,7 +1025,7 @@ def simulate_transit_single_epoch(
         Filepath to the CRIRES+ JSON file containing instrument transfer
         functions as a function of wavelength.
 
-    do_equidistant_lambda_sampling_before_broadening: boolean, default: True
+    do_equid_lambda_resample: boolean, default: True
         Whether to resample wavelength and flux arrays onto a new wavelength
         scale with equidistant lambda sampling prior to broadening. This is
         required for using instrBroadGaussFast.
@@ -978,10 +1041,18 @@ def simulate_transit_single_epoch(
     apply_blaze_function: boolean, default: True
         Whether or not to apply the blaze function.
 
+    constant_gain: float, default: 2
+        Detector gain to use. TODO: Update this to be more realistic.
+
     Returns
     -------
     flux_counts, snr
         Modelled spectra flux in counts and the associated SNR.
+
+    component_spectra: dict of float arrays
+        Dict with keys ['stellar_flux', 'telluric_tau', 'planet_trans'] which
+        contains the component model spectra used to construct the simulated
+        transit.
     """
     # -------------------------------------------------------------------------
     # Integrated stellar flux
@@ -1002,25 +1073,15 @@ def simulate_transit_single_epoch(
         r_tel_prim=r_tel_prim,
         r_tel_cen_ob=r_tel_cen_ob,)
 
-    # Doppler shift stellar flux to velocity γ_j
-    stellar_flux_rv_shift = interpolate_spectrum(
-        wave_new=wave_marcs*(1-transit_epoch["gamma"]),
+    # Doppler shift stellar flux to velocity γ_j, broaden to instrumental
+    # resolution, and interpolate to instrumental wavelength scale
+    stellar_flux_obs = shift_spec_and_convert_to_instrumental_scale(
         wave_old=wave_marcs,
         flux_old=fluxes_disk_scaled,
-        fill_value=1.0,)
-
-    # Broaden stellar flux to instrumental resolution
-    stellar_flux_instr = instrBroadGaussFast(
-        wvl=wave_marcs,
-        flux=stellar_flux_rv_shift,
-        resolution=instr_resolving_power,
-        equid=do_equidistant_lambda_sampling_before_broadening,)
-
-    # Interpolate stellar flux to instrumental wavelength scale
-    stellar_flux_obs = interpolate_spectrum(
-        wave_new=wave_observed,
-        wave_old=wave_marcs,
-        flux_old=stellar_flux_instr,)
+        wave_obs=wave_observed,
+        doppler_shift=transit_epoch["gamma"],
+        instr_resolving_power=instr_resolving_power,
+        do_equid_lambda_resample=do_equid_lambda_resample,)
 
     # -------------------------------------------------------------------------
     # Planet *is* transiting
@@ -1033,13 +1094,6 @@ def simulate_transit_single_epoch(
         print("\tSimulating planet flux...")
         # Boost the strength of the planet spectrum for testing [optional]
         trans_planet = 1 - planet_transmission_boost_fac*(1-trans_planet)
-
-        # Doppler shift planet flux
-        planet_flux_rv_shift = interpolate_spectrum(
-            wave_new=wave_planet*(1-transit_epoch["delta"]),
-            wave_old=wave_planet,
-            flux_old=trans_planet,
-            fill_value=1.0,)
 
         # Smear planet flux. The physically realistic way to do this is create
         # and combine flux from number of 'sub-exposures' where each is shifted
@@ -1056,24 +1110,21 @@ def simulate_transit_single_epoch(
         if smear_R < instr_resolving_power:
             print("Warning--smeared R is < instrument R.")
 
-        planet_flux_smeared = instrBroadGaussFast(
+        planet_trans_smeared = instrBroadGaussFast(
             wvl=wave_planet,
-            flux=planet_flux_rv_shift,
+            flux=trans_planet,
             resolution=smear_R,
-            equid=do_equidistant_lambda_sampling_before_broadening,)
+            equid=do_equid_lambda_resample,)
 
-        # Convolve planet flux to instrumental resolution
-        planet_flux_instr = instrBroadGaussFast(
-            wvl=wave_planet,
-            flux=planet_flux_smeared,
-            resolution=instr_resolving_power,
-            equid=do_equidistant_lambda_sampling_before_broadening,)
-
-        # Interpolate planet flux to instrumental wavelength scale
-        planet_spec_obs = interpolate_spectrum(
-            wave_new=wave_observed,
+        # Doppler shift planet transmission to velocity δ_j, broaden to
+        # instrumental resolution, and interpolate to instrumental scale
+        planet_trans_obs = shift_spec_and_convert_to_instrumental_scale(
             wave_old=wave_planet,
-            flux_old=planet_flux_instr,)
+            flux_old=planet_trans_smeared,
+            wave_obs=wave_observed,
+            doppler_shift=transit_epoch["delta"],
+            instr_resolving_power=instr_resolving_power,
+            do_equid_lambda_resample=do_equid_lambda_resample,)
 
         # ---------------------------------------------------------------------
         # Blocked stellar flux (assuming an entirely opaque planet)
@@ -1099,63 +1150,34 @@ def simulate_transit_single_epoch(
         scale_fac = area_ratio * flux_total_integrated / flux_at_mu_integrated
         flux_shadow_opaque = flux_at_mu * scale_fac
 
-        # Doppler shift stellar flux to velocity β_j
-        flux_shadow_opaque_rv_shift = interpolate_spectrum(
-            wave_new=wave_marcs*(1-transit_epoch["beta"]),
+        # Doppler shift stellar flux to velocity β_j, broaden to instrumental
+        # resolution, and interpolate to instrumental wavelength scale
+        flux_shadow_opaque_obs = shift_spec_and_convert_to_instrumental_scale(
             wave_old=wave_marcs,
             flux_old=flux_shadow_opaque,
-            fill_value=1.0,)
-
-        # Broaden stellar flux to instrumental resolution
-        flux_shadow_opaque_instr = instrBroadGaussFast(
-            wvl=wave_marcs,
-            flux=flux_shadow_opaque_rv_shift,
-            resolution=instr_resolving_power,
-            equid=do_equidistant_lambda_sampling_before_broadening,)
-
-        # Interpolate stellar flux to instrumental wavelength scale
-        flux_shadow_opaque_obs = interpolate_spectrum(
-            wave_new=wave_observed,
-            wave_old=wave_marcs,
-            flux_old=flux_shadow_opaque_instr,)
+            wave_obs=wave_observed,
+            doppler_shift=transit_epoch["beta"],
+            instr_resolving_power=instr_resolving_power,
+            do_equid_lambda_resample=do_equid_lambda_resample,)
 
         # ---------------------------------------------------------------------
         # Transmitted stellar flux (through planet atmosphere)
         # ---------------------------------------------------------------------
         print("\tSimulating transmitted flux...")
-        # Here we use the same assumed mu value as before, but instead scale
-        # thee spectrum by the adopted thickness of the planet atmosphere.
+        # Here we use the same assumed mu value and spectrum as before, but 
+        # instead scale the spectrum by the adopted thickness of the planet
+        # atmosphere.
         planet_atmo_frac = (syst_info.loc["r_planet_atmo_r_earth", "value"]**2
             / syst_info.loc["r_planet_rearth", "value"]**2 )
         
-        flux_shadow_atmo = flux_shadow_opaque * planet_atmo_frac
-
-        # Doppler shift stellar flux to velocity β_j
-        flux_shadow_atmo_rv_shift = interpolate_spectrum(
-            wave_new=wave_marcs*(1-transit_epoch["beta"]),
-            wave_old=wave_marcs,
-            flux_old=flux_shadow_atmo,
-            fill_value=1.0,)
-
-        # Broaden stellar flux to instrumental resolution
-        flux_shadow_atmo_instr = instrBroadGaussFast(
-            wvl=wave_marcs,
-            flux=flux_shadow_atmo_rv_shift,
-            resolution=instr_resolving_power,
-            equid=do_equidistant_lambda_sampling_before_broadening,)
-
-        # Interpolate stellar flux to instrumental wavelength scale
-        flux_shadow_atmo_obs = interpolate_spectrum(
-            wave_new=wave_observed,
-            wave_old=wave_marcs,
-            flux_old=flux_shadow_atmo_instr,)
+        flux_shadow_atmo_obs = flux_shadow_opaque_obs * planet_atmo_frac
 
     # -------------------------------------------------------------------------
     # Planet *not* transiting
     # -------------------------------------------------------------------------
     else:
         print("\tPlanet not transiting")
-        planet_spec_obs = 0
+        planet_trans_obs = 0
         flux_shadow_opaque_obs = 0
         flux_shadow_atmo_obs = 0
 
@@ -1177,7 +1199,7 @@ def simulate_transit_single_epoch(
     flux_model_ob = calc_model_flux(
         stellar_flux=stellar_flux_obs,
         telluric_tau=tau_obs,
-        planet_trans=planet_spec_obs,
+        planet_trans=planet_trans_obs,
         shadow_flux_opaque=flux_shadow_opaque_obs,
         shadow_flux_atmo=flux_shadow_atmo_obs,
         airmass=transit_epoch["airmass"],
@@ -1200,7 +1222,7 @@ def simulate_transit_single_epoch(
     flux_counts_per_sec = convert_flux_to_counts(
         wave=wave_observed,
         flux=flux_instrumental,
-        gain=2,)                                   # TODO: do properly
+        gain=constant_gain,)                               # TODO: do properly
     
     # Convert counts/sec to counts
     flux_counts = flux_counts_per_sec * transit_epoch["exptime_sec"]
@@ -1213,8 +1235,37 @@ def simulate_transit_single_epoch(
     # -------------------------------------------------------------------------
     pass
 
+    # -------------------------------------------------------------------------
+    # Prepare component spectra
+    # -------------------------------------------------------------------------
+    component_spectra = {}
+
+    # Flux
+    flux_component = apply_instrumental_transfer_function(
+        wave=wave_observed,
+        flux=stellar_flux_obs,
+        throughput_json_path=throughput_json_path,
+        fill_throughput_value=fill_throughput_value,
+        apply_blaze=apply_blaze_function,)
+    
+    flux_component_counts_per_sec = convert_flux_to_counts(
+        wave=wave_observed,
+        flux=flux_component,
+        gain=constant_gain,)
+    
+    component_spectra["stellar_flux"] = \
+        flux_component_counts_per_sec * transit_epoch["exptime_sec"]
+    
+    # Tellurics
+    component_spectra["telluric_tau"] = tau_obs
+
+    # Planet
+    # TODO: I don't think this is entirely correct? I'm unsure on whether
+    # Aronson is recovering a transmission or absolute flux?
+    component_spectra["planet_trans"] = planet_trans_obs
+
     # All done
-    return flux_counts, snr
+    return flux_counts, snr, component_spectra
 
 
 def simulate_transit_multiple_epochs(
@@ -1231,7 +1282,7 @@ def simulate_transit_multiple_epochs(
     instr_resolving_power,
     r_tel_prim,
     r_tel_cen_ob,
-    do_equidistant_lambda_sampling_before_broadening,
+    do_equid_lambda_resample,
     fill_throughput_value,
     tau_fill_value,
     planet_transmission_boost_fac,
@@ -1291,7 +1342,7 @@ def simulate_transit_multiple_epochs(
     r_tel_prim, r_tel_cen_ob: float
         Radii of telescope primary mirror and central obstruction in metres.
 
-    do_equidistant_lambda_sampling_before_broadening: boolean, default: True
+    do_equid_lambda_resample: boolean, default: True
         Whether to resample wavelength and flux arrays onto a new wavelength
         scale with equidistant lambda sampling prior to broadening. This is
         required for using instrBroadGaussFast.
@@ -1329,6 +1380,11 @@ def simulate_transit_multiple_epochs(
     fluxes_model, snr: float array
         Modelled flux and SNR arrays corresponding to wavelengths of shape 
         [n_phase, n_spec, n_wave].
+
+    component_spectra: dict of float arrays
+        Dict with keys ['stellar_flux', 'telluric_tau', 'planet_trans'] which
+        contains the *rest frame* component model spectra used to construct the
+        simulated transit.
     """
     # Input checking
     if wl_min > np.min(wave_observed) or wl_max < np.max(wave_observed):
@@ -1367,7 +1423,7 @@ def simulate_transit_multiple_epochs(
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}...".format(epoch_i))
-        flux_counts, snr = simulate_transit_single_epoch(
+        flux_counts, snr, _ = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
@@ -1381,8 +1437,7 @@ def simulate_transit_multiple_epochs(
             instr_resolving_power=instr_resolving_power,
             r_tel_prim=r_tel_prim,
             r_tel_cen_ob=r_tel_cen_ob,
-            do_equidistant_lambda_sampling_before_broadening=\
-                do_equidistant_lambda_sampling_before_broadening,
+            do_equid_lambda_resample=do_equid_lambda_resample,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
             planet_transmission_boost_fac=planet_transmission_boost_fac,
@@ -1391,4 +1446,42 @@ def simulate_transit_multiple_epochs(
         fluxes_model_all[epoch_i] = flux_counts
         snr_model_all[epoch_i] = snr
 
-    return fluxes_model_all, snr_model_all
+    # -------------------------------------------------------------------------
+    # Prepare component spectra
+    # -------------------------------------------------------------------------
+    # Prepare component vectors without doppler shift with mean params
+    rest_frame_epoch = transit_epoch.copy()
+    rest_frame_epoch["is_in_transit_mid"] = True
+    rest_frame_epoch["mu_mid"] = 1
+    rest_frame_epoch["airmass"] = 1
+    rest_frame_epoch["gamma"] = 0
+    rest_frame_epoch["beta"] = 0
+    rest_frame_epoch["delta"] = 0
+
+    delta_rv = np.mean(np.abs(
+        transit_info["v_y_start"].values - transit_info["v_y_end"].values))
+    
+    rest_frame_epoch["v_y_start"] = delta_rv
+    rest_frame_epoch["v_y_end"] = 0
+    
+    _, _, component_vectors = simulate_transit_single_epoch(
+            wave_observed=wave_observed,
+            wave_marcs=wave_marcs,
+            fluxes_marcs=fluxes_marcs,
+            mus_marcs=mus_marcs,
+            wave_planet=wave_planet,
+            trans_planet=trans_planet,
+            telluric_wave=telluric_wave,
+            telluric_tau=telluric_tau,
+            syst_info=syst_info,
+            transit_epoch=rest_frame_epoch,
+            instr_resolving_power=instr_resolving_power,
+            r_tel_prim=r_tel_prim,
+            r_tel_cen_ob=r_tel_cen_ob,
+            do_equid_lambda_resample=do_equid_lambda_resample,
+            throughput_json_path=throughput_json_path,
+            fill_throughput_value=fill_throughput_value,
+            planet_transmission_boost_fac=planet_transmission_boost_fac,
+            apply_blaze_function=apply_blaze_function,)
+
+    return fluxes_model_all, snr_model_all, component_vectors

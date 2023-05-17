@@ -947,7 +947,11 @@ def run_transit_model_iteration(
     lambda_treg_star,
     lambda_treg_tau,
     lambda_treg_planet,
-    is_first,):
+    is_first,
+    do_fix_flux_vector,
+    do_fix_trans_vector,
+    do_fix_tau_vector,
+    do_fix_scale_vector,):
     """Runs a single iteration of our inverse model. Each iteration does the
     following:
      1) Update stellar flux, flux derivative, and model.
@@ -1032,6 +1036,11 @@ def run_transit_model_iteration(
         Whether this is the first iteration which affects the initialisation
         for the Newton-Raphson iterative scheme for tau.
 
+    do_fix_flux_vector, do_fix_tau_vector, do_fix_trans_vector,
+    do_fix_scale_vector: boolean
+        If true, we don't iteratre the respective vector when modelling. This
+        is useful for debugging.
+
     Updates
     -------
     flux: 2D float array
@@ -1065,36 +1074,40 @@ def run_transit_model_iteration(
     # TODO I don't think this is needed since we update the derivative along
     # with the stellar flux in update_stellar_flux?
     # flux_2 = flux.copy()
-    print("- Updating stellar flux...")
-    update_stellar_flux(
-        waves=waves,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        tau_2=tau_2,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        mask=mask,
-        mask_2=mask_2,
-        obs_spec=obs_spec,
-        obs_spec_2=obs_spec_2,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        lambda_treg=lambda_treg_star,
-        flux_limits=stellar_flux_limits,)
+    if not do_fix_flux_vector:
+        print("- Updating stellar flux...")
+        update_stellar_flux(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            tau_2=tau_2,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            mask=mask,
+            mask_2=mask_2,
+            obs_spec=obs_spec,
+            obs_spec_2=obs_spec_2,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            lambda_treg=lambda_treg_star,
+            flux_limits=stellar_flux_limits,)
 
-    model[:,:,:] = create_transit_model_array(
-        waves=waves,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        model_limits=model_limits,)
+        model[:,:,:] = create_transit_model_array(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            model_limits=model_limits,)
+        
+    else:
+        print("- Fixed flux, skipping")
 
     # -------------------------------------------------------------------------
     # Update tau & model by reference
@@ -1102,68 +1115,79 @@ def run_transit_model_iteration(
     # Telluric has a non-linear equation so we use a Newton-Raphson solver
     # We do this for each order on each detector separately as the telluric
     # features do not overlap
-    if is_first:
-        print("- Initialising tau...")
-        init_tau_newton_raphson(
+    if not do_fix_tau_vector:
+        if is_first:
+            print("- Initialising tau...")
+            init_tau_newton_raphson(
+                obs_spec=obs_spec,
+                model=model,
+                tau=tau,
+                mask=mask,
+                airmasses=airmasses,
+                telluric_trans_limits=telluric_trans_limits,)
+
+        print("- Updating tau...")
+        update_tau_newton_raphson(
             obs_spec=obs_spec,
             model=model,
             tau=tau,
             mask=mask,
             airmasses=airmasses,
-            telluric_trans_limits=telluric_trans_limits,)
+            lambda_treg=lambda_treg_tau,
+            tolerance=tau_nr_tolerance,
+            telluric_tau_limits=telluric_tau_limits,)
 
-    print("- Updating tau...")
-    update_tau_newton_raphson(
-        obs_spec=obs_spec,
-        model=model,
-        tau=tau,
-        mask=mask,
-        airmasses=airmasses,
-        lambda_treg=lambda_treg_tau,
-        tolerance=tau_nr_tolerance,
-        telluric_tau_limits=telluric_tau_limits,)
+        # Update tau derivative from our new tau array
+        for spec_i in range(0, n_spec):
+            tau_2[spec_i] = tu.bezier_init(waves[spec_i], tau[spec_i],)
 
-    # Update tau derivative from our new tau array
-    for spec_i in range(0, n_spec):
-        tau_2[spec_i] = tu.bezier_init(waves[spec_i], tau[spec_i],)
+    else:
+        print("- Fixed tau, skipping")
 
     # -------------------------------------------------------------------------
     # Update scaling & model by reference
     # -------------------------------------------------------------------------
-    print("- Updating scaling...")
-    update_scaling(model, obs_spec, scale, scale_limits)
+    if not do_fix_scale_vector:
+        print("- Updating scaling...")
+        update_scaling(model, obs_spec, scale, scale_limits)
+    else:
+        print("- Fixed scale, skipping")
 
     # -------------------------------------------------------------------------
     # Update transmission & model by reference
     # -------------------------------------------------------------------------
-    print("- Updating transmission...")
-    update_transmission(
-        waves=waves,
-        obs_spec=obs_spec,
-        obs_spec_2=obs_spec_2,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        tau_2=tau_2,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        lambda_treg=lambda_treg_planet,
-        trans_limits=planet_trans_limits,)
+    if not do_fix_trans_vector:
+        print("- Updating transmission...")
+        update_transmission(
+            waves=waves,
+            obs_spec=obs_spec,
+            obs_spec_2=obs_spec_2,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            tau_2=tau_2,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            lambda_treg=lambda_treg_planet,
+            trans_limits=planet_trans_limits,)
 
-    model[:,:,:] = create_transit_model_array(
-        waves=waves,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        model_limits=model_limits,)
+        model[:,:,:] = create_transit_model_array(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            model_limits=model_limits,)
+
+    else:
+        print("- Fixed transmission, skipping")
 
     # All done, nothing to return since we modified in place
 
@@ -1186,7 +1210,15 @@ def run_transit_model(
     model_limits=(None, None),
     max_iter=4000,
     do_plot=False,
-    print_every_n_iterations=100,):
+    print_every_n_iterations=100,
+    do_fix_flux_vector=False,
+    do_fix_trans_vector=False,
+    do_fix_tau_vector=False,
+    do_fix_scale_vector=False,
+    fixed_flux=None,
+    fixed_trans=None,
+    fixed_tau=None,
+    fixed_scale=None,):
     """
     We solve iteratively 4 systems of equations:
      1) for the stellar spectrum flux,
@@ -1259,6 +1291,15 @@ def run_transit_model(
     print_every_n_iterations: int, default: 100
         How many iterations to print fitting updates after.
 
+    do_fix_flux_vector, do_fix_tau_vector, do_fix_trans_vector, 
+    do_fix_scale_vector: boolean, default: False
+        If true, we don't iteratre the respective vector when modelling. This
+        is useful for debugging.
+    
+    fixed_flux, fixed_tau, fixed_trans, fixed_scale: float array or None
+        Arrays to fix flux, trans, tau, or scale to. Must have the same shape
+        as their respective arrays.
+
     Returns
     -------
     flux: 2D float array
@@ -1281,21 +1322,35 @@ def run_transit_model(
         Mask array of shape [n_phase, n_spec, n_px]. Contains either 0 or 1.
     """
     # -------------------------------------------------------------------------
+    # Error checking
+    # -------------------------------------------------------------------------
+    # TODO: error checking on fixed parameters
+    # - Check dimensions
+    # - Check booleans correspond to arrays
+    # - Check we haven't fixed all our arrays
+
+    # -------------------------------------------------------------------------
     # Initialise variables for convenience 
     # -------------------------------------------------------------------------
     n_phase = obs_spec.shape[0]
     n_spec = obs_spec.shape[1]
     n_wave = obs_spec.shape[2]
 
-    airmasses = transit_info["airmass"]
+    airmasses = transit_info["airmass"].values
+    airmass_min_i = np.argmin(airmasses)
 
     # -------------------------------------------------------------------------
     # Initialise planet transmission
     # -------------------------------------------------------------------------
     # Initialise transmission array to be the fractional light blocked by the
     # planet (normalised to the stellar radius)
-    rp_rstar_area_frac = syst_info.loc["rp_rstar", "value"]**2
-    trans = np.zeros((n_spec, n_wave)) + rp_rstar_area_frac
+    if not do_fix_trans_vector:
+        rp_rstar_area_frac = syst_info.loc["rp_rstar", "value"]**2
+        trans = np.zeros((n_spec, n_wave)) + rp_rstar_area_frac
+    
+    # Otherwise use our fixed value
+    else:
+        trans = fixed_trans
 
     # -------------------------------------------------------------------------
     # Initialise telluric optical depth
@@ -1303,35 +1358,45 @@ def run_transit_model(
     # For our initial guess for the tellurics, start with the lowest observed
     # airmass observation and assume that all absorption is due to tellurics--
     # that is normalise this transmission and convert to an optical depth.
-    airmass_min_i = np.argmin(airmasses)
+    if not do_fix_tau_vector:
+        tell_trans = obs_spec[airmass_min_i].copy()
 
-    tell_trans = obs_spec[airmass_min_i].copy()
+        # Clip telluric transmission to avoid zeros/unreasonable optical depths
+        tell_trans[:] = np.clip(
+            a=tell_trans,
+            a_min=telluric_trans_limits[0],
+            a_max=telluric_trans_limits[1],)
 
-    # Clip telluric transmission to avoid zeros/unreasonable optical depths
-    tell_trans[:] = np.clip(
-        a=tell_trans,
-        a_min=telluric_trans_limits[0],
-        a_max=telluric_trans_limits[1],)
+        # Normalise -- TODO: smooth instead
+        for spec_i in range(0, n_spec):
+            tell_trans[spec_i,:] = \
+                tell_trans[spec_i]/ np.max(tell_trans[spec_i])
 
-    # Normalise -- TODO: smooth instead
-    for spec_i in range(0, n_spec):
-        tell_trans[spec_i,:] = tell_trans[spec_i]/ np.max(tell_trans[spec_i])
-
-    tau = -np.log(tell_trans) / airmasses[airmass_min_i]
+        tau = -np.log(tell_trans) / airmasses[airmass_min_i]
+    
+    # Otherwise use our fixed value
+    else:
+        tau = fixed_tau
 
     # -------------------------------------------------------------------------
     # Initialise stellar flux
     # -------------------------------------------------------------------------
     # Initial guess for stellar flux + transmission and Bezier derivatives
-    flux = obs_spec[airmass_min_i,:,:]/np.exp(-tau*airmasses[airmass_min_i])
+    if not do_fix_flux_vector:
+        flux = \
+            obs_spec[airmass_min_i,:,:] / np.exp(-tau*airmasses[airmass_min_i])
 
-    # Clip fluxes
-    if (stellar_flux_limits[0] is not None 
-        or stellar_flux_limits[1] is not None):
-        flux[:] = np.clip(
-            a=flux,
-            a_min=stellar_flux_limits[0],
-            a_max=stellar_flux_limits[1],)
+        # Clip fluxes
+        if (stellar_flux_limits[0] is not None 
+            or stellar_flux_limits[1] is not None):
+            flux[:] = np.clip(
+                a=flux,
+                a_min=stellar_flux_limits[0],
+                a_max=stellar_flux_limits[1],)
+    
+    # Otherwise use our fixed flux vector
+    else:
+        flux = fixed_flux
 
     # -------------------------------------------------------------------------
     # Derivatives
@@ -1360,44 +1425,63 @@ def run_transit_model(
     # Model and Scaling
     # -------------------------------------------------------------------------
     # Initial guess for scaling vector accounting for observed flux variability
-    scale = np.ones(n_phase)
+    if not do_fix_scale_vector:
+        # TODO: avoid including transit itself in scale to have a better
+        # initial guess.
+        scale = np.ones(n_phase)
 
-    # Initialise model based on the initial guesses for all unknown functions
-    model = create_transit_model_array(
-        waves=waves,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        model_limits=model_limits,)
+        # Initialise model based on the initial guesses for all components
+        model = create_transit_model_array(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            model_limits=model_limits,)
 
-    # Adjust the scale to match roughly variation of the observed flux and 
-    for phase_i in range(0, n_phase):
-        m1 = model[phase_i]
-        o1 = obs_spec[phase_i]
-        k1 = np.where(m1 > 0.)
+        # Adjust the scale to match roughly variation of the observed flux and 
+        for phase_i in range(0, n_phase):
+            m1 = model[phase_i]
+            o1 = obs_spec[phase_i]
+            k1 = np.where(m1 > 0.)
 
-        scale[phase_i] = np.median(o1[k1]/m1[k1])
-    
-    # TODO: not sure where this came from?
-    #scale /= np.max(scale)
+            scale[phase_i] = np.median(o1[k1]/m1[k1])
+        
+        # TODO: not sure where this came from? Probably a good idea though?
+        #scale /= np.max(scale)
 
-    # Recompute the model
-    model[:,:,:] = create_transit_model_array(
-        waves=waves,
-        flux=flux,
-        flux_2=flux_2,
-        tau=tau,
-        trans=trans,
-        trans_2=trans_2,
-        scale=scale,
-        transit_info=transit_info,
-        syst_info=syst_info,
-        model_limits=model_limits,)
+        # Recompute the model
+        model[:,:,:] = create_transit_model_array(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            model_limits=model_limits,)
+
+    # Otherwise use our fixed scale and compute an initial model
+    else:
+        scale = fixed_scale
+
+        model = create_transit_model_array(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            model_limits=model_limits,)
 
     # -------------------------------------------------------------------------
     # Mask
@@ -1481,7 +1565,11 @@ def run_transit_model(
             lambda_treg_star=lambda_treg_star,
             lambda_treg_tau=lambda_treg_tau,
             lambda_treg_planet=lambda_treg_planet,
-            is_first=is_first,)
+            is_first=is_first,
+            do_fix_flux_vector=do_fix_flux_vector,
+            do_fix_trans_vector=do_fix_trans_vector,
+            do_fix_tau_vector=do_fix_tau_vector,
+            do_fix_scale_vector=do_fix_scale_vector)
 
         # Print update for every Nth iteration
         if (iter_count % print_every_n_iterations) == 0:
@@ -1509,9 +1597,13 @@ def run_transit_model(
             hit_max_iterations = True
 
         # Continue to iterate so long as either flux or tau is not yet below
-        # our adopted tolerance
-        if (np.nanmedian(np.abs(flux-flux_old)) < model_converge_tolerance
-            and np.nanmedian(np.abs(tau-tau_old)) < model_converge_tolerance):
+        # our adopted tolerance. TODO: account for possibility of both tau and
+        # flux being fixed.
+        delta_flux = np.nanmedian(np.abs(flux-flux_old))
+        delta_tau = np.nanmedian(np.abs(tau-tau_old))
+
+        if (delta_flux < model_converge_tolerance
+            and delta_tau < model_converge_tolerance):
             # Update convergence
             has_converged = True
 
