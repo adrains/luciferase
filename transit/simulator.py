@@ -1221,7 +1221,14 @@ def simulate_transit_single_epoch(
         # ---------------------------------------------------------------------
         print("\tSimulating planet flux...")
         # Boost the strength of the planet spectrum for testing [optional]
-        trans_planet = 1 - planet_transmission_boost_fac*(1-trans_planet)
+        # We do this by normalising our planet transmission to its maximum, 
+        # converting it to an optical depth, multiplying by our scale factor,
+        # then converting back. This won't preserve the median transmission/
+        # continuum level of the planet, but will increase the depths of the
+        # lines which is suitable for testing.
+        norm_trans_planet = trans_planet / np.max(trans_planet)
+        tau_planet = -np.log(norm_trans_planet) * planet_transmission_boost_fac
+        trans_planet = np.exp(-tau_planet)
 
         # Smear planet flux. The physically realistic way to do this is create
         # and combine flux from number of 'sub-exposures' where each is shifted
