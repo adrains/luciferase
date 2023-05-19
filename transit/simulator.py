@@ -14,7 +14,135 @@ from PyAstronomy.pyasl import instrBroadGaussFast
 # -----------------------------------------------------------------------------
 # Load/save spectra
 # -----------------------------------------------------------------------------
-def read_marcs_spectrum(
+def read_marcs_spectrum(filepath, wave_min, wave_max,):
+    """Reads either a MARCS .plt or .itf file to extract wavelengths, mu 
+    values, and radiant fluxes in units of ergs/cm^2/s/Å/µ.
+
+    Parameters
+    ----------
+    filepath: str
+        Filepath to MARCS .itf file.
+
+    wave_min, wave_max: float or None, default: None
+        Minimum and maximum wavelengths to return in Angstrom.
+
+    Returns
+    -------
+    wave_marcs: 1D float array
+        Array of wavelengths of shape [n_wave].
+    
+    fluxes_marcs: 2D float array
+        Array of intensities of shape [n_wave, n_max_n_mu].
+
+    mus: 2D float array
+        Array of mus of shape [n_wave, n_max_n_mu].
+    """
+    if ".itf" in filepath:
+        wave_marcs, _, _, mus, fluxes_marcs = read_marcs_itf(
+            filepath=filepath,
+            wave_min=wave_min,
+            wave_max=wave_max,)
+        
+    elif ".plt" in filepath:
+        wave_marcs, mus, _, _, fluxes_marcs = \
+            read_marcs_plt(filepath)
+    else:
+        raise ValueError("Invalid MARCS format.")
+    
+    return wave_marcs, fluxes_marcs, mus
+
+
+def read_marcs_plt(filepath, n_max_n_mu=69,):
+    """Reads in a MARCS .plt file to extract wavelengths, weights, mu values,
+    and radiant fluxes in units of ergs/cm^2/s/Å/µ.
+
+    TODO: there might be a factor of pi missing in this definition.
+    
+    Note that the amount of mu points sampled varies for each wavelength point
+    and ranges from 16 through 69. For speed we pre-allocate our mu and
+    intensity arrays with shape [n_wave, n_max_n_mu], meaning that for any
+    wavelength with < 55 samples the array will be 'padded' with nans. This
+    does mean that one cannot take slices through this array in the mu
+    direction prior to interpolation/resampling, but it is both
+    computatationally expensive and unnecessary to do that for the entire MARCS
+    spectral range, and we leave that until later when one is considering a
+    more limited wavelength range.
+    Parameters
+    ----------
+    filepath: str
+        Filepath to MARCS .plt file.
+
+    n_max_n_mu: int, default: 69
+        The maximum number of mu samples across the disc we expect.
+
+    Returns
+    -------
+    wavelengths_all: 1D float array
+        Array of wavelengths of shape [n_wave].
+    
+    mus_all: 2D float array
+        Array of mus of shape [n_wave, n_max_n_mu].
+
+    n_samples_all: 1D float array
+        Array of n_mu_samples of shape [n_wave].
+
+    weights_all: 1D float array
+        Array of weights of shape [n_wave].
+    
+    intensities_all: 2D float array
+        Array of intensities of shape [n_wave, n_max_n_mu].
+    """
+    with open(filepath) as marcs_plt:
+        # Read in all lines
+        all_lines = marcs_plt.readlines()
+
+        # Count the number of wavelength points
+        n_wave = 0
+        for line in all_lines:
+            if line[1] != " ":
+                n_wave += 1
+        
+        wavelengths_all = np.zeros(n_wave)
+        n_samples_all = np.zeros(n_wave)
+
+        # Finally, initialise per-wavelength vectors
+        mus_all = np.full((n_wave, n_max_n_mu), np.nan)
+        weights_all = np.full((n_wave, n_max_n_mu), np.nan)
+        intensities_all = np.full((n_wave, n_max_n_mu), np.nan)
+
+        line_i = 0
+
+        for wave_i in range(n_wave):
+            # Construct the whole row
+            whole_line = all_lines[line_i]
+
+            if line_i < len(all_lines):
+                if all_lines[line_i+1][1] == " ":
+                    whole_line += all_lines[line_i+1]
+                    line_i += 2
+                else:
+                    line_i += 1
+
+            # Split
+            line_arr = np.array(whole_line.split()).astype(float)
+
+            wave = line_arr[0]
+            n_samples = int(len(line_arr[1:]) / 3)
+            mus = line_arr[1::3]
+            weights = line_arr[2::3]
+            intensities = line_arr[3::3]
+
+            wavelengths_all[wave_i] = wave
+            n_samples_all[wave_i] = n_samples
+            mus_all[wave_i][:n_samples] = mus
+            weights_all[wave_i][:n_samples] = weights
+            intensities_all[wave_i][:n_samples] = intensities
+
+        return wavelengths_all, mus_all, n_samples_all, weights_all, \
+            intensities_all
+
+
+def read_marcs_itf(
     filepath,
     n_max_n_mu=55,
     header_length=36,
@@ -1391,7 +1519,7 @@ def simulate_transit_multiple_epochs(
         raise ValueError("MARCS wl bounds do not cover observed wl scale.")
     
     # Import MARCS fluxes (ergs/cm^2/s/Å/μ)
-    wave_marcs, _, _, mus_marcs, fluxes_marcs = read_marcs_spectrum(
+    wave_marcs, fluxes_marcs, mus_marcs = read_marcs_spectrum(
         filepath=marcs_fits,
         wave_min=wl_min,
         wave_max=wl_max,)

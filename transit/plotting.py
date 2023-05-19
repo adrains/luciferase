@@ -88,7 +88,14 @@ def plot_all_input_spectra(
     plt.tight_layout()
 
 
-def plot_component_spectra(waves, fluxes, telluric_tau, planet_trans,):
+def plot_component_spectra(
+    waves,
+    fluxes,
+    telluric_tau,
+    planet_trans,
+    ref_fluxes=None,
+    ref_telluric_tau=None,
+    ref_planet_trans=None,):
     """Plots fluxes, telluric transmission, and planet transmission in
     respective subplots. Can be used for both Aronson fitted results, or
     simulated components.
@@ -106,6 +113,9 @@ def plot_component_spectra(waves, fluxes, telluric_tau, planet_trans,):
 
     planet_trans: 2D float array
         Model planet transmission component of shape [n_spec, n_px].
+
+    ref_fluxes, ref_telluric_tau, ref_planet_trans: float array or None
+        Reference spectra to plot against fluxes, tau, and trans.
     """
     # Intialise subplots
     fig, (ax_flux, ax_tell, ax_trans) = plt.subplots(
@@ -120,19 +130,50 @@ def plot_component_spectra(waves, fluxes, telluric_tau, planet_trans,):
             waves[spec_i],
             fluxes[spec_i],
             linewidth=0.4,
-            color="r")
+            color="r",
+            alpha=0.8,)
         
         ax_tell.plot(
             waves[spec_i],
             np.exp(-telluric_tau[spec_i]),
             linewidth=0.4,
-            color="b")
+            color="b",
+            alpha=0.8,)
         
         ax_trans.plot(
             waves[spec_i],
             planet_trans[spec_i],
             linewidth=0.4,
-            color="g")
+            color="g",
+            alpha=0.8,)
+        
+        # Plot reference vectors if we have them
+        if (ref_fluxes is not None
+            and fluxes.shape == ref_fluxes.shape):
+            ax_flux.plot(
+                waves[spec_i],
+                ref_fluxes[spec_i],
+                linewidth=0.4,
+                color="k",
+                alpha=0.8,)
+            
+        if (ref_telluric_tau is not None
+            and telluric_tau.shape == ref_telluric_tau.shape):
+            ax_tell.plot(
+                waves[spec_i],
+                np.exp(-ref_telluric_tau[spec_i]),
+                linewidth=0.4,
+                color="k",
+                alpha=0.8,)
+        
+        if (ref_planet_trans is not None
+            and planet_trans.shape == ref_planet_trans.shape):
+            ax_trans.plot(
+                waves[spec_i],
+                ref_planet_trans[spec_i],
+                linewidth=0.4,
+                color="k",
+                alpha=0.8,)
 
     ax_flux.set_title("Stellar flux")
     ax_tell.set_title("Telluric Transmission")

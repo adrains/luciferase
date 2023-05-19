@@ -309,7 +309,7 @@ def init_tau_newton_raphson(
         mask_n = mask[:,spec_i]
 
         # Expand tau to all phases with shape [n_phase, n_wave]
-        tau_n_all = np.tile(tau_n, n_phase).reshape((n_wave, n_phase)).T
+        tau_n_all = np.tile(tau_n, n_phase).reshape((n_phase, n_wave))
 
         # Initial guess, assuming all Z eq 1, sum over all phases (axis=0)
         # TODO: should we be assuming this is one?
@@ -334,7 +334,7 @@ def init_tau_newton_raphson(
         
         # Expand delta tau to all wavelengths with shape [n_phase, n_wave]
         delta_tau = np.tile(
-            tau_n-tau_n_new, n_phase).reshape((n_wave, n_phase)).T
+            tau_n-tau_n_new, n_phase).reshape((n_phase, n_wave))
 
         # Calculate updated model
         model_n_new = model_n * np.exp(delta_tau*am_all)
@@ -428,6 +428,8 @@ def update_tau_newton_raphson(
         # ---------------------------------------------------------------------
         iter_count = 0
         has_converged = False
+
+        print("")   # Empty line to separate segments
         
         while (not has_converged):
             # Calculate num/denominator, sum along phase axis (axis 0)
@@ -449,9 +451,22 @@ def update_tau_newton_raphson(
 
             # Clip tau to limits, calculate updated tau
             tau_n_new = np.clip(
-                a=tau_n+delta_tau,
+                a=tau_n_old+delta_tau,
                 a_min=telluric_tau_limits[0],
                 a_max=telluric_tau_limits[1],)
+
+            # Print iteration updates
+            delta_tau = tau_n_old - tau_n_new
+            med_delta_tau = np.median(np.abs(delta_tau))
+            std_delta_tau = np.std(delta_tau)
+            max_delta_tau = np.max(np.abs(delta_tau))
+
+            print(
+                "\tSegment #{:2}\t".format(spec_i),
+                "iteration #{:4}\t".format(iter_count),
+                "| median diff | = {:18.14f}\t".format(med_delta_tau),
+                "| max diff | = {:18.14f}\t".format(max_delta_tau),
+                "std diff = {:18.14f}\t".format(std_delta_tau),)
 
             # Calculcate updated model
             model_n_new = model_n * np.exp((tau_n_old-tau_n_new)*am_all)
@@ -473,7 +488,7 @@ def update_tau_newton_raphson(
 
         total_iterations += iter_count
 
-    print('\t...converged with {} iterations'.format(total_iterations))
+    print("\n\tConverged with {} iterations\n".format(total_iterations))
 
 
 def update_transmission(
@@ -582,8 +597,8 @@ def update_transmission(
     # -------------------------------------------------------------------------
     # Precalculate limb darkening
     # -------------------------------------------------------------------------
-    nlimb = len(a_limb)
-    ipow = np.arange(nlimb)+1
+    n_limb = len(a_limb)
+    ipow = np.arange(n_limb) + 1
     N = np.pi*(1-np.sum(ipow*a_limb/(ipow+4)))
 
     in_transit = transit_info["is_in_transit_mid"].values
@@ -599,7 +614,7 @@ def update_transmission(
         b = np.zeros(n_wave)
 
         # Only loop over the phases that are mid-transit
-        for phase_i in range(phase_i_min, phase_i_max):     # TODO: check we hit all phases
+        for phase_i in range(phase_i_min, phase_i_max+1):
             # Shift observed spectrum to planet rv frame (delta) from telescope
             # frame (rest frame)
             o = tu.doppler_shift(
@@ -625,7 +640,7 @@ def update_transmission(
                 y2=flux_2[spec_i])
 
             # Apply limb darkening to the shadow
-            if mus[phase_i] > 0:
+            if in_transit[phase_i]:
                 intens = (
                     f2 * (1-np.sum(a_limb*(1-np.sqrt(mus[phase_i]**ipow)))) / N
                     * area_frac[phase_i])
@@ -647,8 +662,8 @@ def update_transmission(
             b += intens**2 * t**2
 
         # TODO: no idea what this means?
-        if lambda_treg is not None:
-            r += lambda_treg * syst_info.loc["rp_rstar", "value"]
+        #if lambda_treg is not None:
+        #    r += lambda_treg * syst_info.loc["rp_rstar", "value"]
 
         # Ensure r is positive
         r[r < 0] = 0
@@ -1502,17 +1517,32 @@ def run_transit_model(
     init_error = np.sum(mask*np.abs(obs_spec-model))/np.sum(mask)
     print("-"*140, "\nModelling: Initial Values\n", "-"*140, sep="",)
     print("Initial error: {}\n".format(init_error))
-            
-    names = ["obs_spec", "model", "flux", "tau", "trans", "scale"]
-    arrays =[obs_spec, model, flux, tau, trans, scale]
+    
+    # Store references to arrays in dict, and copies in another, for checking
+    # convergence at the end of each iteration.
+    arrays = {
+        "obs_spec":obs_spec,
+        "model":model,
+        "flux":flux,
+        "tau":tau,
+        "trans":trans,
+        "scale":scale,}
+    
+    arrays_old = {
+        "obs_spec":obs_spec.copy(),
+        "model":model.copy(),
+        "flux":flux.copy(),
+        "tau":tau.copy(),
+        "trans":trans.copy(),
+        "scale":scale.copy(),}
 
-    for name, array in zip(names, arrays):
-        min_array = np.nanmin(array)
-        max_array = np.nanmax(array)
-        median_array = np.nanmedian(array)
-        mean_array = np.nanmean(array)
-        std_array = np.nanstd(array)
-        n_nans = np.sum(np.isnan(array))
+    for name in arrays.keys():
+        min_array = np.nanmin(arrays[name])
+        max_array = np.nanmax(arrays[name])
+        median_array = np.nanmedian(arrays[name])
+        mean_array = np.nanmean(arrays[name])
+        std_array = np.nanstd(arrays[name])
+        n_nans = np.sum(np.isnan(arrays[name]))
         print("{: <8} -->".format(name),
             " min = {:10.4f},".format(min_array),
             " median = {:10.4f},".format(median_array),
@@ -1533,9 +1563,14 @@ def run_transit_model(
     while (not has_converged) and (not hit_max_iterations):
         print("-"*160, "\nIteration #{}\n".format(iter_count), "-"*160, sep="")
         # Save previous estimates for comparison
-        flux_old = flux.copy()
-        tau_old = tau.copy()
+        arrays_old["obs_spec"] = obs_spec.copy()
+        arrays_old["model"] = model.copy()
+        arrays_old["flux"] = flux.copy()
+        arrays_old["tau"] = tau.copy()
+        arrays_old["trans"] = trans.copy()
+        arrays_old["scale"] = scale.copy()
 
+        # Initialise boolean for running Newton's method on Tau
         is_first = True if iter_count == 0 else False
 
         # Run single iteration, updating arrays in place
@@ -1571,25 +1606,37 @@ def run_transit_model(
             do_fix_tau_vector=do_fix_tau_vector,
             do_fix_scale_vector=do_fix_scale_vector)
 
+        # -----------------------------------------
+        # Check array equivalence [TODO: remove]
+        # -----------------------------------------
+        assert np.sum(obs_spec - arrays["obs_spec"]) == 0
+        assert np.sum(model - arrays["model"]) == 0
+        assert np.sum(flux - arrays["flux"]) == 0
+        assert np.sum(tau - arrays["tau"]) == 0
+        assert np.sum(trans - arrays["trans"]) == 0
+        assert np.sum(scale - arrays["scale"]) == 0
+
         # Print update for every Nth iteration
         if (iter_count % print_every_n_iterations) == 0:
-            print("\nIteration  {} finished, median resid = {:0.4f},".format(
-                iter_count, np.nanmedian(np.abs(obs_spec-model))))
+            print("\nIteration {} finished, obs-model median resid = {:0.6f},".format(
+                iter_count, np.nanmedian(obs_spec-model)))
 
-            for name, array in zip(names, arrays):
-                min_array = np.nanmin(array)
-                max_array = np.nanmax(array)
-                median_array = np.nanmedian(array)
-                mean_array = np.nanmean(array)
-                std_array = np.nanstd(array)
-                n_nans = np.sum(np.isnan(array))
+            for name in arrays.keys():
+                min_array = np.nanmin(arrays[name])
+                max_array = np.nanmax(arrays[name])
+                median_array = np.nanmedian(arrays[name])
+                mean_array = np.nanmean(arrays[name])
+                std_array = np.nanstd(arrays[name])
+                n_nans = np.sum(np.isnan(arrays[name]))
+                delta_array = np.median(arrays_old[name]-arrays[name])
                 print("{: <8} -->".format(name),
                     " min = {:20.4f},".format(min_array),
                     " median = {:20.4f},".format(median_array),
                     " mean = {:20.4f},".format(mean_array),
                     " std = {:20.4f},".format(std_array),
                     " max = {:20.4f},".format(max_array),
-                    " # nans = {}".format(n_nans),
+                    #" # nans = {:20}".format(n_nans),
+                    " change = {:+20.8f},".format(delta_array),
                     sep="",)
 
         # End the loop if we hit the maximum number of iterations
@@ -1599,11 +1646,15 @@ def run_transit_model(
         # Continue to iterate so long as either flux or tau is not yet below
         # our adopted tolerance. TODO: account for possibility of both tau and
         # flux being fixed.
-        delta_flux = np.nanmedian(np.abs(flux-flux_old))
-        delta_tau = np.nanmedian(np.abs(tau-tau_old))
+        delta_flux = np.nanmedian(np.abs(arrays_old["flux"]-arrays["flux"]))
+        delta_tau = np.nanmedian(np.abs(arrays_old["tau"]-arrays["tau"]))
+        delta_trans = np.nanmedian(np.abs(arrays_old["trans"]-arrays["trans"]))
+
+        print("\n", delta_flux, delta_tau, delta_trans)
 
         if (delta_flux < model_converge_tolerance
-            and delta_tau < model_converge_tolerance):
+            and delta_tau < model_converge_tolerance
+            and delta_trans < model_converge_tolerance):
             # Update convergence
             has_converged = True
 

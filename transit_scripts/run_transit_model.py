@@ -28,12 +28,15 @@ transit_info = transit_info_list[0]
 # separated by 6 in the array.
 run_on_sub_slice = True
 segments_to_keep = [0, 6, 12]
-segment_mask = np.full(waves.shape[0], False)
-segment_mask[segments_to_keep] = True
 
 if run_on_sub_slice:
+    segment_mask = np.full(waves.shape[0], False)
+    segment_mask[segments_to_keep] = True
     waves = waves[segment_mask]
     obs_spec = obs_spec[:,segment_mask]
+
+else:
+    segment_mask = np.full(waves.shape[0], True)
 
 # HACK to put mu_wgt in Nik's format. TODO discuss with Nik the correct
 # formalism, specifically whether mu_wgt should be normalised or not.
@@ -50,21 +53,21 @@ transit_info["planet_area_frac_mid"] = \
 # Inverse model settings
 # -----------------------------------------------------------------------------
 lambda_treg_star = 1
-lambda_treg_tau = 100      # 1E-3
-lambda_treg_planet = 1   # 1E5
+lambda_treg_tau = 1     # 1E-3
+lambda_treg_planet = 1 # 1E5
 tau_nr_tolerance = 1E-5
 model_converge_tolerance = 1E-5
-max_iter = 3000
+max_iter = 300
 do_plot = False
 print_every_n_iterations = 1
 
 # Set a reasonable limit for the maximum fluxes. Recommend not to use currently
 # it seems to prevent the model fully exploring the parameter space.
-max_flux = None # 2*np.max(fluxes_list[0])
+max_flux = np.max(obs_spec)
 
 # Limits (low, high). Set to (None, None) for no limits. Note that to prevent
 # division by zero and overflow errors min telluric_trans should be > 0.
-stellar_flux_limits = (1E-5, None)
+stellar_flux_limits = (1E-5, max_flux)
 telluric_trans_limits = (4.5E-5, None)          # Max optical depth ~10
 telluric_tau_limits = (0, -np.log(4.5E-5))
 planet_trans_limits = (1E-5, None)
@@ -135,4 +138,11 @@ tu.save_transit_model_results_to_fits(
     mask=mask,)
 
 # Diagnostic plots
-tplt.plot_component_spectra(waves, flux, tau, trans,)
+tplt.plot_component_spectra(
+    waves=waves,
+    fluxes=flux,
+    telluric_tau=tau,
+    planet_trans=trans,
+    ref_fluxes=fixed_flux,
+    ref_telluric_tau=fixed_tau,
+    ref_planet_trans=fixed_trans,)
