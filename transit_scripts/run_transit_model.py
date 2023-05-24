@@ -7,6 +7,7 @@ import transit.model as tmod
 import transit.utils as tu
 import transit.plotting as tplt
 import astropy.constants as const
+import matplotlib.pyplot as plt
 
 # -----------------------------------------------------------------------------
 # Read in pre-prepared fits file
@@ -27,7 +28,7 @@ transit_info = transit_info_list[0]
 # ordered by detector, so the three segments making up each order will be
 # separated by 6 in the array.
 run_on_sub_slice = True
-segments_to_keep = [0, 6, 12]
+segments_to_keep = [3, 9, 15]
 
 if run_on_sub_slice:
     segment_mask = np.full(waves.shape[0], False)
@@ -52,12 +53,13 @@ transit_info["planet_area_frac_mid"] = \
 # -----------------------------------------------------------------------------
 # Inverse model settings
 # -----------------------------------------------------------------------------
-lambda_treg_star = 1
-lambda_treg_tau = 1     # 1E-3
-lambda_treg_planet = 1 # 1E5
+lambda_treg_star = 100
+lambda_treg_tau = 100
+lambda_treg_planet = 1E6
 tau_nr_tolerance = 1E-5
 model_converge_tolerance = 1E-5
-max_iter = 300
+max_model_iter = 1000
+max_tau_nr_iter = 300
 do_plot = False
 print_every_n_iterations = 1
 
@@ -93,7 +95,7 @@ fixed_scale = np.ones(obs_spec.shape[0])
 do_fix_flux_vector = False
 do_fix_tau_vector = False
 do_fix_trans_vector = False
-do_fix_scale_vector = False
+do_fix_scale_vector = True
 
 # -----------------------------------------------------------------------------
 # Running modelling
@@ -114,7 +116,8 @@ flux, trans, tau, scale, model, mask = tmod.run_transit_model(
     planet_trans_limits=planet_trans_limits,
     scale_limits=scale_limits,
     model_limits=model_limits,
-    max_iter=max_iter,
+    max_model_iter=max_model_iter,
+    max_tau_nr_iter=max_tau_nr_iter,
     do_plot=do_plot,
     print_every_n_iterations=print_every_n_iterations,
     do_fix_flux_vector=do_fix_flux_vector,
@@ -137,12 +140,26 @@ tu.save_transit_model_results_to_fits(
     scale=scale,
     mask=mask,)
 
+plt.close("all")
+
 # Diagnostic plots
 tplt.plot_component_spectra(
     waves=waves,
     fluxes=flux,
     telluric_tau=tau,
     planet_trans=trans,
+    ref_fluxes=fixed_flux,
+    ref_telluric_tau=fixed_tau,
+    ref_planet_trans=fixed_trans,)
+
+tplt.plot_epoch_model_comp(
+    waves=waves,
+    obs_spec=obs_spec,
+    model=model,
+    fluxes=flux,
+    telluric_tau=tau,
+    planet_trans=trans,
+    transit_info=transit_info,
     ref_fluxes=fixed_flux,
     ref_telluric_tau=fixed_tau,
     ref_planet_trans=fixed_trans,)

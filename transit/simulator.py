@@ -902,7 +902,6 @@ def calc_model_flux(
     telluric_tau,
     planet_trans,
     shadow_flux_opaque,
-    shadow_flux_atmo,
     airmass,
     scale,):
     """Compute the model observed flux.
@@ -930,19 +929,6 @@ def calc_model_flux(
 
     Velocities are precomputed for each phase in transit_info.
 
-    However, for this simulation we want to be more explicit in modelling the
-    transparent and non-transparent components of the planet. To do this, we
-    replace the content of the square brackets with:
-
-    S = F_λ(1+γ_j) - I_P^j_λ(1+β_j) * A + I_P^j_λ(1+β_j) * P^j_λ(1+δ_j) * A
-
-    Where we first remove flux assuming an entirely opaque planet, then add 
-    back in the flux corresponding to the planet atmosphere. In reality this
-    corresponds to the planet scale height (with different absorption occuring
-    at different altitudes), but for simplicity to begin with we'll just adopt
-    an atmospheric thickness as a fraction of the planet radius and apply the
-    planet transmission to the amount of flux travelling through this.
-
     Parameters
     ----------
     stellar_flux: 1D float array
@@ -959,11 +945,6 @@ def calc_model_flux(
         of shape [n_wave]. This should be equal to zero when the planet is not
         transitting.
 
-    shadow_flux_atmo: 1D float array
-        *Transmitted* stellar flux array (light passing through a transparent
-        annulus representing the atmosphere of the planet) of shape [n_wave].
-        This should be equal to zero when the planet is not transitting.
-
     airmass: float
         Airmass at the current epoch.
 
@@ -977,7 +958,7 @@ def calc_model_flux(
         Simulated model fluxes of shape [n_wave].
     """
     flux_model_ob = (
-        (stellar_flux - shadow_flux_opaque + shadow_flux_atmo * planet_trans)
+        (stellar_flux - shadow_flux_opaque * planet_trans)
         * np.exp(-telluric_tau * airmass) * scale)
     
     return flux_model_ob
@@ -1073,11 +1054,9 @@ def simulate_transit_single_epoch(
     broadening of spectra, and the instrumental transfer function to return
     a modelled 'observed' spectrum in units of counts.
 
-    We use a slightly different formalism to the Aronson Method here, in that
-    we model:
+    We use the same formalism to the Aronson Method here, in that we model:
      - The stellar flux (doppler shift gamma)
-     - The stellar flux blocked assuming an entirely opaque planet (beta)
-     - The stellar flux transmitted through the planet atmosphere (beta)
+     - The stellar flux blocked by the portion of the planet (beta)
      - The planet transmittance (delta)
      - The optical depth of telluric absorption
     with each component shifted to the appropriate radial velocity listed in
@@ -1275,10 +1254,12 @@ def simulate_transit_single_epoch(
             mus=mus_marcs,
             mu_selected=transit_epoch["mu_mid"],)
         
-        # Scale this flux such that it represents the total flux blocked by the
-        # planet assuming it were entirely opaque
-        r_p = syst_info.loc["r_planet_rearth", "value"] * const.R_earth.value
-        r_s = syst_info.loc["r_star_rsun", "value"] * const.R_sun.value
+        # Scale this flux such that it represents the blocked flux
+        r_e = const.R_earth.value   # Earth radii in metres
+        r_sun = const.R_sun.value   # Solar radii in metres
+
+        r_p = syst_info.loc["r_planet_rearth", "value"] * r_e
+        r_s = syst_info.loc["r_star_rsun", "value"] * r_sun
 
         flux_at_mu_integrated = simps(x=wave_marcs, y=flux_at_mu)
         area_ratio = (transit_epoch["planet_area_frac_mid"] * r_p**2 / r_s**2)
@@ -1295,18 +1276,6 @@ def simulate_transit_single_epoch(
             instr_resolving_power=instr_resolving_power,
             do_equid_lambda_resample=do_equid_lambda_resample,)
 
-        # ---------------------------------------------------------------------
-        # Transmitted stellar flux (through planet atmosphere)
-        # ---------------------------------------------------------------------
-        print("\tSimulating transmitted flux...")
-        # Here we use the same assumed mu value and spectrum as before, but 
-        # instead scale the spectrum by the adopted thickness of the planet
-        # atmosphere.
-        planet_atmo_frac = (syst_info.loc["r_planet_atmo_r_earth", "value"]**2
-            / syst_info.loc["r_planet_rearth", "value"]**2 )
-        
-        flux_shadow_atmo_obs = flux_shadow_opaque_obs * planet_atmo_frac
-
     # -------------------------------------------------------------------------
     # Planet *not* transiting
     # -------------------------------------------------------------------------
@@ -1314,7 +1283,6 @@ def simulate_transit_single_epoch(
         print("\tPlanet not transiting")
         planet_trans_obs = 0
         flux_shadow_opaque_obs = 0
-        flux_shadow_atmo_obs = 0
 
     # -------------------------------------------------------------------------
     # Tellurics
@@ -1336,7 +1304,6 @@ def simulate_transit_single_epoch(
         telluric_tau=tau_obs,
         planet_trans=planet_trans_obs,
         shadow_flux_opaque=flux_shadow_opaque_obs,
-        shadow_flux_atmo=flux_shadow_atmo_obs,
         airmass=transit_epoch["airmass"],
         scale=1,)                                   # TODO: do properly
     

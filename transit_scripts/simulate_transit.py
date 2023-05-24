@@ -24,7 +24,8 @@ N_TRANSIT = 2
 
 # Files
 fits_load_dir = "transit_data_wasp107.fits"
-marcs_fits = "synth/marcs_ltt1445/3340g5.0z-0.34m0.3t0.itf"
+#marcs_fits = "synth/marcs_ltt1445/3340g5.0z-0.34m0.3t0.itf"
+marcs_fits = "synth/marcs_wasp107_4420g4.61z+0.00m0.683t0.plt"
 planet_wave_fits = "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_wave_R200000.fits"
 planet_spec_fits = "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_flux_R200000.fits"
 molecfit_fits = "data_reduction/molecfit_wasp107_continuum_norm/MODEL/BEST_FIT_MODEL.fits"
@@ -59,7 +60,7 @@ do_use_uniform_telluric_spec = False
 do_use_uniform_planet_spec = False
 
 # Set this to values > 1 to increase the planetary absorption
-planet_transmission_boost_fac = 1
+planet_transmission_boost_fac = 1000
 
 # -----------------------------------------------------------------------------
 # Running things

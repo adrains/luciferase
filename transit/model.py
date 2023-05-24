@@ -177,6 +177,7 @@ def update_stellar_flux(
     # -------------------------------------------------------------------------
     # Pre-compute the limb darkening function:
     # sum [a_k * mu^(k/2)] / sum [2*a_k / (k + 4)]
+    # TODO: is there a factor of 2 missing here?
     limb = np.zeros(n_phase)
     ipow = np.arange(len(a_limb))+1
     N = np.pi*(1-np.sum(ipow*a_limb/(ipow+4)))
@@ -352,7 +353,8 @@ def update_tau_newton_raphson(
     airmasses,
     lambda_treg,
     tolerance,
-    telluric_tau_limits,):
+    telluric_tau_limits,
+    max_tau_nr_iter=1E20,):
     """
     Iteratively update tau (and the model) until the difference between 
     subsequent updates is below the adopted tolerance.
@@ -394,6 +396,9 @@ def update_tau_newton_raphson(
         (tau_low, tau_high) where a value of None for either the lower or
         upper limit is used to not apply a limit.
     
+    max_tau_nr_iter: int, default: 1E20
+        Maximum number of Newton's method iterations.
+
     Updated
     -------
     tau: 2D float array
@@ -431,7 +436,7 @@ def update_tau_newton_raphson(
 
         print("")   # Empty line to separate segments
         
-        while (not has_converged):
+        while (not has_converged) and (iter_count < max_tau_nr_iter):
             # Calculate num/denominator, sum along phase axis (axis 0)
             b = np.sum(mask_n*(2*model_n-obs_spec_n)*model_n*am_all**2, axis=0)
             r = np.sum(mask_n*(model_n-obs_spec_n)*model_n*am_all, axis=0)
@@ -464,9 +469,9 @@ def update_tau_newton_raphson(
             print(
                 "\tSegment #{:2}\t".format(spec_i),
                 "iteration #{:4}\t".format(iter_count),
-                "| median diff | = {:18.14f}\t".format(med_delta_tau),
-                "| max diff | = {:18.14f}\t".format(max_delta_tau),
-                "std diff = {:18.14f}\t".format(std_delta_tau),)
+                "| median Δ | = {:18.14f}\t".format(med_delta_tau),
+                "| max Δ | = {:18.14f}\t".format(max_delta_tau),
+                "std Δ = {:18.14f}\t".format(std_delta_tau),)
 
             # Calculcate updated model
             model_n_new = model_n * np.exp((tau_n_old-tau_n_new)*am_all)
@@ -486,7 +491,10 @@ def update_tau_newton_raphson(
             else:
                 iter_count += 1
 
-        total_iterations += iter_count
+        if iter_count >= max_tau_nr_iter:
+            print("\tHit max iterations, continuing")
+
+        total_iterations += iter_count + 1
 
     print("\n\tConverged with {} iterations\n".format(total_iterations))
 
@@ -966,7 +974,8 @@ def run_transit_model_iteration(
     do_fix_flux_vector,
     do_fix_trans_vector,
     do_fix_tau_vector,
-    do_fix_scale_vector,):
+    do_fix_scale_vector,
+    max_tau_nr_iter,):
     """Runs a single iteration of our inverse model. Each iteration does the
     following:
      1) Update stellar flux, flux derivative, and model.
@@ -1055,6 +1064,9 @@ def run_transit_model_iteration(
     do_fix_scale_vector: boolean
         If true, we don't iteratre the respective vector when modelling. This
         is useful for debugging.
+
+    max_tau_nr_iter: int
+        Maximum number of Newton's method iterations.
 
     Updates
     -------
@@ -1150,7 +1162,8 @@ def run_transit_model_iteration(
             airmasses=airmasses,
             lambda_treg=lambda_treg_tau,
             tolerance=tau_nr_tolerance,
-            telluric_tau_limits=telluric_tau_limits,)
+            telluric_tau_limits=telluric_tau_limits,
+            max_tau_nr_iter=max_tau_nr_iter,)
 
         # Update tau derivative from our new tau array
         for spec_i in range(0, n_spec):
@@ -1223,7 +1236,8 @@ def run_transit_model(
     planet_trans_limits=(None, None),
     scale_limits=(None, None),
     model_limits=(None, None),
-    max_iter=4000,
+    max_model_iter=4000,
+    max_tau_nr_iter=300,
     do_plot=False,
     print_every_n_iterations=100,
     do_fix_flux_vector=False,
@@ -1297,8 +1311,9 @@ def run_transit_model(
         (low, high) where a value of None for either the lower or upper limit
         is used to not apply a limit. Default (None, None).
 
-    max_iter: int, default: 6000
-        Maximum number of loop iterations for fitting.
+    max_model_iter, max_tau_nr_iter: int, default: 4000, 300
+        Maximum number of loop iterations for fitting for the modelling and
+        tau Newton's method respectively.
 
     do_plot: boolean, default: False
         TODO: not implemented.
@@ -1343,6 +1358,7 @@ def run_transit_model(
     # - Check dimensions
     # - Check booleans correspond to arrays
     # - Check we haven't fixed all our arrays
+    # - Check that limits are appropriate
 
     # -------------------------------------------------------------------------
     # Initialise variables for convenience 
@@ -1604,7 +1620,8 @@ def run_transit_model(
             do_fix_flux_vector=do_fix_flux_vector,
             do_fix_trans_vector=do_fix_trans_vector,
             do_fix_tau_vector=do_fix_tau_vector,
-            do_fix_scale_vector=do_fix_scale_vector)
+            do_fix_scale_vector=do_fix_scale_vector,
+            max_tau_nr_iter=max_tau_nr_iter,)
 
         # -----------------------------------------
         # Check array equivalence [TODO: remove]
@@ -1618,8 +1635,9 @@ def run_transit_model(
 
         # Print update for every Nth iteration
         if (iter_count % print_every_n_iterations) == 0:
-            print("\nIteration {} finished, obs-model median resid = {:0.6f},".format(
-                iter_count, np.nanmedian(obs_spec-model)))
+            print("\nIteration {} finished, ".format(iter_count),
+                  "obs-model median resid = {:0.6f},".format(
+                    np.nanmedian(obs_spec-model)))
 
             for name in arrays.keys():
                 min_array = np.nanmin(arrays[name])
@@ -1640,17 +1658,20 @@ def run_transit_model(
                     sep="",)
 
         # End the loop if we hit the maximum number of iterations
-        if iter_count >= max_iter:
+        if iter_count >= max_model_iter:
             hit_max_iterations = True
 
         # Continue to iterate so long as either flux or tau is not yet below
         # our adopted tolerance. TODO: account for possibility of both tau and
         # flux being fixed.
-        delta_flux = np.nanmedian(np.abs(arrays_old["flux"]-arrays["flux"]))
-        delta_tau = np.nanmedian(np.abs(arrays_old["tau"]-arrays["tau"]))
-        delta_trans = np.nanmedian(np.abs(arrays_old["trans"]-arrays["trans"]))
+        delta_flux = np.nanmean(np.abs(arrays_old["flux"]-arrays["flux"]))
+        delta_tau = np.nanmean(np.abs(arrays_old["tau"]-arrays["tau"]))
+        delta_trans = np.nanmean(np.abs(arrays_old["trans"]-arrays["trans"]))
 
-        print("\n", delta_flux, delta_tau, delta_trans)
+        print("\nMean change:")
+        print("|Δ flux|\t= {:11.8f}".format(delta_flux),)
+        print("|Δ tau|\t\t= {:11.8f}".format(delta_tau),)
+        print("|Δ trans|\t= {:11.8f}".format(delta_trans),)
 
         if (delta_flux < model_converge_tolerance
             and delta_tau < model_converge_tolerance
