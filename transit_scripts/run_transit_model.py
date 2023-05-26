@@ -3,6 +3,7 @@ Script to run the transit modelling using the Aronson method. Assumes that a
 data file has already been prepared using prepare_transit_model_fits.py.
 """
 import numpy as np
+import pandas as pd
 import transit.model as tmod
 import transit.utils as tu
 import transit.plotting as tplt
@@ -20,15 +21,31 @@ n_transit = 2
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(save_path, file_label, n_transit)
 
-# Run on only a single transit for now
-obs_spec = fluxes_list[0]
-transit_info = transit_info_list[0]
+# Combine transits - stack observations allong phase dimension
+obs_spec = np.vstack(fluxes_list)
 
+# Add in transit number column to each dataframe, then stack
+for t_i in range(n_transit):
+    transit_info_list[t_i]["transit_num"] = t_i
+    transit_info_list[t_i].reset_index(inplace=True)
+    transit_info_list[t_i].rename(columns={"index":"obs_i"}, inplace=True)
+
+transit_info = pd.concat(transit_info_list, axis=0)
+transit_info.index = np.arange(len(transit_info))
+
+# Reorder columns so we have transit_num, obs_i, then everything else
+columns = np.concatenate(
+    (["transit_num", "obs_i"], transit_info.columns.values[1:-1]))
+transit_info = transit_info[columns]
+
+# -----------------------------------------------------------------------------
+# Running on subset of data
+# -----------------------------------------------------------------------------
 # Run on a subset of all spectral segments. By default the segments are
 # ordered by detector, so the three segments making up each order will be
 # separated by 6 in the array.
 run_on_sub_slice = True
-segments_to_keep = [3, 9, 15]
+segments_to_keep = [3, 9, 15, 2, 8, 14, 1, 7, 13, 0, 6, 12]
 
 if run_on_sub_slice:
     segment_mask = np.full(waves.shape[0], False)
@@ -72,7 +89,7 @@ max_flux = np.max(obs_spec)
 stellar_flux_limits = (1E-5, max_flux)
 telluric_trans_limits = (4.5E-5, None)          # Max optical depth ~10
 telluric_tau_limits = (0, -np.log(4.5E-5))
-planet_trans_limits = (1E-5, None)
+planet_trans_limits = (1E-5, 1)
 scale_limits = (1E-5, 1)
 model_limits = (1E-5, None)
 

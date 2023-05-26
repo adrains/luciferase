@@ -1363,6 +1363,7 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise variables for convenience 
     # -------------------------------------------------------------------------
+    n_transits = len(set(transit_info["transit_num"]))
     n_phase = obs_spec.shape[0]
     n_spec = obs_spec.shape[1]
     n_wave = obs_spec.shape[2]
@@ -1530,10 +1531,17 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Print initial error + info
     # -------------------------------------------------------------------------
-    init_error = np.sum(mask*np.abs(obs_spec-model))/np.sum(mask)
-    print("-"*140, "\nModelling: Initial Values\n", "-"*140, sep="",)
-    print("Initial error: {}\n".format(init_error))
-    
+    #init_error = np.sum(mask*np.abs(obs_spec-model))/np.sum(mask)
+    #print("-"*140, "\nModelling: Initial Values\n", "-"*140, sep="",)
+    #print("Initial error: {}\n".format(init_error))
+    print("-"*140, "\nStarting modelling\n", "-"*140, sep="",)
+    print("N transits \t= {:1.0f}".format(n_transits))
+    print("N phases \t= {:3.0f}".format(n_phase))
+    print("Max iter \t= {}".format(max_model_iter))
+    print("Stellar λ_reg \t= {}".format(lambda_treg_star))
+    print("Telluric λ_reg \t= {}".format(lambda_treg_tau))
+    print("Planet λ_reg \t= {}\n".format(lambda_treg_planet))
+    print("Initial statistics:")
     # Store references to arrays in dict, and copies in another, for checking
     # convergence at the end of each iteration.
     arrays = {
