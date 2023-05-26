@@ -54,8 +54,9 @@ file/path/[setting]/[setting].sof
 file/path/reduce_master_[setting].sh
     #!/bin/bash
     cd file/path/[setting]/
-    esorex cr2res_obs_nodding --extract_swath_width=400 --extract_oversample=12
-        --extract_height=30 file/path/[setting]/[setting].sof
+    esorex cr2res_obs_nodding --extract_swath_width=800 --extract_oversample=10
+        --extract_height=30 --extract_smooth_slit=10 --extract_smooth_spec=0.00
+        --cosmics=TRUE file/path/[setting]/[setting].sof
 """
 import sys
 import os
@@ -88,13 +89,24 @@ if not os.path.isfile(TRACE_WAVE):
     raise Exception("Trace wave not found.")
 
 # Swath width in spectral dimension for extraction with reduce algorithm
-SWATH_WIDTH = 400           # Default: 800
+SWATH_WIDTH = 800           # Default: 800
 
 # Factor by which to oversample the extraction
-EXTRACT_OVERSAMPLE = 12     # Default: 7
+EXTRACT_OVERSAMPLE = 10     # Default: 7
 
 # Amount of slit to extract
 EXTRACT_HEIGHT = 30         # Default: -1 (i.e. full slit)
+
+# Regularization parameter for the slit-illumination vector, should not be set
+# below 1.0 to avoid ringing. Default: 2.0
+EXTRACT_SMOOTH_SLIT = 10
+
+# Analogous to the previous, but along the spectrum instead. Defaults
+# to 0.0 to not degrade resolution, but can be increased as needed.
+EXTRACT_SMOOTH_SPEC = 0.01
+
+# Find and mark cosmic rays hits as bad. Default: False
+DO_COSMIC_CORR = True
 
 # Detector linearity is computed from a series of flats with a range of NDIT in
 # three different grating settings to illuminate all pixels. This process takes
@@ -193,5 +205,8 @@ with open(shell_script, 'a') as ww:
         + '--extract_swath_width={:0.0f} '.format(SWATH_WIDTH)
         + '--extract_oversample={:0.0f} '.format(EXTRACT_OVERSAMPLE)
         + '--extract_height={:0.0f} '.format(EXTRACT_HEIGHT)
+        + '--extract_smooth_slit={:0.1f} '.format(EXTRACT_SMOOTH_SLIT)
+        + '--extract_smooth_spec={:0.2f} '.format(EXTRACT_SMOOTH_SPEC)
+        + '--cosmics={} '.format(str(DO_COSMIC_CORR).upper())
         + obs_sof + '\n')
     ww.write(esorex_cmd)

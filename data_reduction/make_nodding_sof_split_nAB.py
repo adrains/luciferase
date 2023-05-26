@@ -59,8 +59,9 @@ reduce_[nAB]xAB.sh
         --extract_height=30 file/path/[nAB]_00/[nAB]_00.sof
     ...
     cd file/path/[nAB]_NN/
-    esorex cr2res_obs_nodding --extract_swath_width=400 --extract_oversample=12
-        --extract_height=30 file/path/[nAB]_NN/[nAB]_NN.sof
+    esorex cr2res_obs_nodding --extract_swath_width=800 --extract_oversample=10
+        --extract_height=30 --extract_smooth_slit=10 --extract_smooth_spec=0.00
+        --cosmics=TRUE file/path/[nAB]_NN/[nAB]_NN.sof
 """
 import sys
 import numpy as np
@@ -86,13 +87,24 @@ if ".sof" not in master_sof:
     print("Are you sure {} is a .sof file?".format(master_sof))
 
 # Swath width in spectral dimension for extraction with reduce algorithm
-SWATH_WIDTH = 400           # Default: 800
+SWATH_WIDTH = 800           # Default: 800
 
 # Factor by which to oversample the extraction
-EXTRACT_OVERSAMPLE = 12     # Default: 7
+EXTRACT_OVERSAMPLE = 10     # Default: 7
 
 # Amount of slit to extract
 EXTRACT_HEIGHT = 30         # Default: -1 (i.e. full slit)
+
+# Regularization parameter for the slit-illumination vector, should not be set
+# below 1.0 to avoid ringing. Default: 2.0
+EXTRACT_SMOOTH_SLIT = 10
+
+# Analogous to the previous, but along the spectrum instead. Defaults
+# to 0.0 to not degrade resolution, but can be increased as needed.
+EXTRACT_SMOOTH_SPEC = 0.0
+
+# Find and mark cosmic rays hits as bad. Default: False
+DO_COSMIC_CORR = True
 
 # -----------------------------------------------------------------------------
 # Read in files
@@ -203,5 +215,8 @@ for nod_set_i in range(n_sci//nAB//2):
             + '--extract_swath_width={:0.0f} '.format(SWATH_WIDTH)
             + '--extract_oversample={:0.0f} '.format(EXTRACT_OVERSAMPLE)
             + '--extract_height={:0.0f} '.format(EXTRACT_HEIGHT)
+            + '--extract_smooth_slit={:0.1f} '.format(EXTRACT_SMOOTH_SLIT)
+            + '--extract_smooth_spec={:0.2f} '.format(EXTRACT_SMOOTH_SPEC)
+            + '--cosmics={} '.format(str(DO_COSMIC_CORR).upper())
             + sof_file + '\n')
         ww.write(esorex_cmd)
