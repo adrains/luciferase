@@ -36,6 +36,7 @@ import sys
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.stats import sigma_clip
 
 sys.path.insert(1, "/home/arains/code/luciferase/")
 
@@ -61,7 +62,7 @@ VMAX_PC = 85
 
 # Y Bounds to plot
 Y_BOUND_LOW = -0.1
-Y_BOUND_HIGH = 2.0
+Y_BOUND_HIGH_N_SIGMA = 5.0
 
 # Edge pixels to avoid when normalising by median
 EDGE_PX = 200
@@ -316,12 +317,12 @@ for folder in folders:
                     color=colours[obs_i],
                     alpha=0.8,)
             
-            # Label Y axes and ticks only on left
+            # Label Y axes only on left
             if det_i == 0:
                 axes[n_ax_base+order_i, det_i].set_ylabel("Flux")
-            else:
-                axes[n_ax_base+order_i, det_i].set_yticks([])
-                axes[n_ax_base-1, det_i].set_yticks([])
+            
+            axes[n_ax_base+order_i, det_i].set_yticks([])
+            axes[n_ax_base-1, det_i].set_yticks([])
             
             # X label for slit func
             axes[n_ax_base-1, det_i].set_xlabel(
@@ -402,7 +403,11 @@ for folder in folders:
                 color=fwhm_text_colour,)
 
             # Set appropriate y limits
-            axes[n_ax_base+order_i, det_i].set_ylim(Y_BOUND_LOW, Y_BOUND_HIGH)
+            clipped_flux = sigma_clip(
+                flux_norm[np.isfinite(flux_norm)], 
+                sigma_upper=5)
+            upper_bound = 1 + Y_BOUND_HIGH_N_SIGMA * np.nanstd(clipped_flux)
+            axes[n_ax_base+order_i, det_i].set_ylim(Y_BOUND_LOW, upper_bound)
 
             # Finally index our spectral count
             spec_i += 1
