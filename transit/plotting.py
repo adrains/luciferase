@@ -81,6 +81,8 @@ def plot_all_input_spectra(
                     linewidth=0.5,
                     label=phase_i,)
 
+        axes[transit_i].set_ylim(
+            -1000, 3*np.nanmedian(fluxes_all_list[transit_i]))
         axes[transit_i].set_ylabel("Flux (counts)")
 
         cb = fig.colorbar(cmap, ax=axes[transit_i])
@@ -95,9 +97,12 @@ def plot_component_spectra(
     fluxes,
     telluric_tau,
     planet_trans,
+    scale_vector,
+    transit_num,
     ref_fluxes=None,
     ref_telluric_tau=None,
-    ref_planet_trans=None,):
+    ref_planet_trans=None,
+    ref_scale_vector=None,):
     """Plots fluxes, telluric transmission, and planet transmission in
     respective subplots. Can be used for both Aronson fitted results, or
     simulated components.
@@ -116,15 +121,21 @@ def plot_component_spectra(
     planet_trans: 2D float array
         Model planet transmission component of shape [n_spec, n_px].
 
-    ref_fluxes, ref_telluric_tau, ref_planet_trans: float array or None
-        Reference spectra to plot against fluxes, tau, and trans.
+    scale_vector: 1D ffloat array
+        Adoped scale/slit losses vector of shape [n_phase].
+
+    ref_fluxes, ref_telluric_tau, ref_planet_trans, ref_scale_vector: float 
+    array or None
+        Reference vectors to plot against fluxes, tau, trans, and scale.
     """
     # Intialise subplots
-    fig, (ax_flux, ax_tell, ax_trans) = plt.subplots(
-        nrows=3,
+    fig, (ax_flux, ax_tell, ax_trans, ax_scale) = plt.subplots(
+        nrows=4,
         ncols=1,
-        figsize=(15, 5),
-        sharex=True,)
+        figsize=(20, 8),)
+    
+    # Share x axes
+    ax_flux.get_shared_x_axes().join(ax_flux, ax_tell, ax_trans)
 
     # Plot each spectral segment
     for spec_i in range(waves.shape[0]):
@@ -148,6 +159,21 @@ def plot_component_spectra(
             linewidth=0.4,
             color="g",
             alpha=0.8,)
+        
+        ax_scale.plot(
+            np.arange(len(scale_vector)),
+            scale_vector,
+            marker="o",
+            linewidth=0.4,
+            color="c",
+            alpha=0.8,)
+        
+        ax_scale.hlines(
+            y=1,
+            xmin=0,
+            xmax=len(scale_vector),
+            colors="k",
+            linestyles="dotted",)
         
         # Plot reference vectors if we have them
         if (ref_fluxes is not None
@@ -176,11 +202,24 @@ def plot_component_spectra(
                 linewidth=0.4,
                 color="k",
                 alpha=0.8,)
+            
+        if (ref_scale_vector is not None
+            and scale_vector.shape == ref_scale_vector.shape):
+            ax_scale.plot(
+                np.arange(len(scale_vector)),
+                scale_vector,
+                marker="o",
+                linewidth=0.4,
+                color="c",
+                alpha=0.8,)
 
+    fig.suptitle("Transit #{:0.0f}".format(transit_num+1))
     ax_flux.set_title("Stellar flux")
     ax_tell.set_title("Telluric Transmission")
     ax_trans.set_title("Planet Transmission")
     ax_trans.set_xlabel(r"Wavelength (${\rm \AA}$)")
+    ax_scale.set_xlabel("Epoch #")
+    ax_scale.set_ylim(0.5, 1.5)
     plt.tight_layout()
 
 

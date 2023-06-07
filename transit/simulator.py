@@ -10,6 +10,7 @@ import astropy.constants as const
 from scipy.interpolate import interp1d
 from scipy.integrate import simps
 from PyAstronomy.pyasl import instrBroadGaussFast
+from scipy.signal import savgol_filter
 
 # -----------------------------------------------------------------------------
 # Load/save spectra
@@ -1039,6 +1040,7 @@ def simulate_transit_single_epoch(
     trans_planet,
     telluric_wave,
     telluric_tau,
+    scale_val,
     instr_resolving_power,
     r_tel_prim,
     r_tel_cen_ob,
@@ -1121,6 +1123,9 @@ def simulate_transit_single_epoch(
     telluric_wave, telluric_tau: 1D float array
         Wavelength and tau arrays for the telluric spectrum of shape 
         [n_wave_telluric].
+
+    scale_val: float
+        Scale value representing slit losses per the Aronson method formalism.
 
     instr_resolving_power: float
         Instrumental resolving power to simulate.
@@ -1305,7 +1310,7 @@ def simulate_transit_single_epoch(
         planet_trans=planet_trans_obs,
         shadow_flux_opaque=flux_shadow_opaque_obs,
         airmass=transit_epoch["airmass"],
-        scale=1,)                                   # TODO: do properly
+        scale=scale_val,)
     
     # -------------------------------------------------------------------------
     # Instrumental transfer function, convert to counts
@@ -1362,8 +1367,6 @@ def simulate_transit_single_epoch(
     component_spectra["telluric_tau"] = tau_obs
 
     # Planet
-    # TODO: I don't think this is entirely correct? I'm unsure on whether
-    # Aronson is recovering a transmission or absolute flux?
     component_spectra["planet_trans"] = planet_trans_obs
 
     # All done
@@ -1391,7 +1394,10 @@ def simulate_transit_multiple_epochs(
     do_use_uniform_stellar_spec,
     do_use_uniform_telluric_spec,
     do_use_uniform_planet_spec,
-    apply_blaze_function,):
+    apply_blaze_function,
+    scale_vector_method,
+    savgol_window_frac_size,
+    savgol_poly_order,):
     """Simulates an entire transit with many epochs using multiple calls to
     simulate_transit_single_epoch. See docstrings of calc_model_flux and
     simulate_transit_single_epoch for more detail.
@@ -1477,6 +1483,19 @@ def simulate_transit_multiple_epochs(
     apply_blaze_function: boolean
         Whether or not to apply the blaze function.
 
+    scale_vector_method: str
+        Method to use for constructing our scale vector. Currently either:
+         1) 'constant_unity'  - an array of all ones.
+         2) 'smoothed_random' - smoothed array of n_phase random (0,2) points.
+
+    savgol_window_frac_size: float
+        Fractional size of the Savitzky–Golay window relative to n_phase to use
+        for smoothing random points generated for the 'smoothed_random' method
+        of scale vector generation.
+
+    savgol_poly_order: int
+        Polynomial order to use for the Savitzky–Golay filter.
+
     Returns
     -------
     fluxes_model, snr: float array
@@ -1488,6 +1507,18 @@ def simulate_transit_multiple_epochs(
         contains the *rest frame* component model spectra used to construct the
         simulated transit.
     """
+    # TODO: input checking
+    pass
+
+    # Supported methods of generating a scale vector
+    scale_vector_methods = [
+        "constant_unity",
+        "smoothed_random"
+    ]
+
+    # Define for convenience
+    n_phase = len(transit_info)
+
     # Input checking
     if wl_min > np.min(wave_observed) or wl_max < np.max(wave_observed):
         raise ValueError("MARCS wl bounds do not cover observed wl scale.")
@@ -1517,6 +1548,22 @@ def simulate_transit_multiple_epochs(
     if do_use_uniform_telluric_spec:
         telluric_tau = np.zeros_like(telluric_tau)
 
+    # Initialise scale vector
+    # TODO: NP mentioned that the scale vector also has some dependence on
+    # seeing, so that could potentially also be factored in here.
+    if scale_vector_method == "constant_unity":
+        scale_vector = np.ones(n_phase)
+
+    elif scale_vector_method =="smoothed_random":
+        rand_points = np.random.random_sample(n_phase) * 2.0
+        scale_vector = savgol_filter(
+            x=rand_points,
+            window_length=int(n_phase * savgol_window_frac_size),
+            polyorder=savgol_poly_order,)
+    else:
+        raise ValueError("scale_vector_method must be in {}".format(
+            scale_vector_methods))
+
     # Initialise output flux array
     shape = (len(transit_info), wave_observed.shape[0], wave_observed.shape[1])
     fluxes_model_all = np.zeros(shape)
@@ -1534,6 +1581,7 @@ def simulate_transit_multiple_epochs(
             trans_planet=trans_planet,
             telluric_wave=telluric_wave,
             telluric_tau=telluric_tau,
+            scale_val=scale_vector[epoch_i],
             syst_info=syst_info,
             transit_epoch=transit_epoch,
             instr_resolving_power=instr_resolving_power,
@@ -1552,6 +1600,8 @@ def simulate_transit_multiple_epochs(
     # Prepare component spectra
     # -------------------------------------------------------------------------
     # Prepare component vectors without doppler shift with mean params
+    # TODO: rewrite so that recovering the component vectors is more elegant
+    # than....this.
     rest_frame_epoch = transit_epoch.copy()
     rest_frame_epoch["is_in_transit_mid"] = True
     rest_frame_epoch["mu_mid"] = 1
@@ -1575,6 +1625,7 @@ def simulate_transit_multiple_epochs(
             trans_planet=trans_planet,
             telluric_wave=telluric_wave,
             telluric_tau=telluric_tau,
+            scale_val=1.0,
             syst_info=syst_info,
             transit_epoch=rest_frame_epoch,
             instr_resolving_power=instr_resolving_power,
@@ -1585,5 +1636,8 @@ def simulate_transit_multiple_epochs(
             fill_throughput_value=fill_throughput_value,
             planet_transmission_boost_fac=planet_transmission_boost_fac,
             apply_blaze_function=apply_blaze_function,)
+
+    # Add in scale vector
+    component_vectors["scale_vector"] = scale_vector
 
     return fluxes_model_all, snr_model_all, component_vectors

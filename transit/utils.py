@@ -1197,9 +1197,13 @@ def save_simulated_transit_components_to_fits(
     n_transit,
     flux,
     tau,
-    trans,):
-    """Function to save the component flux, telluric tau, and planet 
-    transmission vectors to the same fits file as the individual epochs.
+    trans,
+    scale,):
+    """Function to save the component flux, telluric tau, planet transmission,
+    and scale vectors to the same fits file as the individual epochs.
+
+    We expect to receive only a single flux and trans vector, but as many tau
+    and scale vectors as there are transits.
     
     Parameters
     ----------
@@ -1215,17 +1219,21 @@ def save_simulated_transit_components_to_fits(
     flux: 2D float array
         Model stellar flux component of shape [n_spec, n_px].
 
-    tau: 2D float array
-        Model telluric tau component of shape [n_spec, n_px].
+    tau: 3D float array
+        Model telluric tau component of shape [n_transit, n_spec, n_px].
 
     trans: 2D float array
         Model planet transmission component of shape [n_spec, n_px].
+
+    scale: list of 1D float arrays
+        List of shape n_transit of adopted scale/slit losses of shape [n_phase]
     """
     # Pair the extensions with their data
     extensions = {
         "COMPONENT_FLUX":(flux, "Flux component of simulated transit."),
         "COMPONENT_TAU":(tau, "Telluric tau component of simulated transit."),
         "COMPONENT_TRANS":(trans, "Planet component of simulated transit."),
+        "COMPONENT_SCALE":(scale, "Adopted scale/slit loss vector."),
     }
 
     # Load in the fits file
@@ -1233,7 +1241,8 @@ def save_simulated_transit_components_to_fits(
         fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
 
     with fits.open(fits_file, mode="update") as fits_file:
-        for extname in extensions.keys():
+        # Constant components across transits
+        for extname in ["COMPONENT_FLUX", "COMPONENT_TRANS"]:
             # First check if the HDU already exists
             if extname in fits_file:
                 fits_file[extname].data = extensions[extname][0]
@@ -1244,7 +1253,22 @@ def save_simulated_transit_components_to_fits(
                 hdu.header["EXTNAME"] = (extname, extensions[extname][1])
                 fits_file.append(hdu)
 
-            fits_file.flush()
+        # Components that vary from transit to transit
+        for extname in ["COMPONENT_TAU", "COMPONENT_SCALE"]:
+            for trans_i in range(n_transit):
+                extname_i = "{}_{:0.0f}".format(extname, trans_i)
+
+                # First check if the HDU already exists
+                if extname_i in fits_file:
+                    fits_file[extname_i].data = extensions[extname][0][trans_i]
+                
+                # Not there, make and append
+                else:
+                    hdu = fits.PrimaryHDU(extensions[extname][0][trans_i])
+                    hdu.header["EXTNAME"] = (extname_i, extensions[extname][1])
+                    fits_file.append(hdu)
+
+        fits_file.flush()
 
 
 def load_simulated_transit_components_from_fits(
@@ -1270,11 +1294,14 @@ def load_simulated_transit_components_from_fits(
     component_flux: 2D float array
         Model stellar flux component of shape [n_spec, n_px].
 
-    component_tau: 2D float array
-        Model telluric tau component of shape [n_spec, n_px].
+    component_tau: 3D float array
+        Model telluric tau component of shape [n_transit, n_spec, n_px].
 
     component_trans: 2D float array
         Model planet transmission component of shape [n_spec, n_px].
+
+    component_scale: list of 1D float arrays
+        List of shape n_transit of adopted scale/slit losses of shape [n_phase]
     """
     # Load in the fits file
     fits_file = os.path.join(
@@ -1283,11 +1310,23 @@ def load_simulated_transit_components_from_fits(
     with fits.open(fits_file, mode="readonly") as fits_file:
         # Load data constant across transits
         component_flux = fits_file["COMPONENT_FLUX"].data.astype(float)
-        component_tau = fits_file["COMPONENT_TAU"].data.astype(float)
         component_trans = fits_file["COMPONENT_TRANS"].data.astype(float)
 
+        # Load components that vary across transits
+        component_tau = []
+        component_scale = []
+
+        for transit_i in range(n_transit):
+            tau_nm = "COMPONENT_TAU_{:0.0f}".format(transit_i)
+            tau = fits_file[tau_nm].data.astype(float)
+            component_tau.append(tau)
+
+            scale_nm = "COMPONENT_SCALE_{:0.0f}".format(transit_i)
+            scale = fits_file[scale_nm].data.astype(float)
+            component_scale.append(scale)
+
     # All done, return
-    return component_flux, component_tau, component_trans
+    return component_flux, component_tau, component_trans, component_scale
 
 
 def save_transit_model_results_to_fits(
