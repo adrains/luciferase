@@ -170,7 +170,8 @@ for trans_i in range(N_TRANSIT):
         telluric_tau=telluric_components[trans_i],
         planet_trans=planet_components[trans_i],
         scale_vector=scale_components[trans_i],
-        transit_num=trans_i,)
+        transit_num=trans_i,
+        star_name=star_name,)
 
 # Save results to new fits file
 tu.save_transit_info_to_fits(

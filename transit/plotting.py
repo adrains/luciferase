@@ -99,6 +99,7 @@ def plot_component_spectra(
     planet_trans,
     scale_vector,
     transit_num,
+    star_name,
     ref_fluxes=None,
     ref_telluric_tau=None,
     ref_planet_trans=None,
@@ -121,11 +122,17 @@ def plot_component_spectra(
     planet_trans: 2D float array
         Model planet transmission component of shape [n_spec, n_px].
 
-    scale_vector: 1D ffloat array
+    scale_vector: 1D float array
         Adoped scale/slit losses vector of shape [n_phase].
 
-    ref_fluxes, ref_telluric_tau, ref_planet_trans, ref_scale_vector: float 
-    array or None
+    transit_num: int
+        Transit number for use when titling plots.
+
+    star_name: str
+        Name of the star.
+
+    ref_fluxes, ref_telluric_tau, ref_planet_trans, ref_scale_vector: 
+    float array or None
         Reference vectors to plot against fluxes, tau, trans, and scale.
     """
     # Intialise subplots
@@ -221,6 +228,10 @@ def plot_component_spectra(
     ax_scale.set_xlabel("Epoch #")
     ax_scale.set_ylim(0.5, 1.5)
     plt.tight_layout()
+
+    fig_name = "plots/{}_transit_{:0.0f}_components.pdf".format(
+        star_name, transit_num)
+    plt.savefig(fig_name)
 
 
 def plot_epoch_model_comp(
