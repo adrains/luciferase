@@ -1014,6 +1014,7 @@ def shift_spec_and_convert_to_instrumental_scale(
         flux_rv_shift = flux_old.copy()
 
     # Broaden flux to instrumental resolution
+    # TODO: is it appropriate to just use the midpoint?
     flux_instr = instrBroadGaussFast(
         wvl=wave_old,
         flux=flux_rv_shift,

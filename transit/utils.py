@@ -1325,6 +1325,8 @@ def load_simulated_transit_components_from_fits(
             scale = fits_file[scale_nm].data.astype(float)
             component_scale.append(scale)
 
+    component_tau = np.array(component_tau)
+
     # All done, return
     return component_flux, component_tau, component_trans, component_scale
 

@@ -241,10 +241,12 @@ def plot_epoch_model_comp(
     fluxes,
     telluric_tau,
     planet_trans,
+    scale,
     transit_info,
     ref_fluxes=None,
     ref_telluric_tau=None,
-    ref_planet_trans=None,):
+    ref_planet_trans=None,
+    ref_scale=None):
     """Plots diagnostic plot per phase.
 
     Parameters
@@ -267,7 +269,10 @@ def plot_epoch_model_comp(
 
     planet_trans: 2D float array
         Model planet transmission component of shape [n_spec, n_px].
-        
+    
+    scale: 1D float array
+        Model scale vector of shape [n_phase].
+
     transit_info: pandas DataFrame
         Transit info DataFrames containing information associated with each 
         transit time step with columns:
@@ -284,31 +289,37 @@ def plot_epoch_model_comp(
          'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
          'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
 
-    ref_fluxes, ref_telluric_tau, ref_planet_trans: float array or None
-        Reference spectra to plot against fluxes, tau, and trans.
+    ref_fluxes, ref_telluric_tau, ref_planet_trans, ref_scale: 
+    float array or None
+        Reference vectors to plot against fluxes, tau, trans, and scale.
     """
-    # pull out variables for convenience
+    # Pull out variables for convenience
     (n_phase, n_spec, n_wave) = obs_spec.shape
 
     # loop over all epochs
     for phase_i, transit_epoch in transit_info.iterrows():
         # TODO Temporary HACK
-        if phase_i != 0:
+        if phase_i != 100:
             continue
 
-        # initialise subplot
-        fig, (ax_spec, ax_flux, ax_tell, ax_trans) = plt.subplots(
-            nrows=4,
+        transit_i = transit_info.iloc[phase_i]["transit_num"]
+
+        night_masks = [transit_info["transit_num"].values == trans_i
+            for trans_i in range(telluric_tau.shape[0])]
+
+        # Initialise subplot
+        fig, (ax_spec, ax_flux, ax_tell, ax_trans, ax_scale) = plt.subplots(
+            nrows=5,
             ncols=1,
-            figsize=(15, 10),
-            sharex=True,)
+            figsize=(15, 10),)
         
         # Setup lower panel for residuals
         plt.setp(ax_spec.get_xticklabels(), visible=False)
         divider = make_axes_locatable(ax_spec)
         res_ax = divider.append_axes("bottom", size="30%", pad=0)
         fig.add_axes(res_ax, sharex=ax_spec)
-        ax_spec.get_shared_x_axes().join(ax_spec, res_ax)
+        ax_spec.get_shared_x_axes().join(
+            ax_spec, res_ax, ax_flux, ax_tell, ax_trans)
 
         # Grab velocities for this phase
         gamma = transit_epoch["gamma"]
@@ -318,7 +329,6 @@ def plot_epoch_model_comp(
         for spec_i in range(n_spec):
             # Initialise derivatives
             flux_2 = tu.bezier_init(x=waves[spec_i], y=fluxes[spec_i],)
-            tau_2 = tu.bezier_init(x=waves[spec_i], y=telluric_tau[spec_i],)
             trans_2 = tu.bezier_init(x=waves[spec_i], y=planet_trans[spec_i],)
 
             # -----------------------------------------------------------------
@@ -390,7 +400,7 @@ def plot_epoch_model_comp(
             # -----------------------------------------------------------------
             # Plot tellurics
             # -----------------------------------------------------------------
-            tellurics = np.exp(-telluric_tau[spec_i])
+            tellurics = np.exp(-telluric_tau[transit_i, spec_i])
 
             ax_tell.plot(
                 waves[spec_i],
@@ -404,7 +414,7 @@ def plot_epoch_model_comp(
             and telluric_tau.shape == ref_telluric_tau.shape):
                 ax_tell.plot(
                     waves[spec_i],
-                    np.exp(-ref_telluric_tau[spec_i]),
+                    np.exp(-ref_telluric_tau[transit_i, spec_i]),
                     linewidth=0.4,
                     color="k",
                     alpha=0.8,
@@ -446,6 +456,36 @@ def plot_epoch_model_comp(
                     color="k",
                     alpha=0.8,
                     label="Input" if spec_i == 0 else "_nolegend_",)
+                
+            # -----------------------------------------------------------------
+            # Plot scale
+            # -----------------------------------------------------------------
+            # Plot fitted scale for this transit
+            ax_scale.plot(
+                scale[night_masks[transit_i]],
+                linewidth=0.4,
+                color="c",
+                alpha=0.8,
+                label="Scale" if spec_i == 0 else "_nolegend_",)
+            
+            # Plot marker for this phase
+            ax_scale.plot(
+                transit_info.iloc[phase_i]["obs_i"],
+                scale[phase_i],
+                linewidth=0.4,
+                marker="o",
+                color="c",
+                alpha=0.8,)
+            
+            if (ref_scale is not None
+            and scale.shape == ref_scale.shape):
+                ax_scale.plot(
+                    ref_scale[night_masks[transit_i]],
+                    linewidth=0.4,
+                    marker="+",
+                    color="k",
+                    alpha=0.8,
+                    label="Input" if spec_i == 0 else "_nolegend_",)
 
         # Finish setup
         ax_spec.set_title("Input vs Model Spectrum")
@@ -453,11 +493,13 @@ def plot_epoch_model_comp(
         ax_tell.set_title("Telluric Transmission")
         ax_trans.set_title("Planet Transmission")
         ax_trans.set_xlabel(r"Wavelength (${\rm \AA}$)")
+        ax_scale.set_xlabel(r"Phase #")
 
         ax_spec.legend(loc="lower center", ncol=2)
         ax_flux.legend(loc="lower center", ncol=2)
         ax_tell.legend(loc="lower center", ncol=2)
         ax_trans.legend(loc="lower center", ncol=2)
+        ax_scale.legend(loc="lower center", ncol=2)
 
         plt.tight_layout()
 

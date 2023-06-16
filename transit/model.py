@@ -84,7 +84,8 @@ def update_stellar_flux(
     lambda_treg,
     flux_limits,):
     """
-    Updates stellar flux and its derivative in the *stellar* frame.
+    Updates stellar flux and its derivative in the *stellar* frame. Note that
+    this function uses the appropriate tau vector for the transit in question.
 
     Parameters
     ----------
@@ -153,11 +154,13 @@ def update_stellar_flux(
         Fitted model stellar flux and its derivative of shape [n_spec, n_px].
     """
     # -------------------------------------------------------------------------
-    # Initialise
+    # Initialise variable references for convenience
     # -------------------------------------------------------------------------
     n_phase = obs_spec.shape[0]
     n_spec = obs_spec.shape[1]
     n_wave = obs_spec.shape[2]
+
+    transit_nums = transit_info["transit_num"].values
 
     ldc_cols = ["ldc_init_a1", "ldc_init_a2", "ldc_init_a3", "ldc_init_a4",]
     a_limb = syst_info.loc[ldc_cols, "value"].values
@@ -192,12 +195,15 @@ def update_stellar_flux(
         r = np.zeros(n_wave)
 
         for phase_i in range(0, n_phase):
-            # RV shift tellurics into stellar rv frame
+            # RV shift tellurics into stellar rv frame, making sure to use the
+            # tellurics from the appropriate transit.
+            transit_i = transit_nums[phase_i]
+
             t = tu.doppler_shift(
                 x=waves[spec_i],
-                y=tau[spec_i],
+                y=tau[transit_i, spec_i],
                 gamma=gamma[phase_i],
-                y2=tau_2[spec_i],)
+                y2=tau_2[transit_i, spec_i],)
 
             # RV shift mask into stellar rv frame
             m = tu.doppler_shift(
@@ -252,7 +258,7 @@ def init_tau_newton_raphson(
     model,
     tau,
     mask,
-    airmasses,
+    transit_info,
     telluric_trans_limits,):
     """Initialise tau before running the Newton-Raphson method. This function
     should be called before update_tau_newton_raphson for the first time.
@@ -266,14 +272,27 @@ def init_tau_newton_raphson(
         Combined model (star + tellurics + planet) at each phase of shape 
         [n_phase, n_spec, n_px].
 
-    tau: 2D float array
-        Fitted model telluric tau and its derivative of shape [n_spec, n_px].
+    tau: 3D float array
+        Fitted model telluric tau of shape [n_transit, n_spec, n_px].
 
     mask: 3D float array
         Mask array of shape [n_phase, n_spec, n_px]. Contains either 0 or 1.
 
-    airmasses: 1D float array
-        Array of airmasses for each phase of shape [n_phase].
+    transit_info: pandas DataFrame
+        Transit info DataFrames containing information associated with each 
+        transit time step with columns:
+
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file', 'phase_start', 'is_in_transit_start', 'r_x_start',
+         'r_y_start', 'r_z_start', 'v_x_start', 'v_y_start', 'v_z_start',
+         's_projected_start', 'scl_start', 'mu_start',
+         'planet_area_frac_start', 'phase_mid', 'is_in_transit_mid',
+         'r_x_mid', 'r_y_mid', 'r_z_mid', 'v_x_mid', 'v_y_mid', 'v_z_mid',
+         's_projected_mid', 'scl_mid', 'mu_mid', 'planet_area_frac_mid',
+         'phase_end', 'is_in_transit_end', 'r_x_end', 'r_y_end', 'r_z_end',
+         'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
+         'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
 
     telluric_trans_limits: float/None tuple
         Lower and upper limits to enforce for modelled telluric transmission
@@ -290,59 +309,77 @@ def init_tau_newton_raphson(
         [n_phase, n_spec, n_px].
     """
     # -------------------------------------------------------------------------
-    # Initialise
+    # Initialise for convenience
     # -------------------------------------------------------------------------
-    n_phase = obs_spec.shape[0]
+    n_transit = tau.shape[0]
     n_spec = obs_spec.shape[1]
     n_wave = obs_spec.shape[2]
 
-    # Expand airmass to all wavelengths with shape [n_phase, n_wave]
-    am_all = np.tile(airmasses, n_wave).reshape((n_wave, n_phase)).T
+    # Masks to reference obs_spec/model/transit info per transit
+    night_masks = [transit_info["transit_num"].values == trans_i
+        for trans_i in range(n_transit)]
+    
+    # Number of phases per night
+    n_phase_nightly = [np.sum(nm) for nm in night_masks]
+
+    airmasses = transit_info["airmass"].values
 
     # -------------------------------------------------------------------------
-    # Loop over all spectral segments
+    # Loop over all transits
     # -------------------------------------------------------------------------
-    for spec_i in range(0, n_spec):
-        # Pull out subarrays for convenience
-        obs_spec_n = obs_spec[:,spec_i]
-        model_n = model[:,spec_i]
-        tau_n = tau[spec_i]
-        mask_n = mask[:,spec_i]
+    for transit_i in range(0, n_transit):
+        # Grab mask and n_phase for this transit
+        nm = night_masks[transit_i]
+        n_phase = n_phase_nightly[transit_i]
 
-        # Expand tau to all phases with shape [n_phase, n_wave]
-        tau_n_all = np.tile(tau_n, n_phase).reshape((n_phase, n_wave))
+        # Expand airmass to all wavelengths with shape [n_phase, n_wave]
+        am_all = np.tile(airmasses[nm], n_wave).reshape((n_wave, n_phase)).T
 
-        # Initial guess, assuming all Z eq 1, sum over all phases (axis=0)
-        # TODO: should we be assuming this is one?
-        #   - if we're coming here initially, we've already assumed z=1
-        a = np.sum(mask_n*model_n*obs_spec_n/np.exp(-tau_n_all*am_all),axis=0)
-        b = np.sum(mask_n*model_n**2/np.exp(-2*tau_n_all*am_all), axis=0)
+        # ---------------------------------------------------------------------
+        # Loop over all spectral segments
+        # ---------------------------------------------------------------------
+        for spec_i in range(0, n_spec):
+            # Pull out subarrays for convenience
+            obs_spec_n = obs_spec[nm, spec_i]
+            model_n = model[nm, spec_i]
+            tau_n = tau[transit_i, spec_i]
+            mask_n = mask[nm, spec_i]
 
-        ibad = np.where(b == 0)
-        nbad = np.sum(ibad)
+            # Expand tau to all phases with shape [n_phase, n_wave]
+            tau_n_all = np.tile(tau_n, n_phase).reshape((n_phase, n_wave))
 
-        if nbad > 0:
-            b[ibad] = 1
+            # Initial guess, assuming all Z eq 1, sum over all phases (axis=0)
+            # TODO: should we be assuming this is one?
+            #   - if we're coming here initially, we've already assumed z=1
+            a = np.sum(
+                mask_n*model_n*obs_spec_n/np.exp(-tau_n_all*am_all),axis=0)
+            b = np.sum(mask_n*model_n**2/np.exp(-2*tau_n_all*am_all), axis=0)
 
-        # Calculate (and clip) tellurics to calculcate a new value for tau
-        tellurics = a/b
-        clipped_tellurics = np.clip(
-            a=tellurics/np.max(tellurics),
-            a_min=telluric_trans_limits[0],
-            a_max=telluric_trans_limits[1],)
-        
-        tau_n_new = -np.log(clipped_tellurics) / np.min(airmasses)
-        
-        # Expand delta tau to all wavelengths with shape [n_phase, n_wave]
-        delta_tau = np.tile(
-            tau_n-tau_n_new, n_phase).reshape((n_phase, n_wave))
+            ibad = np.where(b == 0)
+            nbad = np.sum(ibad)
 
-        # Calculate updated model
-        model_n_new = model_n * np.exp(delta_tau*am_all)
+            if nbad > 0:
+                b[ibad] = 1
 
-        # Update (by reference) tau and model vectors
-        tau[spec_i] = tau_n_new
-        model[:,spec_i] = model_n_new
+            # Calculate (and clip) tellurics to calculcate a new value for tau
+            tellurics = a/b
+            clipped_tellurics = np.clip(
+                a=tellurics/np.max(tellurics),
+                a_min=telluric_trans_limits[0],
+                a_max=telluric_trans_limits[1],)
+            
+            tau_n_new = -np.log(clipped_tellurics) / np.min(airmasses)
+            
+            # Expand delta tau to all wavelengths with shape [n_phase, n_wave]
+            delta_tau = np.tile(
+                tau_n-tau_n_new, n_phase).reshape((n_phase, n_wave))
+
+            # Calculate updated model
+            model_n_new = model_n * np.exp(delta_tau*am_all)
+
+            # Update (by reference) tau and model vectors
+            tau[transit_i, spec_i] = tau_n_new
+            model[nm, spec_i] = model_n_new
 
 
 def update_tau_newton_raphson(
@@ -350,14 +387,15 @@ def update_tau_newton_raphson(
     model,
     tau,
     mask,
-    airmasses,
+    transit_info,
     lambda_treg,
     tolerance,
     telluric_tau_limits,
     max_tau_nr_iter=1E20,):
     """
     Iteratively update tau (and the model) until the difference between 
-    subsequent updates is below the adopted tolerance.
+    subsequent updates is below the adopted tolerance. This is done per transit
+    per spectral segment.
     
     M = [F - I*P] e^(-tau * Z) * S
 
@@ -381,8 +419,21 @@ def update_tau_newton_raphson(
     mask: 3D float array
         Mask array of shape [n_phase, n_spec, n_px]. Contains either 0 or 1.
 
-    airmasses: 1D float array
-        Array of airmasses for each phase of shape [n_phase].
+    transit_info: pandas DataFrame
+        Transit info DataFrames containing information associated with each 
+        transit time step with columns:
+
+        ['mjd_start', 'mjd_mid', 'mjd_end', 'jd_start', 'jd_mid', 'jd_end',
+         'airmass', 'bcor', 'hcor', 'ra', 'dec', 'exptime_sec', 'nod_pos',
+         'raw_file', 'phase_start', 'is_in_transit_start', 'r_x_start',
+         'r_y_start', 'r_z_start', 'v_x_start', 'v_y_start', 'v_z_start',
+         's_projected_start', 'scl_start', 'mu_start',
+         'planet_area_frac_start', 'phase_mid', 'is_in_transit_mid',
+         'r_x_mid', 'r_y_mid', 'r_z_mid', 'v_x_mid', 'v_y_mid', 'v_z_mid',
+         's_projected_mid', 'scl_mid', 'mu_mid', 'planet_area_frac_mid',
+         'phase_end', 'is_in_transit_end', 'r_x_end', 'r_y_end', 'r_z_end',
+         'v_x_end', 'v_y_end', 'v_z_end', 's_projected_end', 'scl_end',
+         'mu_end', 'planet_area_frac_end', 'gamma', 'beta', 'delta']
 
     lambda_treg: float or None
         Tikhonov regularisation parameter lambda. Set to None for no smoothing.
@@ -408,93 +459,120 @@ def update_tau_newton_raphson(
         Combined model (star + tellurics + planet) at each phase of shape 
         [n_phase, n_spec, n_px].
     """
+    # -------------------------------------------------------------------------
     # Initialise for convenience
-    n_phase = obs_spec.shape[0]
+    # -------------------------------------------------------------------------
+    n_transit = tau.shape[0]
     n_spec = obs_spec.shape[1]
     n_wave = obs_spec.shape[2]
 
-    # Expand airmass to all wavelengths with shape [n_phase, n_wave]
-    am_all = np.tile(airmasses, n_wave).reshape((n_wave, n_phase)).T
+    # Masks to reference obs_spec/model/transit info per transit
+    night_masks = [transit_info["transit_num"].values == trans_i
+        for trans_i in range(n_transit)]
+    
+    # Number of phases per night
+    n_phase_nightly = [np.sum(nm) for nm in night_masks]
+
+    airmasses = transit_info["airmass"].values
 
     total_iterations = 0
 
     # -------------------------------------------------------------------------
-    # Loop over all spectral segments
+    # Loop over all transits
     # -------------------------------------------------------------------------
-    for spec_i in range(0, n_spec):
-        # Pull out subarrays for convenience
-        obs_spec_n = obs_spec[:,spec_i]
-        model_n = model[:,spec_i]
-        tau_n = tau[spec_i]
-        mask_n = mask[:,spec_i]
+    for transit_i in range(0, n_transit):
+        # Grab mask and n_phase for this transit
+        nm = night_masks[transit_i]
+        n_phase = n_phase_nightly[transit_i]
+
+        # Expand airmass to all wavelengths with shape [n_phase, n_wave]
+        am_all = np.tile(airmasses[nm], n_wave).reshape((n_wave, n_phase)).T
 
         # ---------------------------------------------------------------------
-        # Iterate with Newton's method until tau converges for this segment
+        # Loop over all spectral segments
         # ---------------------------------------------------------------------
-        iter_count = 0
-        has_converged = False
+        for spec_i in range(0, n_spec):
+            # Pull out subarrays for convenience
+            obs_spec_n = obs_spec[nm, spec_i]
+            mask_n = mask[nm, spec_i]
 
-        print("")   # Empty line to separate segments
-        
-        while (not has_converged) and (iter_count < max_tau_nr_iter):
-            # Calculate num/denominator, sum along phase axis (axis 0)
-            b = np.sum(mask_n*(2*model_n-obs_spec_n)*model_n*am_all**2, axis=0)
-            r = np.sum(mask_n*(model_n-obs_spec_n)*model_n*am_all, axis=0)
+            # -----------------------------------------------------------------
+            # Iterate with Newton's method until tau converges for this segment
+            # -----------------------------------------------------------------
+            iter_count = 0
+            has_converged = False
 
-            # Calculate delta_tau as:
-            #   delta tau = [sum(M-O) * M * z] / [sum(2M - O)*M * z^2]
-            # *With* regulatisation
-            if lambda_treg is not None:
-                delta_tau = do_tikhonov_regularise(b, r, lambda_treg, n_wave)
+            print("")   # Empty line to separate segments
+            
+            while (not has_converged) and (iter_count < max_tau_nr_iter):
+                # Pull out sub-arrays for convenience
+                model_n = model[nm, spec_i]
+                tau_n = tau[transit_i, spec_i]
 
-            # Or *without* regulatisation
-            else:
-                delta_tau = r/b
+                # Calculate num/denominator, sum along phase axis (axis 0)
+                b = np.sum(
+                    mask_n*(2*model_n-obs_spec_n)*model_n*am_all**2, axis=0)
+                r = np.sum(mask_n*(model_n-obs_spec_n)*model_n*am_all, axis=0)
 
-            # Store old value of tau
-            tau_n_old = tau_n.copy()
+                # Calculate delta_tau as:
+                #   delta tau = [sum(M-O) * M * z] / [sum(2M - O)*M * z^2]
+                # *With* regularisation
+                if lambda_treg is not None:
+                    delta_tau = do_tikhonov_regularise(
+                        b, r, lambda_treg, n_wave)
 
-            # Clip tau to limits, calculate updated tau
-            tau_n_new = np.clip(
-                a=tau_n_old+delta_tau,
-                a_min=telluric_tau_limits[0],
-                a_max=telluric_tau_limits[1],)
+                # Or *without* regulatisation
+                else:
+                    delta_tau = r/b
 
-            # Print iteration updates
-            delta_tau = tau_n_old - tau_n_new
-            med_delta_tau = np.median(np.abs(delta_tau))
-            std_delta_tau = np.std(delta_tau)
-            max_delta_tau = np.max(np.abs(delta_tau))
+                # Store old value of tau
+                tau_n_old = tau_n.copy()
 
-            print(
-                "\tSegment #{:2}\t".format(spec_i),
-                "iteration #{:4}\t".format(iter_count),
-                "| median Δ | = {:18.14f}\t".format(med_delta_tau),
-                "| max Δ | = {:18.14f}\t".format(max_delta_tau),
-                "std Δ = {:18.14f}\t".format(std_delta_tau),)
+                # Clip tau to limits, calculate updated tau
+                tau_n_new = np.clip(
+                    a=tau_n_old+delta_tau,
+                    a_min=telluric_tau_limits[0],
+                    a_max=telluric_tau_limits[1],)
 
-            # Calculcate updated model
-            model_n_new = model_n * np.exp((tau_n_old-tau_n_new)*am_all)
+                # Print iteration updates
+                delta_tau_clipped = tau_n_old - tau_n_new
+                med_delta_tau = np.median(np.abs(delta_tau_clipped))
+                std_delta_tau = np.std(delta_tau_clipped)
+                sum_delta_tau = np.sum(delta_tau_clipped)
+                max_delta_tau = np.max(np.abs(delta_tau_clipped))
 
-            # Update tau and model by reference
-            tau[spec_i] = tau_n_new
-            model[:,spec_i] = model_n_new
+                print(
+                    "\tTransit #{:2}\t".format(transit_i),
+                    "\tSegment #{:2}\t".format(spec_i),
+                    "iteration #{:4}\t".format(iter_count),
+                    "| median Δ | = {:18.14f}\t".format(med_delta_tau),
+                    "| max Δ | = {:18.14f}\t".format(max_delta_tau),
+                    "sum Δ = {:20.14f}\t".format(sum_delta_tau),
+                    "std Δ = {:18.14f}\t".format(std_delta_tau),)
 
-            # Finally, check convergence
-            max_resid = np.nanmax(np.abs(tau_n_old-tau_n_new))
+                # Calculcate updated model
+                model_n_new = model_n * np.exp(delta_tau_clipped * am_all)
 
-            if np.isnan(max_resid):
-                raise Exception(
-                    "Maximum residual is nan for iter {}".format(iter_count))
-            if max_resid < tolerance:
-                has_converged = True
-            else:
-                iter_count += 1
+                # Update tau and model by reference
+                tau[transit_i, spec_i] = tau_n_new
+                model[nm, spec_i] = model_n_new
 
-        if iter_count >= max_tau_nr_iter:
-            print("\tHit max iterations, continuing")
+                # Finally, check convergence
+                max_resid = np.nanmax(np.abs(delta_tau_clipped))
 
-        total_iterations += iter_count + 1
+                if np.isnan(max_resid):
+                    raise Exception(
+                        "Maximum residual is nan for iter {}".format(
+                        iter_count))
+                if max_resid < tolerance:
+                    has_converged = True
+                else:
+                    iter_count += 1
+
+            if iter_count >= max_tau_nr_iter:
+                print("\tHit max iterations, continuing")
+
+            total_iterations += iter_count + 1
 
     print("\n\tConverged with {} iterations\n".format(total_iterations))
 
@@ -592,6 +670,8 @@ def update_transmission(
 
     mus = transit_info["mu_mid"].values
     airmasses = transit_info["airmass"].values
+    
+    transit_nums = transit_info["transit_num"].values
 
     # gamma [star]    = (v_bary + v_star) / c
     # beta  [shadow]  = (v_bary + v_star + vsini * x_planet) / c
@@ -656,12 +736,15 @@ def update_transmission(
                 intens = np.zeros(n_wave)
 
             # Shift telluric vector to planet rv frame (delta) from telescope
-            # frame (rest frame)
+            # frame (rest frame), making sure to use the telluric vector for
+            # the appropriate transit.
+            transit_i = transit_nums[phase_i]
+
             t = tu.doppler_shift(
                 x=waves[spec_i],
-                y=tau[spec_i],
+                y=tau[transit_i, spec_i],
                 gamma=delta[phase_i],
-                y2=tau_2[spec_i],)
+                y2=tau_2[transit_i, spec_i],)
 
             # Calculate the numerator (r) and denominator (b) of equation 12
             # from the Aronson paper.
@@ -876,6 +959,8 @@ def create_transit_model_array(
 
     airmasses = transit_info["airmass"].values
 
+    transit_nums = transit_info["transit_num"].values
+
     # Grab our RVs for convenience
     gamma = transit_info["gamma"].values       # gamma = rv_star + rv_bcor
     beta = transit_info["beta"].values         # beta = gamma + rv_projected
@@ -932,9 +1017,12 @@ def create_transit_model_array(
             else:
                 intens = np.zeros(n_wave)
 
-            # Combine each of our separate components
+            transit_i = transit_nums[phase_i]
+
+            # Combine each of our separate components, making sure to use the
+            # appropriate telluric vector
             model[phase_i, spec_i] = (scale[phase_i] * (f1-intens) 
-                * np.exp(-tau[spec_i]*airmasses[phase_i]))
+                * np.exp(-tau[transit_i, spec_i]*airmasses[phase_i]))
 
     # [Optional] Enforce model limits
     if model_limits[0] is not None or model_limits[1] is not None:
@@ -1093,7 +1181,7 @@ def run_transit_model_iteration(
     # Define variables for convenience
     # -------------------------------------------------------------------------
     n_spec = obs_spec.shape[1]
-    airmasses = transit_info["airmass"].values
+    n_transits = tau.shape[0]
 
     # -------------------------------------------------------------------------
     # Update stellar flux & model by reference
@@ -1150,7 +1238,7 @@ def run_transit_model_iteration(
                 model=model,
                 tau=tau,
                 mask=mask,
-                airmasses=airmasses,
+                transit_info=transit_info,
                 telluric_trans_limits=telluric_trans_limits,)
 
         print("- Updating tau...")
@@ -1159,16 +1247,19 @@ def run_transit_model_iteration(
             model=model,
             tau=tau,
             mask=mask,
-            airmasses=airmasses,
+            transit_info=transit_info,
             lambda_treg=lambda_treg_tau,
             tolerance=tau_nr_tolerance,
             telluric_tau_limits=telluric_tau_limits,
             max_tau_nr_iter=max_tau_nr_iter,)
 
         # Update tau derivative from our new tau array
-        for spec_i in range(0, n_spec):
-            tau_2[spec_i] = tu.bezier_init(waves[spec_i], tau[spec_i],)
-
+        for transit_i in range(0, n_transits):
+            for spec_i in range(0, n_spec):
+                tau_2[transit_i, spec_i] = \
+                    tu.bezier_init(waves[spec_i], tau[transit_i, spec_i],)
+    
+        # TODO: ensure model is consistently updated
     else:
         print("- Fixed tau, skipping")
 
@@ -1364,12 +1455,22 @@ def run_transit_model(
     # Initialise variables for convenience 
     # -------------------------------------------------------------------------
     n_transits = len(set(transit_info["transit_num"]))
-    n_phase = obs_spec.shape[0]
     n_spec = obs_spec.shape[1]
     n_wave = obs_spec.shape[2]
 
+    # We have two sets of phases to keep track of: the total number of phases,
+    # and the number of phases observed on each night.
+    n_phase_all = obs_spec.shape[0]
+
+    # Masks to reference obs_spec/model/transit info per transit
+    night_masks = [transit_info["transit_num"].values == trans_i
+        for trans_i in range(n_transits)]
+
+    # Get minimum airmass for each night
     airmasses = transit_info["airmass"].values
-    airmass_min_i = np.argmin(airmasses)
+    am_min_i = np.argmin(airmasses)
+    am_min_transit_i = transit_info.iloc[am_min_i]["transit_num"]
+    am_nightly_min_i = [np.argmin(airmasses[nm]) for nm in night_masks]
 
     # -------------------------------------------------------------------------
     # Initialise planet transmission
@@ -1388,24 +1489,31 @@ def run_transit_model(
     # Initialise telluric optical depth
     # -------------------------------------------------------------------------
     # For our initial guess for the tellurics, start with the lowest observed
-    # airmass observation and assume that all absorption is due to tellurics--
-    # that is normalise this transmission and convert to an optical depth.
+    # airmass observation from each transit and assume that all absorption is
+    # due to tellurics--that is normalise this transmission and convert to an
+    # optical depth.
     if not do_fix_tau_vector:
-        tell_trans = obs_spec[airmass_min_i].copy()
+        tau = []
 
-        # Clip telluric transmission to avoid zeros/unreasonable optical depths
-        tell_trans[:] = np.clip(
-            a=tell_trans,
-            a_min=telluric_trans_limits[0],
-            a_max=telluric_trans_limits[1],)
+        for trans_i, nm in enumerate(night_masks):
+            tell_trans = obs_spec[nm][am_nightly_min_i[trans_i]].copy()
 
-        # Normalise -- TODO: smooth instead
-        for spec_i in range(0, n_spec):
-            tell_trans[spec_i,:] = \
-                tell_trans[spec_i]/ np.max(tell_trans[spec_i])
+            # Clip telluric transmission for zeros/unreasonable optical depths
+            tell_trans[:] = np.clip(
+                a=tell_trans,
+                a_min=telluric_trans_limits[0],
+                a_max=telluric_trans_limits[1],)
 
-        tau = -np.log(tell_trans) / airmasses[airmass_min_i]
-    
+            # Normalise -- TODO: smooth instead
+            for spec_i in range(0, n_spec):
+                tell_trans[spec_i,:] = \
+                    tell_trans[spec_i]/ np.max(tell_trans[spec_i])
+
+            tau.append(
+                -np.log(tell_trans) / airmasses[nm][am_nightly_min_i[trans_i]])
+
+        tau = np.stack(tau)
+
     # Otherwise use our fixed value
     else:
         tau = fixed_tau
@@ -1413,10 +1521,11 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise stellar flux
     # -------------------------------------------------------------------------
-    # Initial guess for stellar flux + transmission and Bezier derivatives
+    # Initial guess for stellar flux is just the airmass corrected observation
+    # from the minimum airmass epoch across all transits.
     if not do_fix_flux_vector:
-        flux = \
-            obs_spec[airmass_min_i,:,:] / np.exp(-tau*airmasses[airmass_min_i])
+        flux = (obs_spec[am_min_i,:,:]
+            / np.exp(-tau[am_min_transit_i]*airmasses[am_min_i]))
 
         # Clip fluxes
         if (stellar_flux_limits[0] is not None 
@@ -1440,7 +1549,7 @@ def run_transit_model(
     tau_2 = tau.copy()
 
     # Initialise observational derivatives for every phase and spectral segment
-    for phase_i in range(0, n_phase):
+    for phase_i in range(0, n_phase_all):
         for spec_i in range(0, n_spec):
             # Initialise for each phase and spectral segment
             obs_spec_2[phase_i,spec_i,:] = tu.bezier_init(
@@ -1450,8 +1559,12 @@ def run_transit_model(
     # Initialise derivatives for flux/tau/planet for every spectral segment
     for spec_i in range(0, n_spec):
         flux_2[spec_i] = tu.bezier_init(x=waves[spec_i], y=flux[spec_i],)
-        tau_2[spec_i] = tu.bezier_init(x=waves[spec_i], y=tau[spec_i],)
         trans_2[spec_i] = tu.bezier_init(x=waves[spec_i], y=trans[spec_i],)
+
+        # Telluric derivative has to be updated on a per-transit basis
+        for transit_i in range(0, n_transits):
+            tau_2[transit_i, spec_i] = \
+                tu.bezier_init(x=waves[spec_i], y=tau[transit_i, spec_i],)
 
     # -------------------------------------------------------------------------
     # Model and Scaling
@@ -1460,7 +1573,7 @@ def run_transit_model(
     if not do_fix_scale_vector:
         # TODO: avoid including transit itself in scale to have a better
         # initial guess.
-        scale = np.ones(n_phase)
+        scale = np.ones(n_phase_all)
 
         # Initialise model based on the initial guesses for all components
         model = create_transit_model_array(
@@ -1476,7 +1589,7 @@ def run_transit_model(
             model_limits=model_limits,)
 
         # Adjust the scale to match roughly variation of the observed flux and 
-        for phase_i in range(0, n_phase):
+        for phase_i in range(0, n_phase_all):
             m1 = model[phase_i]
             o1 = obs_spec[phase_i]
             k1 = np.where(m1 > 0.)
@@ -1522,7 +1635,7 @@ def run_transit_model(
     mask = np.ones_like(model)
     mask_2 = mask.copy()
 
-    for phase_i in range(0, n_phase):
+    for phase_i in range(0, n_phase_all):
         for spec_i in range(0, n_spec):
             mask_2[phase_i, spec_i] = tu.bezier_init(
                 x=waves[spec_i],
@@ -1536,7 +1649,7 @@ def run_transit_model(
     #print("Initial error: {}\n".format(init_error))
     print("-"*140, "\nStarting modelling\n", "-"*140, sep="",)
     print("N transits \t= {:1.0f}".format(n_transits))
-    print("N phases \t= {:3.0f}".format(n_phase))
+    print("N phases \t= {:3.0f}".format(n_phase_all))
     print("Max iter \t= {}".format(max_model_iter))
     print("Stellar λ_reg \t= {}".format(lambda_treg_star))
     print("Telluric λ_reg \t= {}".format(lambda_treg_tau))
@@ -1675,11 +1788,13 @@ def run_transit_model(
         delta_flux = np.nanmean(np.abs(arrays_old["flux"]-arrays["flux"]))
         delta_tau = np.nanmean(np.abs(arrays_old["tau"]-arrays["tau"]))
         delta_trans = np.nanmean(np.abs(arrays_old["trans"]-arrays["trans"]))
+        delta_scale = np.nanmean(np.abs(arrays_old["scale"]-arrays["scale"]))
 
         print("\nMean change:")
         print("|Δ flux|\t= {:11.8f}".format(delta_flux),)
         print("|Δ tau|\t\t= {:11.8f}".format(delta_tau),)
         print("|Δ trans|\t= {:11.8f}".format(delta_trans),)
+        print("|Δ scale|\t= {:11.8f}".format(delta_scale),)
 
         if (delta_flux < model_converge_tolerance
             and delta_tau < model_converge_tolerance

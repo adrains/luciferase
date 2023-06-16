@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 # Read in pre-prepared fits file
 # -----------------------------------------------------------------------------
 save_path = ""
-file_label = "simulated_wasp107"
+file_label = "simulated_wasp107_uniform_scale"
 n_transit = 2
 
 # Load in prepared fits file for our transit
@@ -45,7 +45,7 @@ transit_info = transit_info[columns]
 # ordered by detector, so the three segments making up each order will be
 # separated by 6 in the array.
 run_on_sub_slice = True
-segments_to_keep = [3, 9, 15, 2, 8, 14, 1, 7, 13, 0, 6, 12]
+segments_to_keep = [3, ]#9, 15, ] # 2, 8, 14, 1, 7, 13, 0, 6, 12
 
 if run_on_sub_slice:
     segment_mask = np.full(waves.shape[0], False)
@@ -96,17 +96,22 @@ model_limits = (1E-5, None)
 # -----------------------------------------------------------------------------
 # Debugging settings
 # -----------------------------------------------------------------------------
-# Load in the flux, tau, and trans vectors used to simulate this transit
-component_flux, component_tau, component_trans = \
+# Load in the flux, tau, and trans vectors used to simulate this transit.
+# Note that the flux and trans vectors will have shape [n_spec, n_px], the tau
+# vector will have shape [n_trans, n_spec, n_px] and the scale vector will be
+# a list of length n_trans containing (likely unequal) vectors of n_phase.
+component_flux, component_tau, component_trans, component_scale = \
     tu.load_simulated_transit_components_from_fits(
         fits_load_dir=save_path,
         label=file_label,
         n_transit=n_transit,)
 
+# Slice these so we're only considering the segments we're interested in, and
+# concatenate the scale vector to be 1D.
 fixed_flux = component_flux[segment_mask]
-fixed_tau = component_tau[segment_mask]
+fixed_tau = component_tau[:, segment_mask]
 fixed_trans = component_trans[segment_mask]
-fixed_scale = np.ones(obs_spec.shape[0])
+fixed_scale = np.concatenate(component_scale)
 
 # Setting any of these to true will fix that particular vector during fitting
 do_fix_flux_vector = False
@@ -160,14 +165,18 @@ tu.save_transit_model_results_to_fits(
 plt.close("all")
 
 # Diagnostic plots
-tplt.plot_component_spectra(
-    waves=waves,
-    fluxes=flux,
-    telluric_tau=tau,
-    planet_trans=trans,
-    ref_fluxes=fixed_flux,
-    ref_telluric_tau=fixed_tau,
-    ref_planet_trans=fixed_trans,)
+# Plot the component spectra (one pdf per transit).
+for trans_i in range(n_transit):
+    tm = transit_info["transit_num"] == trans_i
+
+    tplt.plot_component_spectra(
+        waves=waves,
+        fluxes=flux,
+        telluric_tau=tau[trans_i],
+        planet_trans=trans,
+        scale_vector=scale[tm],
+        transit_num=trans_i,
+        star_name=file_label,)
 
 tplt.plot_epoch_model_comp(
     waves=waves,
@@ -176,7 +185,9 @@ tplt.plot_epoch_model_comp(
     fluxes=flux,
     telluric_tau=tau,
     planet_trans=trans,
+    scale=scale,
     transit_info=transit_info,
     ref_fluxes=fixed_flux,
     ref_telluric_tau=fixed_tau,
-    ref_planet_trans=fixed_trans,)
+    ref_planet_trans=fixed_trans,
+    ref_scale=fixed_scale,)

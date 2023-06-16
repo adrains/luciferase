@@ -70,7 +70,7 @@ apply_blaze_function = False
 # generate n_phase random points between 0 and 2, and use a Savitzky–Golay to
 # smooth this using a window size of savgol_window_frac_size * n_phase and a
 # polynomial order of savgol_poly_order.
-scale_vector_method = "smoothed_random"
+scale_vector_method = "constant_unity" #"smoothed_random"
 savgol_window_frac_size = 0.5
 savgol_poly_order = 3
 
