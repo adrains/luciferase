@@ -11,11 +11,32 @@ from scipy.interpolate import interp1d
 from scipy.integrate import simps
 from PyAstronomy.pyasl import instrBroadGaussFast
 from scipy.signal import savgol_filter
+import transit.utils as tu
 
 # -----------------------------------------------------------------------------
 # Load/save spectra
 # -----------------------------------------------------------------------------
-def read_marcs_spectrum(filepath, wave_min, wave_max,):
+def read_fits_template(filepath):
+    """Load a fits file template.
+
+    Parameters
+    ----------
+    filepath: string
+        Filepath to the fits file.
+
+    Returns
+    -------
+    wave, spec: 1D float array
+        Wavelength and spectra arrays of shape n_wave.
+    """
+    with fits.open(filepath) as fits_file:
+        wave = fits_file["WAVE"].data
+        spec = fits_file["SPEC"].data[0]
+
+    return wave, spec
+
+
+def read_marcs_spectrum(filepath, wave_min, wave_max, a_limb, n_mu_samples):
     """Reads either a MARCS .plt or .itf file to extract wavelengths, mu 
     values, and radiant fluxes in units of ergs/cm^2/s/Å/µ.
 
@@ -37,16 +58,34 @@ def read_marcs_spectrum(filepath, wave_min, wave_max,):
 
     mus: 2D float array
         Array of mus of shape [n_wave, n_max_n_mu].
+
+    a_limb: float array or None, default: None
+        Array of limb darkening coefficients
     """
+    # Format #1 for reading in mu sampled fluxes
     if ".itf" in filepath:
         wave_marcs, _, _, mus, fluxes_marcs = read_marcs_itf(
             filepath=filepath,
             wave_min=wave_min,
             wave_max=wave_max,)
-        
+    
+    # Format #2 for reading in mu sampled fluxes
     elif ".plt" in filepath:
         wave_marcs, mus, _, _, fluxes_marcs = \
             read_marcs_plt(filepath)
+    
+    # HACK format for simulating mu sampled fluxes with a 1D spectrum and limb
+    # darkening coefficients.
+    elif ".fits" in filepath:
+        if a_limb is None and n_mu_samples is None:
+            raise Exception("a_limb and n_mu_samples cannot be None.")
+        
+        wave_marcs, fluxes_1d = read_fits_template(filepath=filepath,)
+        fluxes_marcs, mus = tu.generate_mock_flux_mu_grid(
+            flux=fluxes_1d,
+            a_limb=a_limb,
+            n_mu_samples=n_mu_samples,)
+
     else:
         raise ValueError("Invalid MARCS format.")
     
@@ -1525,10 +1564,22 @@ def simulate_transit_multiple_epochs(
         raise ValueError("MARCS wl bounds do not cover observed wl scale.")
     
     # Import MARCS fluxes (ergs/cm^2/s/Å/μ)
+    # TODO: this preparation is a HACK for until we have mu sampled spectra at
+    # arbitrary resolutions.
+    if "fits" in marcs_fits:
+        ldc_cols = ["ldc_init_a1", "ldc_init_a2", "ldc_init_a3", "ldc_init_a4"]
+        a_limb = syst_info.loc[ldc_cols, "value"].values
+        n_mu_samples = 20
+    else:
+        a_limb = None
+        n_mu_samples = None
+
     wave_marcs, fluxes_marcs, mus_marcs = read_marcs_spectrum(
         filepath=marcs_fits,
         wave_min=wl_min,
-        wave_max=wl_max,)
+        wave_max=wl_max,
+        a_limb=a_limb,
+        n_mu_samples=n_mu_samples,)
     
     if do_use_uniform_stellar_spec:
         fluxes_marcs = np.ones_like(fluxes_marcs) * np.nanmedian(fluxes_marcs)

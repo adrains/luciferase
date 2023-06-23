@@ -1967,3 +1967,71 @@ def sigma_clip_observations(
             bad_px_mask[:, spec_i, px_i] = bad_px
 
     return obs_spec_clipped, bad_px_mask
+
+
+def limb_darken_spectrum(spec, a_limb, mu):
+    """Limb darken a given spectrum using the non-linear limb darkening law
+    from Claret 2000.
+
+    I(μ)/I(1) = 1 - Σ [a_k * (1 - μ^(k/2)) ] for k 1-4 
+
+    Parameters
+    ----------
+    spec: 1D float array
+        1D spectrum to limb darken.
+
+    a_limb: 1D float array
+        Array of non-linear limb darkening coefficients.
+
+    mu: float
+        μ point at which do compute limb darkening.
+
+    Returns
+    -------
+    spec_ld: 1D float array
+        1D limb darkened spectrum.
+    """
+    k_i = np.arange(len(a_limb)) + 1
+    I_mu_on_I_centre = 1 - np.sum(a_limb * (1 - mu**(k_i/2)))
+
+    spec_ld = I_mu_on_I_centre * spec
+
+    return spec_ld
+
+
+def generate_mock_flux_mu_grid(
+    flux,
+    a_limb,
+    n_mu_samples,):
+    """Generates a mock 2D flux grid of shape [n_wave, n_mu] from a 1D spectrum
+    and a set of non-linear limb darkening coefficients.
+
+    Parameters
+    ----------
+    flux: 1D float array
+        1D spectrum flux array.
+
+    a_limb: 1D float array
+        Array of non-linear limb darkening coefficients.
+
+    n_mu_samples: float
+        Number of μ points at which to sample limb-darkening for our grid.
+
+    Returns
+    -------
+    flux_grid, mu_grid: 2D float array
+        Limb darkened flux and corresponding mu sampling arrays of shape
+        [n_wave, n_mu].
+    """
+    # Uniformly sample mus from the edge to centre of the disc
+    mus = np.linspace(0.001, 1, n_mu_samples,)
+
+    # Initialise empty flux grid, and tile mus
+    flux_grid = np.full((len(flux), n_mu_samples), np.nan)
+    mu_grid = np.tile(mus, len(flux)).reshape((len(flux), n_mu_samples))
+
+    # For each mu value, determine the limb-darkened flux
+    for mu_i, mu in enumerate(mus):
+        flux_grid[:, mu_i] = limb_darken_spectrum(flux, a_limb, mu)
+
+    return flux_grid, mu_grid
