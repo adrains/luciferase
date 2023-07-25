@@ -768,12 +768,12 @@ def apply_instrumental_transfer_function(
     wave,
     flux,
     throughput_json_path,
-    fill_throughput_value=0,
-    apply_blaze=True,):
+    fill_throughput_value=0,):
     """Apply the CRIRES+ instrumental transfer function for the telescope, 
     enslitted fraction, instrument throughput, grating + blaze efficiency, and 
     detector efficiency. Note that we do *not* account for the atmospheric
-    throughput here.
+    throughput here, as that is accounted for by separately modelling the
+    tellurics.
 
     Parameters
     ----------
@@ -787,9 +787,6 @@ def apply_instrumental_transfer_function(
         Default througput value to fill undefined wavelength points. Default is
         0, meaning that we assume no transmission for undefined values.
 
-    apply_blaze: boolean, default: True
-        Whether or not to apply the grating/blaze throughput.
-
     Returns
     -------
     flux_scaled: 1D float array
@@ -799,17 +796,11 @@ def apply_instrumental_transfer_function(
     throughput_df = load_crires_throughput_json(throughput_json_path,)
 
     # Multiply throughputs (all except atmosphere)
-    if apply_blaze:
-        total_throughput = (throughput_df["grating eff. incl. blaze"]
-            * throughput_df["eff.telescope"]
-            * throughput_df["enslitted energy fraction"]
-            * throughput_df["eff.detector"]
-            * throughput_df["eff.instrument"])
-    else:
-        total_throughput = (throughput_df["eff.telescope"]
-            * throughput_df["enslitted energy fraction"]
-            * throughput_df["eff.detector"]
-            * throughput_df["eff.instrument"])
+    total_throughput = (throughput_df["grating eff. incl. blaze"]
+        * throughput_df["eff.telescope"]
+        * throughput_df["enslitted energy fraction"]
+        * throughput_df["eff.detector"]
+        * throughput_df["eff.instrument"])
     
     # Interpolate throughput
     calc_throughput = interp1d(
@@ -823,6 +814,49 @@ def apply_instrumental_transfer_function(
     flux_scaled = flux * throughput
 
     return flux_scaled
+
+
+def remove_instrumental_blaze_function(
+    wave,
+    flux,
+    sigma,
+    throughput_json_path,
+    fill_throughput_value=0,):
+    """Remove the CRIRES+ instrumental blaze transfer function.
+
+    Parameters
+    ----------
+    wave, flux, sigma: 1D float array
+        Wavelength, flux, and sigma arrays of shape [n_wave].
+
+    throughput_json_path: string
+        Filepath to the CRIRES+ JSON file.
+
+    fill_throughput_value: float, default: 0
+        Default througput value to fill undefined wavelength points. Default is
+        0, meaning that we assume no transmission for undefined values.
+
+    Returns
+    -------
+    flux_scaled, sigma_scaled: 1D float array
+        Scaled flux and sigma array of shape [n_wave].
+    """
+    # Load throughput JSON
+    throughput_df = load_crires_throughput_json(throughput_json_path,)
+
+    # Interpolate blaze function
+    calc_blaze = interp1d(
+        x=throughput_df["wavelengths"].values,
+        y=throughput_df["grating eff. incl. blaze"].values,
+        fill_value=fill_throughput_value,)
+    
+    blaze = calc_blaze(wave)
+
+    # Remove the effect of the blaze on the flux and scale the uncertainties
+    flux_scaled = flux / blaze
+    sigma_scaled = sigma / blaze
+
+    return flux_scaled, sigma_scaled
 
 
 def convert_flux_to_counts(wave, flux, gain,):
@@ -1085,10 +1119,11 @@ def simulate_transit_single_epoch(
     r_tel_prim,
     r_tel_cen_ob,
     throughput_json_path,
+    target_snr,
     do_equid_lambda_resample=True,
     fill_throughput_value=0,
     planet_transmission_boost_fac=1,
-    apply_blaze_function=True,
+    correct_for_blaze=True,
     constant_gain=2,):
     """Simulate a single epoch of a planet during transit by modelling the
     stellar, planetary, and telluric components. This function takes into
@@ -1177,6 +1212,13 @@ def simulate_transit_single_epoch(
         Filepath to the CRIRES+ JSON file containing instrument transfer
         functions as a function of wavelength.
 
+    target_snr: float or None
+        Target SNR such that the median of the brightest spectral segment has
+        SNR = target_snr. Uncertainties are then computed as Poisson
+        uncertainties, and noise applied by sampling from a normal distribution
+        with mean as the scale signal, and width the uncertainties. If set to
+        None, the spectrum is not rescaled and no noise is applied.
+
     do_equid_lambda_resample: boolean, default: True
         Whether to resample wavelength and flux arrays onto a new wavelength
         scale with equidistant lambda sampling prior to broadening. This is
@@ -1190,16 +1232,19 @@ def simulate_transit_single_epoch(
         Whether to artificially boost the strength of planetary absorption by
         some factor for testing. By default set to 1 (i.e. disabled).
 
-    apply_blaze_function: boolean, default: True
-        Whether or not to apply the blaze function.
+    correct_for_blaze: boolean, default: True
+        Whether or not to correct for the effect of the blaze function once
+        we've simulated the complete transfer function and computed 
+        uncertainties.
 
     constant_gain: float, default: 2
         Detector gain to use. TODO: Update this to be more realistic.
 
     Returns
     -------
-    flux_counts, snr
-        Modelled spectra flux in counts and the associated SNR.
+    flux_counts, sigma_counts: float array
+        Modelled flux and sigma arrays corresponding to wavelengths of shape 
+        [n_spec, n_wave].
 
     component_spectra: dict of float arrays
         Dict with keys ['stellar_flux', 'telluric_tau', 'planet_trans'] which
@@ -1362,8 +1407,7 @@ def simulate_transit_single_epoch(
         wave=wave_observed,
         flux=flux_model_ob,
         throughput_json_path=throughput_json_path,
-        fill_throughput_value=fill_throughput_value,
-        apply_blaze=apply_blaze_function,)
+        fill_throughput_value=fill_throughput_value,)
 
     # Convert ergs/s to counts/sec
     flux_counts_per_sec = convert_flux_to_counts(
@@ -1374,17 +1418,60 @@ def simulate_transit_single_epoch(
     # Convert counts/sec to counts
     flux_counts = flux_counts_per_sec * transit_epoch["exptime_sec"]
 
-    # Compute SNR per spectral segment
-    snr = flux_counts / flux_counts**0.5
+    # -------------------------------------------------------------------------
+    # Add noise [Optional], compute uncertainties
+    # -------------------------------------------------------------------------
+    print("\tComputing uncertainties...")
+    # If we've been provided a target SNR, apply noise. We benchmark to be the
+    # median for the order with the most signal and find the scale factor
+    # needed to adjust such that the Poisson uncertainty gives us the desired
+    # SNR, then scale the entire spectrum by that value.
+    if target_snr is not None:
+        # Flux has shape [n_spec, n_wave]
+        max_counts = np.max(np.nanmedian(flux_counts, axis=1))
+
+        # Compute the scale factor as:
+        #  snr_target = counts_orig * scale_fac / sqrt(counts_orig * scale_fac)
+        #  scale_fac = snr_target^2 / counts_orig
+        sf = target_snr**2 / max_counts
+
+        # Scale entire spectrum
+        flux_counts *= sf
+
+        # Compute the uncertainties
+        sigma_counts = flux_counts**0.5
+
+        # Assuming Gaussian uncertainties, resample the spectra to add noise
+        flux_counts = np.random.normal(loc=flux_counts, scale=sigma_counts)
+
+        # Clip this to be >= 0
+        flux_counts = np.clip(flux_counts, a_min=0, a_max=None,)
+
+    # Otherwise no noise, scale factor = 1, Poisson uncertainties
+    else:
+        sf = 1
+        sigma_counts = flux_counts**0.5
 
     # -------------------------------------------------------------------------
-    # Add noise [optional, TODO]
+    # [Optional] Remove the effect of the blaze
     # -------------------------------------------------------------------------
-    pass
-
+    # So that we properly calculate and propagate uncertainties, if we want to
+    # remove the effect of the blaze we do that here (rather than just not
+    # applying it to begin with). By doing it this way our rescaled spectrum
+    # retains the same SNR.
+    if correct_for_blaze:
+        flux_counts, sigma_counts = remove_instrumental_blaze_function(
+            wave=wave_observed,
+            flux=flux_counts,
+            sigma=sigma_counts,
+            throughput_json_path=throughput_json_path,
+            fill_throughput_value=fill_throughput_value,)
+    
     # -------------------------------------------------------------------------
     # Prepare component spectra
     # -------------------------------------------------------------------------
+    # Finally we prepare our 'component' spectra--the uncombined stellar flux,
+    # telluric, and planetary transmission vectors
     component_spectra = {}
 
     # Flux
@@ -1392,16 +1479,22 @@ def simulate_transit_single_epoch(
         wave=wave_observed,
         flux=stellar_flux_obs,
         throughput_json_path=throughput_json_path,
-        fill_throughput_value=fill_throughput_value,
-        apply_blaze=apply_blaze_function,)
-    
-    flux_component_counts_per_sec = convert_flux_to_counts(
+        fill_throughput_value=fill_throughput_value,)
+
+    flux_component_counts = convert_flux_to_counts(
         wave=wave_observed,
         flux=flux_component,
-        gain=constant_gain,)
+        gain=constant_gain,) * transit_epoch["exptime_sec"]
     
-    component_spectra["stellar_flux"] = \
-        flux_component_counts_per_sec * transit_epoch["exptime_sec"]
+    if correct_for_blaze:
+        flux_component_counts, _ = remove_instrumental_blaze_function(
+            wave=wave_observed,
+            flux=flux_component_counts,
+            sigma=np.zeros_like(flux_component_counts),
+            throughput_json_path=throughput_json_path,
+            fill_throughput_value=fill_throughput_value,)
+
+    component_spectra["stellar_flux"] = flux_component_counts * sf
     
     # Tellurics
     component_spectra["telluric_tau"] = tau_obs
@@ -1410,7 +1503,7 @@ def simulate_transit_single_epoch(
     component_spectra["planet_trans"] = planet_trans_obs
 
     # All done
-    return flux_counts, snr, component_spectra
+    return flux_counts, sigma_counts, component_spectra
 
 
 def simulate_transit_multiple_epochs(
@@ -1422,6 +1515,7 @@ def simulate_transit_multiple_epochs(
     planet_spec_fits,
     molecfit_fits,
     throughput_json_path,
+    target_snr,
     wl_min,
     wl_max,
     instr_resolving_power,
@@ -1434,7 +1528,7 @@ def simulate_transit_multiple_epochs(
     do_use_uniform_stellar_spec,
     do_use_uniform_telluric_spec,
     do_use_uniform_planet_spec,
-    apply_blaze_function,
+    correct_for_blaze,
     scale_vector_method,
     savgol_window_frac_size,
     savgol_poly_order,):
@@ -1480,6 +1574,13 @@ def simulate_transit_multiple_epochs(
         Filepaths for MARCS spectrum, planet wave, planet spectra, molecfit
         best fit model, and CRIRES+ throughput files.
 
+    target_snr: float or None
+        Target SNR such that the median of the brightest spectral segment has
+        SNR = target_snr. Uncertainties are then computed as Poisson
+        uncertainties, and noise applied by sampling from a normal distribution
+        with mean as the scale signal, and width the uncertainties. If set to
+        None, the spectrum is not rescaled and no noise is applied.
+
     wave_min, wave_max: float or None, default: None
         Minimum and maximum wavelengths in Angstrom to use when loading MARCS
         spectrum.
@@ -1520,8 +1621,10 @@ def simulate_transit_multiple_epochs(
         If True, the imported planet spectrum is set to have 100% 
         transmittance.
 
-    apply_blaze_function: boolean
-        Whether or not to apply the blaze function.
+    correct_for_blaze: boolean
+        Whether or not to correct for the effect of the blaze function once
+        we've simulated the complete transfer function and computed 
+        uncertainties.
 
     scale_vector_method: str
         Method to use for constructing our scale vector. Currently either:
@@ -1538,8 +1641,8 @@ def simulate_transit_multiple_epochs(
 
     Returns
     -------
-    fluxes_model, snr: float array
-        Modelled flux and SNR arrays corresponding to wavelengths of shape 
+    fluxes_model, sigma_model: float array
+        Modelled flux and sigma arrays corresponding to wavelengths of shape 
         [n_phase, n_spec, n_wave].
 
     component_spectra: dict of float arrays
@@ -1619,12 +1722,12 @@ def simulate_transit_multiple_epochs(
     # Initialise output flux array
     shape = (len(transit_info), wave_observed.shape[0], wave_observed.shape[1])
     fluxes_model_all = np.zeros(shape)
-    snr_model_all = np.zeros(shape)
-    
+    sigma_model_all = np.zeros(shape)
+
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}...".format(epoch_i))
-        flux_counts, snr, _ = simulate_transit_single_epoch(
+        flux_counts, sigma_counts, _ = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
@@ -1640,13 +1743,14 @@ def simulate_transit_multiple_epochs(
             r_tel_prim=r_tel_prim,
             r_tel_cen_ob=r_tel_cen_ob,
             do_equid_lambda_resample=do_equid_lambda_resample,
+            target_snr=target_snr,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
             planet_transmission_boost_fac=planet_transmission_boost_fac,
-            apply_blaze_function=apply_blaze_function,)
-        
+            correct_for_blaze=correct_for_blaze,)
+
         fluxes_model_all[epoch_i] = flux_counts
-        snr_model_all[epoch_i] = snr
+        sigma_model_all[epoch_i] = sigma_counts
 
     # -------------------------------------------------------------------------
     # Prepare component spectra
@@ -1684,12 +1788,13 @@ def simulate_transit_multiple_epochs(
             r_tel_prim=r_tel_prim,
             r_tel_cen_ob=r_tel_cen_ob,
             do_equid_lambda_resample=do_equid_lambda_resample,
+            target_snr=target_snr,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
             planet_transmission_boost_fac=planet_transmission_boost_fac,
-            apply_blaze_function=apply_blaze_function,)
+            correct_for_blaze=correct_for_blaze,)
 
     # Add in scale vector
     component_vectors["scale_vector"] = scale_vector
 
-    return fluxes_model_all, snr_model_all, component_vectors
+    return fluxes_model_all, sigma_model_all, component_vectors

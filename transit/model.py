@@ -1338,7 +1338,11 @@ def run_transit_model(
     fixed_flux=None,
     fixed_trans=None,
     fixed_tau=None,
-    fixed_scale=None,):
+    fixed_scale=None,
+    init_with_flux_vector=False,
+    init_with_tau_vector=False,
+    init_with_trans_vector=False,
+    init_with_scale_vector=False,):
     """
     We solve iteratively 4 systems of equations:
      1) for the stellar spectrum flux,
@@ -1421,6 +1425,9 @@ def run_transit_model(
         Arrays to fix flux, trans, tau, or scale to. Must have the same shape
         as their respective arrays.
 
+    init_with_flux_vector, init_with_tau_vector, init_with_trans_vector,
+    init_with_scale_vector: TODO
+
     Returns
     -------
     flux: 2D float array
@@ -1475,24 +1482,28 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise planet transmission
     # -------------------------------------------------------------------------
-    # Initialise transmission array to be the fractional light blocked by the
-    # planet (normalised to the stellar radius)
-    if not do_fix_trans_vector:
+    # Initialise with our fixed value
+    if init_with_trans_vector or do_fix_trans_vector:
+        trans = fixed_trans
+
+    # Otherwise initialise transmission array to be the fractional light
+    #  blocked by the planet (normalised to the stellar radius)
+    else:
         rp_rstar_area_frac = syst_info.loc["rp_rstar", "value"]**2
         trans = np.zeros((n_spec, n_wave)) + rp_rstar_area_frac
-    
-    # Otherwise use our fixed value
-    else:
-        trans = fixed_trans
 
     # -------------------------------------------------------------------------
     # Initialise telluric optical depth
     # -------------------------------------------------------------------------
-    # For our initial guess for the tellurics, start with the lowest observed
-    # airmass observation from each transit and assume that all absorption is
-    # due to tellurics--that is normalise this transmission and convert to an
-    # optical depth.
-    if not do_fix_tau_vector:
+    # Initialise with our fixed value
+    if init_with_tau_vector or do_fix_tau_vector:
+        tau = fixed_tau
+
+    # Otherwise, for our initial guess for the tellurics, start with the lowest
+    # observed airmass observation from each transit and assume that all
+    # absorption is due to tellurics--that is normalise this transmission and 
+    # convert to an optical depth.
+    else:
         tau = []
 
         for trans_i, nm in enumerate(night_masks):
@@ -1514,16 +1525,16 @@ def run_transit_model(
 
         tau = np.stack(tau)
 
-    # Otherwise use our fixed value
-    else:
-        tau = fixed_tau
-
     # -------------------------------------------------------------------------
     # Initialise stellar flux
     # -------------------------------------------------------------------------
-    # Initial guess for stellar flux is just the airmass corrected observation
-    # from the minimum airmass epoch across all transits.
-    if not do_fix_flux_vector:
+    # Initialise with fixed value
+    if init_with_flux_vector or do_fix_flux_vector:
+        flux = fixed_flux
+    
+    # Otherwise initial guess for stellar flux is just the airmass corrected 
+    # observation from the minimum airmass epoch across all transits.
+    else:
         flux = (obs_spec[am_min_i,:,:]
             / np.exp(-tau[am_min_transit_i]*airmasses[am_min_i]))
 
@@ -1534,10 +1545,6 @@ def run_transit_model(
                 a=flux,
                 a_min=stellar_flux_limits[0],
                 a_max=stellar_flux_limits[1],)
-    
-    # Otherwise use our fixed flux vector
-    else:
-        flux = fixed_flux
 
     # -------------------------------------------------------------------------
     # Derivatives
@@ -1569,8 +1576,25 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Model and Scaling
     # -------------------------------------------------------------------------
-    # Initial guess for scaling vector accounting for observed flux variability
-    if not do_fix_scale_vector:
+    # Initialise with fixed scale vector
+    if init_with_scale_vector or do_fix_scale_vector:
+        scale = fixed_scale
+
+        model = create_transit_model_array(
+            waves=waves,
+            flux=flux,
+            flux_2=flux_2,
+            tau=tau,
+            trans=trans,
+            trans_2=trans_2,
+            scale=scale,
+            transit_info=transit_info,
+            syst_info=syst_info,
+            model_limits=model_limits,)
+    
+    # Otherwise have our initial guess for scaling vector simply account for 
+    # observed flux variability
+    else:
         # TODO: avoid including transit itself in scale to have a better
         # initial guess.
         scale = np.ones(n_phase_all)
@@ -1601,22 +1625,6 @@ def run_transit_model(
 
         # Recompute the model
         model[:,:,:] = create_transit_model_array(
-            waves=waves,
-            flux=flux,
-            flux_2=flux_2,
-            tau=tau,
-            trans=trans,
-            trans_2=trans_2,
-            scale=scale,
-            transit_info=transit_info,
-            syst_info=syst_info,
-            model_limits=model_limits,)
-
-    # Otherwise use our fixed scale and compute an initial model
-    else:
-        scale = fixed_scale
-
-        model = create_transit_model_array(
             waves=waves,
             flux=flux,
             flux_2=flux_2,
