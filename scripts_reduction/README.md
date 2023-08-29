@@ -1,3 +1,16 @@
+# Downloading CRIRES+ Planet Atmosphere Data
+1. Use CRIRES specific ESO download portal (make sure to log in first!):
+    - https://archive.eso.org/wdb/wdb/eso/crires/form
+    - For **_science_** data: fill in “Target name”, “DATE OBS”, “INS WLEN ID” then Mark All, Request marked datasets. Select raw data, associated processed calibrations, and associated raw calibrations. Make sure to check the night report has the appropriate program on it.
+    - For **_calibration_** data: fill in “DATE OBS” (check both the night of and the morning after), “DPR CATG” to CALIB, “INS WLEN ID” to grating setting, and “Program ID” to 60.A-9051(A). Check dates on wavelength cal files to make sure we’re not using calibrations widely separated in time with some coming from the automatic association, and some coming from the manual calibrator query.
+3. Download shell script/s, scp onto desired folder, `chmod +x <filename>`
+4. Run shell script as `./<filename> -u <username> -p`
+    - This ensures that you’re able to download the proprietary data
+    - If you get a “bad substitution error”, check that the shell scripts have `“#!/bin/bash”` at the top and not `#!/bin/sh”`
+5. Uncompress fits files with `gunzip -d *.fits.Z`
+    - The d is ‘decompress’
+
+
 # Reducing CRIRES+ Planet Atmospheres Data
 ### Setup
 1. Copy python scripts into directory (for a record of script version/settings)
