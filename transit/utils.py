@@ -4,6 +4,7 @@ Originally written in IDL by Nikolai Piskunov, ported to Python by Adam Rains.
 """
 import os
 import glob
+import yaml
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -933,6 +934,9 @@ def extract_nodding_time_series(
     return waves, fluxes, sigmas, detectors, orders, transit_df
 
 
+# -----------------------------------------------------------------------------
+# Save/load planet transit info
+# -----------------------------------------------------------------------------
 def save_transit_info_to_fits(
     waves,
     obs_spec_list,
@@ -1191,6 +1195,9 @@ def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
         transit_info_list, syst_info
 
 
+# -----------------------------------------------------------------------------
+# Save/load transit components (flux, trans, tau, scale)
+# -----------------------------------------------------------------------------
 def save_simulated_transit_components_to_fits(
     fits_load_dir,
     label,
@@ -1331,10 +1338,14 @@ def load_simulated_transit_components_from_fits(
     return component_flux, component_tau, component_trans, component_scale
 
 
+# -----------------------------------------------------------------------------
+# Save/load inverse model results (flux, trans, tau, scale)
+# -----------------------------------------------------------------------------
 def save_transit_model_results_to_fits(
     fits_load_dir,
     label,
     n_transit,
+    model,
     flux,
     trans,
     tau,
@@ -1354,6 +1365,10 @@ def save_transit_model_results_to_fits(
     n_transit: int
         Number of transits saved to this fits file.
 
+    model: 3D float array
+        Fitted model observation (star + tellurics + planet) matrix of shape
+        [n_phase, n_spec, n_px].
+
     flux: 2D float array
         Fitted model stellar flux of shape [n_spec, n_px].
 
@@ -1366,15 +1381,12 @@ def save_transit_model_results_to_fits(
     scale: 1D float array
         Fitted model scale parameter of shape [n_phase].
 
-    model: 3D float array
-        Fitted model (star + tellurics + planet) matrix of shape
-        [n_phase, n_spec, n_px].
-
     mask: 3D float array
         Mask array of shape [n_phase, n_spec, n_px]. Contains either 0 or 1.
     """
     # Pair the extensions with their data
     extensions = {
+        "MODEL_OBS":(model, "Model observation combining each component."),
         "MODEL_FLUX":(flux, "Fitted Aronson stellar fluxes."),
         "MODEL_TRANS":(trans, "Fitted Aronson planet transmission."),
         "MODEL_TAU":(tau, "Fitted Aronson telluric tau."),
@@ -1401,6 +1413,66 @@ def save_transit_model_results_to_fits(
             fits_file.flush()
 
 
+def load_simulated_model_results_from_fits(
+    fits_load_dir,
+    label,
+    n_transit,):
+    """Function to load the output of a modelling run (model 'observation', 
+    stellar flux, telluric tau, planet transmission, scale, and mask vectors)
+    from a fits file.
+    
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    Returns
+    -------
+    model_obs: 2D float array
+        Fitted model 'observation' vector of shape [n_phase, n_spec, n_px].
+
+    model_flux: 2D float array
+        Fitted model stellar flux vector of shape [n_spec, n_px].
+
+    model_tau: 3D float array
+        Fitted model telluric tau vector of shape [n_transit, n_spec, n_px].
+
+    model_trans: 2D float array
+        Fitted model planet transmission vector of shape [n_spec, n_px].
+
+    model_scale: 1D float array
+        Fitted scale vector of scale/slit losses of shape [n_phase].
+
+    model_mask: 1D float array
+        Adopted fit mask of shape [n_phase, n_spec, n_px]
+    """
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="readonly") as fits_file:
+        # Load data constant across transits
+        model_obs = fits_file["MODEL_OBS"].data.astype(float)
+        model_flux = fits_file["MODEL_FLUX"].data.astype(float)
+        model_tau = fits_file["MODEL_TRANS"].data.astype(float)
+        model_trans = fits_file["MODEL_TAU"].data.astype(float)
+        model_scale = fits_file["MODEL_SCALE"].data.astype(float)
+        model_mask = fits_file["MODEL_MASK"].data.astype(bool)
+
+    # All done, return
+    return \
+        model_obs, model_flux, model_tau, model_trans, model_scale, model_mask
+
+
+# -----------------------------------------------------------------------------
+# 
+# -----------------------------------------------------------------------------
 def calculate_transit_timestep_info(transit_info, syst_info,):
     """Iterate over each time step and compute planet phase, planet XYZ
     position, planet XYZ velocities, and associated mu value at the start, mid-
@@ -2035,3 +2107,51 @@ def generate_mock_flux_mu_grid(
         flux_grid[:, mu_i] = limb_darken_spectrum(flux, a_limb, mu)
 
     return flux_grid, mu_grid
+
+# -----------------------------------------------------------------------------
+# Handling of settings files
+# -----------------------------------------------------------------------------
+def load_yaml_settings(yaml_path):
+    """Import our settings YAML file as a dictionary and return the object 
+    equivalent.
+
+    Parameters
+    ----------
+    yaml_path: string
+        Path to the saved YAML file.
+
+    Returns
+    -------
+    yaml_settings: YAMLSettings object
+        Settings object with attributes equivalent to YAML keys.
+    """
+    # Load in YAML file as dictionary
+    with open(yaml_path) as yaml_file:
+        yaml_dict = yaml.safe_load(yaml_file)
+
+    # Correctly set None variables
+    for key in yaml_dict.keys():
+        if type(yaml_dict[key]) == list:
+            yaml_dict[key] = \
+                [val if val != "None" else None for val in yaml_dict[key]]
+        elif yaml_dict[key] == "None":
+            yaml_dict[key] = None
+
+    # Finally convert to our wrapper object form and return
+    yaml_settings = YAMLSettings(yaml_dict)
+
+    return yaml_settings
+
+
+class YAMLSettings:
+    """Wrapper object for settings stored in YAML file and opened with
+    load_yaml_settings. Has attributes equivalent to keys in dict/YAML file.
+    """
+    def __init__(self, param_dict):
+        for key, value in param_dict.items():
+            setattr(self, key, value)
+
+        self.param_dict = param_dict
+
+    def __repr__(self):
+        return self.param_dict.__repr__()

@@ -1,0 +1,87 @@
+# This file contains the common set of parameters for running our inverse
+# planet atmosphere recovery method.
+#
+# YAML specifications: https://yaml.org/spec/1.2.2/
+#
+#------------------------------------------------------------------------------
+# Data Settings
+#------------------------------------------------------------------------------
+# The number of transits that we've modelled
+n_transit: 2
+
+# The filename label of the transit data we want to model
+save_path: ""
+fn_label: "simulated_R100000_wasp107_trans_boost_x1_SNR100"
+
+# If true, we're working with a simulated set of transits and know that we have
+# access to the component flux, tau, trans, and scale vectors. If False, we're
+# working with observed data, and do not have complete knowledge of the system.
+is_simulated_data: True
+
+#------------------------------------------------------------------------------
+# Inverse Model Settings
+#------------------------------------------------------------------------------
+# Run on a subset of all spectral segments. By default the segments are
+# ordered by detector, so the three segments making up each order will be
+# separated by 6 in the array.
+run_on_sub_slice: False
+segments_to_keep: [2, 8, 14]
+
+# Tikhonov regularisation to adopt for each vector
+lambda_treg_star: 100
+lambda_treg_tau: 100
+lambda_treg_planet: 1.0E+6
+
+# Fitting settings for when running Newton-Raphson's method to fit Tau. Ideally
+# this should converge relatively quickly, so the iteration cap is mostly to 
+# prevent it running infinitely for particularly telluric dense spectral
+# segments, something is poorly tuned, or just debugging.
+tau_nr_tolerance: 1.0E-5
+max_tau_nr_iter: 300
+
+# Fitting settings for the inverse model as a whole. Set the max iterations
+# lower for quicker testing.
+model_converge_tolerance: 1.0E-5
+max_model_iter: 100
+
+do_plot: False
+print_every_n_iterations : 1
+
+# Setting any of these to true will initialise *and* fix that particular vector
+# to the fixed value above.
+do_fix_flux_vector: False
+do_fix_tau_vector: False
+do_fix_trans_vector: False
+do_fix_scale_vector: True
+
+# Setting any of these to true will initialise that particular vector to the 
+# fixed value above, *but* leave that vector free to float during fitting so
+# long as do_fix_<vector> is False. This allows e.g. the telluric vector to be
+# initialised to a molecfit fit, but still allow it to be optimised to the data
+init_with_flux_vector: True
+init_with_tau_vector: True
+init_with_trans_vector: False
+init_with_scale_vector: False
+
+# TODO: reimplement max_flux = np.max(obs_spec), which previously caused issues
+# in that it seemed to prevent the model fully exploring the parameter space.
+
+# Limits (low, high). Set to (None, None) for no limits. Note that to prevent
+# division by zero and overflow errors min telluric_trans should be > 0.
+stellar_flux_limits: [1.0E-5, None]
+telluric_trans_limits: [4.5E-5, None]          # Max optical depth ~10
+telluric_tau_limits: [0, 10.00884]             # Max optical depth ~10
+planet_trans_limits: [1.0E-5, 1]
+scale_limits: [1.0E-5, 1]
+model_limits: [1.0E-5, None]
+
+#------------------------------------------------------------------------------
+# Templates
+#------------------------------------------------------------------------------
+r_templates: 100000
+template_wave_fits: "wave.fits"
+template_spec_csv: "templates/wasp107_template_list.csv"
+
+#------------------------------------------------------------------------------
+# Recovery Settings
+#------------------------------------------------------------------------------
