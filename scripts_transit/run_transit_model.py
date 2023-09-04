@@ -57,6 +57,9 @@ transit_info["planet_area_frac_mid"] = \
 # -----------------------------------------------------------------------------
 # Mask segments
 # -----------------------------------------------------------------------------
+# Keep track of dimensions
+(n_phase, n_spec, n_px) = obs_spec.shape
+
 # Create a mask if we're choosing to only run on a subset of orders. This mask
 # gets applied to the input data, as well as the component spectra.
 if ms.run_on_sub_slice:
@@ -132,23 +135,46 @@ flux, trans, tau, scale, model, mask = tmod.run_transit_model(
     init_with_trans_vector=ms.init_with_trans_vector,
     init_with_scale_vector=ms.init_with_scale_vector,)
 
+# If we ran only ran on a subset of spectral segments, make sure we still save
+# as the expected shape--just filled with nans for the missing segments.
+if ms.run_on_sub_slice:
+    full_model = np.full((n_phase, n_spec, n_px), np.nan)
+    full_flux = np.full((n_spec, n_px), np.nan)
+    full_tau = np.full((ms.n_transit, n_spec, n_px), np.nan)
+    full_trans = np.full((n_spec, n_px), np.nan)
+    full_mask = np.full((n_phase, n_spec, n_px), np.nan)
+
+    full_model[:,segment_mask, :] = model
+    full_flux[segment_mask] = flux
+    full_tau[:,segment_mask] = tau
+    full_trans[segment_mask] = trans
+    full_mask[:,segment_mask] = mask
+
+# Otherwise our recovered arrays already have the right dimensions
+else:
+    full_model = model
+    full_flux = flux
+    full_tau = tau
+    full_trans = trans
+    full_mask = mask
+
 # Save the results
 tu.save_transit_model_results_to_fits(
     fits_load_dir="",
     label=ms.fn_label,
     n_transit=ms.n_transit,
-    model=model,
-    flux=flux,
-    trans=trans,
-    tau=tau,
+    model=full_model,
+    flux=full_flux,
+    trans=full_trans,
+    tau=full_tau,
     scale=scale,
-    mask=mask,)
-
-plt.close("all")
+    mask=full_mask,)
 
 # -----------------------------------------------------------------------------
 # Diagnostics
 # -----------------------------------------------------------------------------
+plt.close("all")
+
 # Plot the component spectra (one pdf per transit).
 for trans_i in range(ms.n_transit):
     tm = transit_info["transit_num"] == trans_i

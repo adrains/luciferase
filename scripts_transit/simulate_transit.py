@@ -15,81 +15,9 @@ import transit.plotting as tplt
 # -----------------------------------------------------------------------------
 # Setup and Options
 # -----------------------------------------------------------------------------
-# Save path
-save_path = ""
-star_name = "wasp107"
-label = "simulated_R100000_{}".format(star_name)
-
-N_TRANSIT = 2
-
-# For simulating a transit we currently just swap out the fluxes from an
-# actually observed data cube created by prepare_transit_model.fits
-fits_load_dir = "transit_data_wasp107.fits"
-
-# Model stellar spectrum
-#marcs_fits = "synth/marcs_wasp107_4420g4.61z+0.00m0.683t0.plt"
-marcs_fits = "synth/template_wasp107_230623.fits"
-
-# Model planet spectrum
-planet_wave_fits = \
-    "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_wave_R200000.fits"
-planet_spec_fits = \
-    "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_flux_R200000.fits"
-
-# Molecfit modelled telluric spectra--one per night to be simulated
-molecfit_fits = [
-    "data_reduction/molecfit_wasp107_continuum_norm/MODEL/BEST_FIT_MODEL.fits",
-    "data_reduction/wasp_107_n2/BEST_FIT_MODEL_opt.fits"]
-
-# CRIRES+ throughput data from the ETC
-throughput_json_path = "data/crires_etc_throughput_K2148.json"
-
-# Wavelength limits and spectroscopic resolution
-wl_min = 19000
-wl_max = 25000
-instr_resolving_power = 100000
-
-# VLT UT M1 mirror and central obstruction radius
-# https://www.eso.org/sci/facilities/paranal/telescopes/ut/m1unit.html
-r_tel_prim = 8.2 / 2
-r_tel_cen_ob = 1 / 2
-
-do_equid_lambda_resample = True
-
-# Fill value for missing values of CRIRES throughput
-fill_throughput_value = 1
-
-# Fill value for missing telluric tau values
-tau_fill_value = 0
-
-# Whether to correct for the blaze/grating efficiency/throughput term
-correct_for_blaze = True
-
-# These three parameters determine how we simulate our scale vector which
-# represents slit losses. To set this to unity, set scale_vector_method to 
-# 'constant_unity'. Alternatively, set it to 'smoothed_random' where we
-# generate n_phase random points between 0 and 2, and use a Savitzky–Golay to
-# smooth this using a window size of savgol_window_frac_size * n_phase and a
-# polynomial order of savgol_poly_order.
-scale_vector_method = "constant_unity" #"smoothed_random"
-savgol_window_frac_size = 0.5
-savgol_poly_order = 3
-
-# -----------------------------------------------------------------------------
-# Test/troubleshooting settings
-# -----------------------------------------------------------------------------
-# Set these to true to disable the respective component in the modelling
-do_use_uniform_stellar_spec = False
-do_use_uniform_telluric_spec = False
-do_use_uniform_planet_spec = False
-
-# Set this to values > 1 to increase the planetary absorption
-planet_transmission_boost_fac = 1
-
-# Target SNR for the brightest order before correcting for the blaze. Used to
-# rescale spectra and affects applied noise. Set to None to not add noise and
-# have 'infinite' SNR.
-target_snr = 100
+# Import our simulation settings from a separate YAML file
+simulation_settings_file = "scripts_transit/simulation_settings.yml"
+ss = tu.load_yaml_settings(simulation_settings_file)
 
 # -----------------------------------------------------------------------------
 # Running things
@@ -98,7 +26,7 @@ target_snr = 100
 # moment we simulate real transits using real airmass/phase/velocity info and
 # simply duplicate the file and swap out the fluxes with simulated equivalents.
 waves, _, _, det, orders, transit_info_list, syst_info = \
-    tu.load_transit_info_from_fits("", star_name, n_transit=N_TRANSIT,)
+    tu.load_transit_info_from_fits("", ss.star_name, n_transit=ss.n_transit,)
 
 # Initialise arrays for keeping track of simulated spectra
 model_flux_list = []
@@ -113,35 +41,35 @@ scale_components = []
 line = "-"*80
 
 # Run separately for each transit
-for transit_i in range(N_TRANSIT):
+for transit_i in range(ss.n_transit):
     print(line, "\nModelling transit #{}\n".format(transit_i), line, sep="")
     model_flux, model_sigma, component_vectors = \
         sim.simulate_transit_multiple_epochs(
             wave_observed=waves*10,
             syst_info=syst_info,
             transit_info=transit_info_list[transit_i],
-            marcs_fits=marcs_fits,
-            planet_wave_fits=planet_wave_fits,
-            planet_spec_fits=planet_spec_fits,
-            molecfit_fits=molecfit_fits[transit_i],
-            throughput_json_path=throughput_json_path,
-            target_snr=target_snr,
-            wl_min=wl_min,
-            wl_max=wl_max,
-            instr_resolving_power=instr_resolving_power,
-            r_tel_prim=r_tel_prim,
-            r_tel_cen_ob=r_tel_cen_ob,
-            do_equid_lambda_resample=do_equid_lambda_resample,
-            fill_throughput_value=fill_throughput_value,
-            tau_fill_value=tau_fill_value,
-            planet_transmission_boost_fac=planet_transmission_boost_fac,
-            do_use_uniform_stellar_spec=do_use_uniform_stellar_spec,
-            do_use_uniform_telluric_spec=do_use_uniform_telluric_spec,
-            do_use_uniform_planet_spec=do_use_uniform_planet_spec,
-            correct_for_blaze=correct_for_blaze,
-            scale_vector_method=scale_vector_method,
-            savgol_window_frac_size=savgol_window_frac_size,
-            savgol_poly_order=savgol_poly_order,)
+            marcs_fits=ss.marcs_fits,
+            planet_wave_fits=ss.planet_wave_fits,
+            planet_spec_fits=ss.planet_spec_fits,
+            molecfit_fits=ss.molecfit_fits[transit_i],
+            throughput_json_path=ss.throughput_json_path,
+            target_snr=ss.target_snr,
+            wl_min=ss.wl_min,
+            wl_max=ss.wl_max,
+            instr_resolving_power=ss.instr_resolving_power,
+            r_tel_prim=ss.r_tel_prim,
+            r_tel_cen_ob=ss.r_tel_cen_ob,
+            do_equid_lambda_resample=ss.do_equid_lambda_resample,
+            fill_throughput_value=ss.fill_throughput_value,
+            tau_fill_value=ss.tau_fill_value,
+            planet_transmission_boost_fac=ss.planet_transmission_boost_fac,
+            do_use_uniform_stellar_spec=ss.do_use_uniform_stellar_spec,
+            do_use_uniform_telluric_spec=ss.do_use_uniform_telluric_spec,
+            do_use_uniform_planet_spec=ss.do_use_uniform_planet_spec,
+            correct_for_blaze=ss.correct_for_blaze,
+            scale_vector_method=ss.scale_vector_method,
+            savgol_window_frac_size=ss.savgol_window_frac_size,
+            savgol_poly_order=ss.savgol_poly_order,)
     
     model_flux_list.append(model_flux)
     model_sigma_list.append(model_sigma)
@@ -158,15 +86,18 @@ flux_components = np.array(flux_components)
 telluric_components = np.array(telluric_components)
 planet_components = np.array(planet_components)
 
+# -----------------------------------------------------------------------------
+# Diagnostic plots
+# -----------------------------------------------------------------------------
 # Plot the simulated 'observed' spectra for all epochs
 tplt.plot_all_input_spectra(
     waves=waves,
     fluxes_all_list=model_flux_list,
     transit_info_list=transit_info_list,
-    n_transits=N_TRANSIT,)
+    n_transits=ss.n_transit,)
 
 # Plot the component spectra (one pdf per transit).
-for trans_i in range(N_TRANSIT):
+for trans_i in range(ss.n_transit):
     tplt.plot_component_spectra(
         waves=waves,
         fluxes=flux_components[trans_i],
@@ -174,31 +105,34 @@ for trans_i in range(N_TRANSIT):
         planet_trans=planet_components[trans_i],
         scale_vector=scale_components[trans_i],
         transit_num=trans_i,
-        star_name=star_name,)
+        star_name=ss.star_name,)
 
+# -----------------------------------------------------------------------------
+# Save results to fits
+# -----------------------------------------------------------------------------
 # Construct save file name
 fn_label = "{}_trans_boost_x{:0.0f}_SNR{:0.0f}".format(
-    label, planet_transmission_boost_fac, target_snr)
+    ss.label, ss.planet_transmission_boost_fac, ss.target_snr)
 
 # Save results to new fits file
 tu.save_transit_info_to_fits(
     waves=waves,
     obs_spec_list=model_flux_list,
     sigmas_list=model_sigma_list,
-    n_transits=N_TRANSIT,
+    n_transits=ss.n_transit,
     detectors=det,
     orders=orders,
     transit_info_list=transit_info_list,
     syst_info=syst_info,
-    fits_save_dir=save_path,
+    fits_save_dir=ss.save_path,
     label=fn_label,)
 
 # Add the component spectra.  Note that we assume that flux and planet trans
 # is constant across transits, but that our tau  and scale vectors vary.
 tu.save_simulated_transit_components_to_fits(
-    fits_load_dir=save_path,
+    fits_load_dir=ss.save_path,
     label=fn_label,
-    n_transit=N_TRANSIT,
+    n_transit=ss.n_transit,
     flux=flux_components[0],
     tau=telluric_components,
     trans=planet_components[0],

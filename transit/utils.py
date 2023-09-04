@@ -2096,7 +2096,7 @@ def generate_mock_flux_mu_grid(
         [n_wave, n_mu].
     """
     # Uniformly sample mus from the edge to centre of the disc
-    mus = np.linspace(0.001, 1, n_mu_samples,)
+    mus = np.linspace(1, 0.001, n_mu_samples,)
 
     # Initialise empty flux grid, and tile mus
     flux_grid = np.full((len(flux), n_mu_samples), np.nan)
