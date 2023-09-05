@@ -1418,7 +1418,7 @@ def run_transit_model(
 
     do_fix_flux_vector, do_fix_tau_vector, do_fix_trans_vector, 
     do_fix_scale_vector: boolean, default: False
-        If true, we don't iteratre the respective vector when modelling. This
+        If true, we don't iterate the respective vector when modelling. This
         is useful for debugging.
     
     fixed_flux, fixed_tau, fixed_trans, fixed_scale: float array or None
@@ -1426,7 +1426,11 @@ def run_transit_model(
         as their respective arrays.
 
     init_with_flux_vector, init_with_tau_vector, init_with_trans_vector,
-    init_with_scale_vector: TODO
+    init_with_scale_vector: boolean, default: False
+        If true, we initialise our flux, tau, trans, or scale vectors to their
+        equivalent components. So long as the equivalent 
+        do_fix_<component>_vector boolean is False, the arrays are still 
+        allowed to float during fitting.
 
     Returns
     -------
@@ -1484,7 +1488,7 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise with our fixed value
     if init_with_trans_vector or do_fix_trans_vector:
-        trans = fixed_trans
+        trans = fixed_trans.copy()
 
     # Otherwise initialise transmission array to be the fractional light
     #  blocked by the planet (normalised to the stellar radius)
@@ -1497,7 +1501,7 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise with our fixed value
     if init_with_tau_vector or do_fix_tau_vector:
-        tau = fixed_tau
+        tau = fixed_tau.copy()
 
     # Otherwise, for our initial guess for the tellurics, start with the lowest
     # observed airmass observation from each transit and assume that all
@@ -1530,7 +1534,7 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise with fixed value
     if init_with_flux_vector or do_fix_flux_vector:
-        flux = fixed_flux
+        flux = fixed_flux.copy()
     
     # Otherwise initial guess for stellar flux is just the airmass corrected 
     # observation from the minimum airmass epoch across all transits.
@@ -1578,7 +1582,7 @@ def run_transit_model(
     # -------------------------------------------------------------------------
     # Initialise with fixed scale vector
     if init_with_scale_vector or do_fix_scale_vector:
-        scale = fixed_scale
+        scale = fixed_scale.copy()
 
         model = create_transit_model_array(
             waves=waves,

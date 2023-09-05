@@ -24,13 +24,18 @@ is_simulated_data: True
 # Run on a subset of all spectral segments. By default the segments are
 # ordered by detector, so the three segments making up each order will be
 # separated by 6 in the array.
-run_on_sub_slice: False
-segments_to_keep: [2, 8, 14]
+run_on_sub_slice: True
+segments_to_keep: [2, 3, 8, 9, 14, 15]
 
-# Tikhonov regularisation to adopt for each vector
+# Tikhonov regularisation value to adopt for each vector
+# Note that setting stellar regularisation too high will result in the flux
+# vector being unable to reproduce deep or narrow absorption features in the
+# observed spectrum, which can result in it and the tau vector attempting to
+# jointly 'model' said features, which can result in non-physical 'emission'
+# features.
 lambda_treg_star: 100
-lambda_treg_tau: 100
-lambda_treg_planet: 1.0E+6
+lambda_treg_tau: 1.0E+4
+lambda_treg_planet: 1.0E+8
 
 # Fitting settings for when running Newton-Raphson's method to fit Tau. Ideally
 # this should converge relatively quickly, so the iteration cap is mostly to 
@@ -44,7 +49,10 @@ max_tau_nr_iter: 300
 model_converge_tolerance: 1.0E-5
 max_model_iter: 100
 
+# TODO: not yet implemented
 do_plot: False
+
+# How often to print fitting updates
 print_every_n_iterations : 1
 
 # Setting any of these to true will initialise *and* fix that particular vector

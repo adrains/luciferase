@@ -20,11 +20,11 @@ ms = tu.load_yaml_settings(yaml_settings_file)
 # Read in pre-prepared fits file
 # -----------------------------------------------------------------------------
 # Load in prepared fits file for our transit
-waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
+waves_all, fluxes_list, sigmas_list, det, ord, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ms.save_path, ms.fn_label, ms.n_transit)
 
 # Combine transits - stack observations allong phase dimension
-obs_spec = np.vstack(fluxes_list)
+obs_spec_all = np.vstack(fluxes_list)
 
 # Add in transit number column to each dataframe, then stack
 for t_i in range(ms.n_transit):
@@ -58,18 +58,18 @@ transit_info["planet_area_frac_mid"] = \
 # Mask segments
 # -----------------------------------------------------------------------------
 # Keep track of dimensions
-(n_phase, n_spec, n_px) = obs_spec.shape
+(n_phase, n_spec, n_px) = obs_spec_all.shape
 
 # Create a mask if we're choosing to only run on a subset of orders. This mask
 # gets applied to the input data, as well as the component spectra.
 if ms.run_on_sub_slice:
-    segment_mask = np.full(waves.shape[0], False)
+    segment_mask = np.full(waves_all.shape[0], False)
     segment_mask[ms.segments_to_keep] = True
-    waves = waves[segment_mask]
-    obs_spec = obs_spec[:,segment_mask]
+    waves = waves_all[segment_mask]
+    obs_spec = obs_spec_all[:,segment_mask]
 
 else:
-    segment_mask = np.full(waves.shape[0], True)
+    segment_mask = np.full(waves_all.shape[0], True)
 
 # -----------------------------------------------------------------------------
 # Initialise component vectors
