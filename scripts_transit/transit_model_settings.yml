@@ -86,9 +86,8 @@ model_limits: [1.0E-5, None]
 #------------------------------------------------------------------------------
 # Templates
 #------------------------------------------------------------------------------
-r_templates: 100000
-template_wave_fits: "wave.fits"
-template_spec_csv: "templates/wasp107_template_list.csv"
+template_molecules: ["CH4", "CO", "CO2", "H2O"]
+template_fits: "templates/WASP17b/WASP17_templates_all_R100000.fits"
 
 #------------------------------------------------------------------------------
 # Recovery Settings
