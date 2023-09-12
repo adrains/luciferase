@@ -111,8 +111,13 @@ for trans_i in range(ss.n_transit):
 # Save results to fits
 # -----------------------------------------------------------------------------
 # Construct save file name
-fn_label = "{}_trans_boost_x{:0.0f}_SNR{:0.0f}".format(
-    ss.label, ss.planet_transmission_boost_fac, ss.target_snr)
+if ss.target_snr is None:
+    target_snr = np.inf
+else:
+    target_snr = ss.target_snr
+
+fn_label = "{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
+    ss.label, ss.planet_transmission_boost_fac, target_snr)
 
 # Save results to new fits file
 tu.save_transit_info_to_fits(

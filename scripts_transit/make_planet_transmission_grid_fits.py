@@ -78,8 +78,11 @@ for model_i, model_path in enumerate(all_model_paths):
     # Store molecular information
     has_molecules = []
     
+    # Extract molecules from path
+    molecules_in_fn = model_path.split("/")[-1].split("_")[-1][:-4].split("+")
+
     for molecule in MOLECULES:
-        if molecule in model_path:
+        if molecule in molecules_in_fn:
             has_molecules.append(True)
         else:
             has_molecules.append(False)

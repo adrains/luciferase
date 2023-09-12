@@ -65,11 +65,12 @@ transit_info["planet_area_frac_mid"] = \
 if ms.run_on_sub_slice:
     segment_mask = np.full(waves_all.shape[0], False)
     segment_mask[ms.segments_to_keep] = True
-    waves = waves_all[segment_mask]
-    obs_spec = obs_spec_all[:,segment_mask]
 
 else:
     segment_mask = np.full(waves_all.shape[0], True)
+
+waves = waves_all[segment_mask]
+obs_spec = obs_spec_all[:,segment_mask]
 
 # -----------------------------------------------------------------------------
 # Initialise component vectors

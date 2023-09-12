@@ -1460,8 +1460,8 @@ def load_simulated_model_results_from_fits(
         # Load data constant across transits
         model_obs = fits_file["MODEL_OBS"].data.astype(float)
         model_flux = fits_file["MODEL_FLUX"].data.astype(float)
-        model_tau = fits_file["MODEL_TRANS"].data.astype(float)
-        model_trans = fits_file["MODEL_TAU"].data.astype(float)
+        model_tau = fits_file["MODEL_TAU"].data.astype(float)
+        model_trans = fits_file["MODEL_TRANS"].data.astype(float)
         model_scale = fits_file["MODEL_SCALE"].data.astype(float)
         model_mask = fits_file["MODEL_MASK"].data.astype(bool)
 
