@@ -111,7 +111,7 @@ for trans_i in range(ss.n_transit):
 # Save results to fits
 # -----------------------------------------------------------------------------
 # Construct save file name
-if ss.target_snr is None:
+if ss.target_snr is None or ss.target_snr.upper() == "NONE":
     target_snr = np.inf
 else:
     target_snr = ss.target_snr
