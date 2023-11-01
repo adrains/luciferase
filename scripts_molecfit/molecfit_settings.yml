@@ -1,0 +1,81 @@
+# This file exists to keep track of the settings when producing files to run
+# Molecfit and dumping the best fit continuum.
+#
+# YAML specifications: https://yaml.org/spec/1.2.2/
+#
+#------------------------------------------------------------------------------
+# Settings
+#------------------------------------------------------------------------------
+# Directory of reduced data master reduction
+data_dir: "/Users/arains/data/220310_WASP107/K2148"
+
+# Directory for files related to this particular system
+working_dir: "data_reduction/WASP107/"
+
+# Night directory within working_dir
+night_folder: "220310_WASP107"
+
+# Molecfit folders
+molecfit_init_folder: "molecfit_init"         # Init/unoptimised dumped files
+molecfit_results_folder: "molecfit_results"   # Results folder after init run
+molecfit_opt_folder: "molecfit_opt"           # Optimised dumped files
+
+# This is the (ideally blaze corrected) science spectrum in data_dir that we
+# will run Molecfit on.
+sci_spec_fits: "cr2res_obs_nodding_extractedA_blaze_corr.fits"
+
+# VALD line list for this star
+vald_linelist_txt: "vald_wasp107_0.05.txt"
+
+# Template spectrum for this star
+rv_template_fits: "template_wasp_107.fits"
+
+#------------------------------------------------------------------------------
+# RV fitting settings
+#------------------------------------------------------------------------------
+# Either 'CC' for cross correlation or 'LS' for least squares fitting.
+fit_method: "CC"
+
+# If the median flux value for the model telluric transmission of a spectral 
+# segment is below this we consider the *entire segment* too contaminated for
+# use when RV fitting. A value of 1 in this case would be entirely continuum
+# (and be the most restrictive) and a value of 0 would be the most permissible.
+segment_contamination_threshold: 0.95
+
+# Similar to segment_contamination_threshold, but it operates on a *per pixel*
+# level on the model telluric spectrum rather than a per segment level.
+px_absorption_threshold: 0.9
+
+# List of spectral segments to ignore, where 0 is the first segment.
+ignore_segments: []
+
+rv_initial_guess: 0     # km/s
+rv_limits: [-200, 200]  # km/s
+rv_step: 1.0            # km/s
+
+# This can be set to 1 for non-resolved objects
+slit_pos_spec_num: 1
+
+# Whether to plot diagnostic plots. These are saved in the night directory
+do_rv_diagnostic_plots: True
+do_plot_exclusion_diagnostic: True
+
+# Whether to have a verbose RV fit
+verbose_rv_fit: False
+
+#------------------------------------------------------------------------------
+# Initial Molecfit Run
+#------------------------------------------------------------------------------
+# Set this to True to go through the process of selecting continuum regions
+# manually for each spectral segment and then save the results. If False, we
+# instead load in a previously selected set of continuum regions.
+do_identify_continuum_regions: False
+
+plot_spectra: False
+
+# If True, will not consider Molecfit model pixels with no telluric absorption.
+do_mask_uninformative_model_px: True
+
+# Whether to use our input stellar spectrum to mask out strong stellar lines
+# when writing our wavelength exclude fits file.
+do_science_line_masking: True

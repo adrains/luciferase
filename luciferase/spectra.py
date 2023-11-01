@@ -1298,6 +1298,54 @@ class Observation(object):
                 continuum_region_func=continuum_region_func,)
 
 
+    def dump_continuum_polymomial_coefficients(
+        self,
+        filepath,
+        poly_order=1,):
+        """Function to save continuum polynomial coefficients to a CSV with
+        columns [detector, order, lambda_mid, coeff_0, ... coeff_n].
+
+        Parameters
+        ----------
+        filepath: str
+            Folder to save the continuum polynomial coefficients to.
+
+        poly_order: int, default: 1
+            Polynomial order.
+        """
+        # Initialise our columns
+        n_spec = len(self.spectra_1d)
+        lambda_mid_all = np.zeros(n_spec)
+        coeffs_all = np.zeros((n_spec, poly_order+1))
+        orders_all = np.zeros(n_spec)
+        detectors_all = np.zeros(n_spec)
+
+        # Loop over all spectra
+        for spec_i, spectrum in enumerate(self.spectra_1d):
+            lambda_mid_all[spec_i] = np.mean(spectrum.wave)
+            coeffs_all[spec_i] = spectrum.continuum_poly.coef
+            orders_all[spec_i] = spectrum.order_i
+            detectors_all[spec_i] = spectrum.detector_i
+
+        # Construct and sort the DataFrame
+        coeff_cols = ["coeff_{}".format(i) for i in np.arange(poly_order+1)]
+        columns = ["detector", "order", "lambda_mid",] + coeff_cols
+        data = np.hstack((
+            np.atleast_2d(detectors_all).T,
+            np.atleast_2d(orders_all).T,
+            np.atleast_2d(lambda_mid_all).T,
+            coeffs_all))
+        
+        df = pd.DataFrame(data=data, columns=columns)
+        df.sort_values(by="lambda_mid", inplace=True)
+
+        # Save to disk
+        fn = "continuum_poly_coeff_{}_{}.txt".format(
+            self.t_start_str.split("T")[0], self.object_name.replace(" ", "_"))
+
+        df.to_csv(os.path.join(filepath, fn), index=False)
+
+
     def continuum_normalise_spectra(
         self,
         do_plot=False,):
@@ -1752,7 +1800,8 @@ class Observation(object):
         edge_px_to_exlude=40,
         do_science_line_masking=True,
         px_absorption_threshold=0.9,
-        do_plot_exclusion_diagnostic=False,):
+        do_plot_exclusion_diagnostic=False,
+        fig_save_path="plots/"):
         """Writes the pixel exclude fits file for input to Molecfit. If we have
         a template spectrum interpolator, we will exclude strong science lines
         as well as the detector edges, otherwise just the latter.
@@ -1779,6 +1828,9 @@ class Observation(object):
 
         do_plot_exclusion_diagnostic: boolean, default: False
             Whether to plot a diagnostic plot.
+
+        fig_save_path: str, default: 'plots/'
+            Path to save diagnostic plot to.
 
         Output Files
         ------------
@@ -1891,6 +1943,10 @@ class Observation(object):
                     ymax=2,
                     alpha=0.4,
                     color="r",)
+            
+            fig_name = os.path.join(fig_save_path, "px_exclude_diagnostic")
+            plt.savefig("{}.pdf".format(fig_name))
+            plt.savefig("{}.png".format(fig_name), dpi=200)
 
 
     def initialise_molecfit_best_fit_model(
@@ -1989,7 +2045,8 @@ class Observation(object):
         fit_method="CC",
         do_diagnostic_plots=False,
         verbose=False,
-        figsize=(16,4),):
+        figsize=(16,4),
+        fig_save_path="plots/",):
         """Function to fit the radial velocity globally for the observation
         object by doing a simultaneous fit using all spectral segments. Two
         different methods are implemented: a cross correlation and a least
@@ -2048,6 +2105,9 @@ class Observation(object):
 
         figsize: float tuple, default: (16,4)
             Figure size of diagnostic plot.
+
+        fig_save_path: str, default: 'plots'
+            Path to save diagnostic figure to.
         """
         # Check the requested fitting method is valid
         fit_method = fit_method.upper()
@@ -2072,7 +2132,7 @@ class Observation(object):
         # If we don't have a set of telluric model spectra, we're limited to
         # fitting without masking out the telluric features.
         if len(self.spectra_1d_telluric_model) != len(self._spectra_1d):
-            print("No telluric model to use for masking, doing basic fit.")
+            print("\tNo telluric model to use for masking, doing basic fit.")
 
             for seg_i, spec in enumerate(self.spectra_1d):
                 # Mask out NaN, inf, or nonphysical pixels
@@ -2174,7 +2234,8 @@ class Observation(object):
                 rv_max=rv_max,
                 delta_rv=delta_rv,
                 do_diagnostic_plots=do_diagnostic_plots,
-                figsize=figsize)
+                figsize=figsize,
+                fig_save_path=fig_save_path,)
 
             e_rv = np.nan
             fit_dict["rv_steps"] = rv_steps
@@ -2195,7 +2256,8 @@ class Observation(object):
                 ls_diff_step=ls_diff_step,
                 do_diagnostic_plots=do_diagnostic_plots,
                 verbose=verbose,
-                figsize=figsize)
+                figsize=figsize,
+                fig_save_path=fig_save_path,)
 
         if verbose:
             print(rv, "km/s")
@@ -2486,7 +2548,8 @@ def fit_rv_cross_corr(
     rv_max,
     delta_rv,
     do_diagnostic_plots,
-    figsize,):
+    figsize,
+    fig_save_path,):
     """Computes the cross correlation of pre-masked observed spectra against
     a template spectrum from rv_min to rv_max in steps of delta_rv. Returns
     the best fit RV, as well as the RV steps, and cross correlation values.
@@ -2523,6 +2586,9 @@ def fit_rv_cross_corr(
 
     figsize: float tuple
         Figure size of diagnostic plot.
+
+    fig_save_path: str
+        Directory to save the figure to.
 
     Returns
     -------
@@ -2577,6 +2643,10 @@ def fit_rv_cross_corr(
         spec_axis.set_xlabel("Wavelength (nm)")
         spec_axis.set_ylabel("Flux (cont norm)")
         plt.tight_layout()
+
+        fig_name = os.path.join(fig_save_path, "rv_diagnostic")
+        plt.savefig("{}.pdf".format(fig_name))
+        plt.savefig("{}.png".format(fig_name), dpi=200)
     
     return best_fit_rv, rv_steps, cross_corrs
 
@@ -2593,7 +2663,8 @@ def fit_rv_least_squares(
     ls_diff_step,
     do_diagnostic_plots,
     verbose,
-    figsize,):
+    figsize,
+    fig_save_path,):
     """Performs least squares fitting of pre-masked observed spectra against
     a template spectrum from rv_min to rv_max. Returns the best fit RV, the
     statistical uncertainty, as well as the returned fitting dictionary.
@@ -2641,6 +2712,9 @@ def fit_rv_least_squares(
 
     figsize: float tuple
         Figure size of diagnostic plot.
+
+    fig_save_path: str
+        Directory to save the figure to.
 
     Returns
     -------
@@ -2696,6 +2770,10 @@ def fit_rv_least_squares(
         spec_axis.set_xlabel("Wavelength (nm)")
         spec_axis.set_ylabel("Flux (cont norm)")
         plt.tight_layout()
+
+        fig_name = os.path.join(fig_save_path, "rv_diagnostic")
+        plt.savefig("{}.pdf".format(fig_name))
+        plt.savefig("{}.png".format(fig_name), dpi=200)
 
     return rv, std, ls_fit_dict
 
