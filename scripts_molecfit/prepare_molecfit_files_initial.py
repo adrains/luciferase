@@ -30,7 +30,7 @@ import luciferase.spectra as ls
 # Settings + filename setup
 # -----------------------------------------------------------------------------
 # Import settings YAML file
-molecfit_settings = "scripts_molecfit/spectra_settings.yml"
+molecfit_settings = "scripts_molecfit/molecfit_settings.yml"
 ms = tu.load_yaml_settings(molecfit_settings)
 
 # Construct filenames
