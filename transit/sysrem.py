@@ -1,4 +1,8 @@
-"""
+"""Module for functions related to the SYSREM algorithm for light curve 
+detrending for the purpose of exoplanet transmission spectroscopy.
+
+SYSREM:
+    https://ui.adsabs.harvard.edu/abs/2005MNRAS.356.1466T/abstract
 """
 import numpy as np
 from astropy.stats import sigma_clip
@@ -14,13 +18,42 @@ def clean_and_compute_initial_resid(
     sigma_threshold_spectral=6.0,):
     """Function to clean a spectral data cube prior to running SYSREM. We sigma
     clip along the phase dimension (i.e. the time series of each pixel) as well
-    as along the spectral dimension. Note that we only 
+    as along the spectral dimension. 
+
+    Note that this function expects only spectra from a single spectral
+    segment (or a flattened set of many segments.
+
+    TODO: Interpolate linearly along the phase dimension, no point doing both
+    nan and 1E20.
     
     Parameters
     ----------
+    spectra, e_spectra: 2D float array
+        Unnormalised spectra and spectroscopic uncertainties of shape 
+        [n_phase, n_px].
+    
+    bad_px_mask_init: 2D float array
+        Bad px mask of shape [n_phase, n_px].
+
+    sigma_threshold_phase: float, default: 5.0
+        The sigma clipping threshold for when sigma clipping along the *phase*
+        dimension. Note that this used for both lower and upper bound clipping.
+
+    sigma_threshold_spectral: float, default: 6.0
+        The sigma clipping threshold for when sigma clipping along the 
+        *spectral* dimension. Note that we only sigma clip on the upper bound
+        so as to not remove deep spectral features.
 
     Returns
     -------
+    residuals: 2D float array
+        Initial set of residuals to use for SYSREM composed of the median 
+        subtracted fluxes.
+    
+    flux, e_flux: 2D float array
+        Nnormalised spectra and spectroscopic uncertainties with bad pixel
+        fluxes and uncertainties set to nan and 1E20 respectively of shape 
+        [n_phase, n_px].
     """
     # Grab shape
     (n_phase, n_px) = spectra.shape
@@ -71,7 +104,9 @@ def run_sysrem(
     tolerance=1E-6,
     max_converge_iter=100,
     diff_method="max",):
-    """
+    """Function to run the iterative SYSREM algorithm on a set of fluxes and 
+    uncertainties. Note that this only runs on a single spectral segment at a
+    time.
 
     SYSREM aims to iteratively minimise the expression:
 
@@ -95,14 +130,25 @@ def run_sysrem(
 
     Parameters
     ----------
-    spectra,
-    e_spectra,
-    bad_px_mask,
-    n_iter,
-    tolerance=1E-6,
-    max_converge_iter=100,
-    diff_method="max"
+    spectra, e_spectra: 2D float array
+        Unnormalised spectra and spectroscopic uncertainties of shape 
+        [n_phase, n_px].
+    
+    bad_px_mask_init: 2D float array
+        Bad px mask of shape [n_phase, n_px].
 
+    n_iter: int
+        The number of SYSREM iterations to run.
+
+    tolerance: float, default: 1E-6
+        The convergence threshold for a given SYSREM iteration.
+
+    max_converge_iter: int, default: 100
+        The maximum number of iterations to run each SYSREM iteration for while
+        converging.
+
+    diff_method: str, default: 'max'
+        Function used to assess convergence: ['mean', 'median', 'min', 'max']
 
     Returns
     -------
@@ -195,19 +241,36 @@ def cross_correlate_sysrem_resid(
     template_spec,
     cc_rv_step=1,
     cc_rv_lims=(-200,200),):
-    """
+    """Function to cross correlate a template spectrum against all spectral
+    segments, for all phases, and for all SYSREM iterations.
 
     Parameters
     ----------
-    waves_1d,
-    sysrem_resid,
-    template_wave,
-    template_spec,
-    cc_rv_step=1,
-    cc_rv_lims=(-200,200),
+    waves: 2D float array
+        Wavelength scale of shape [n_spec, n_px].
+
+    sysrem_resid: 4D float array
+        Combined (i.e. for multiple spectral segments) set of SYSREM residuals
+        of shape [n_sysrem_iter, n_phase, n_spec, n_px].
+
+    template_wave, template_spec: 1D float array
+        Wavelength scale and spectrum of template spectrum to be interpolated 
+        against.
+
+    cc_rv_step: float, default: 1
+        Step size for cross correlation in km/s.
+
+    cc_rv_lims: float tuple, default: (-200,200)
+        Lower and upper bounds for cross correlation in km/s.
 
     Returns
     -------
+    cc_rvs: 1D float array
+        RV values that were used when cross correlating in km/s.
+    
+    cc_values: 4D float array
+        Array of cross correlation values of shape:
+        [n_sysrem_iter, n_phase, n_spec, n_rv_steps].
     """
     # Initialise RV vector
     cc_rvs = np.arange(cc_rv_lims[0], cc_rv_lims[1]+cc_rv_step, cc_rv_step)
@@ -236,8 +299,8 @@ def cross_correlate_sysrem_resid(
         # Loop over all spectral segments
         for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
             # Loop over all RVs and cross correlate against each phase
-            # Note: all phases need the same cross correlation to occur, so we can
-            # save on interpolation/loops by just interpolating once per RV.
+            # Note: all phases need the same cross correlation to occur, so we
+            # can save on interpolation/loops by just interpolating once per RV
             for rv_i, rv in enumerate(cc_rvs):
                 # Doppler shift for new wavelength scale
                 wave_rv_shift = waves[spec_i] * (1- rv/(const.c.si.value/1000))
@@ -249,12 +312,11 @@ def cross_correlate_sysrem_resid(
                 tspec_tiled = np.tile(tspec_rv_shift, n_phase).reshape(
                     (n_phase, n_px))
 
-                #import pdb
-                #pdb.set_trace()
-
                 # Cross correlate
                 cc_values[sysrem_iter_i, :, spec_i, rv_i] = \
-                    np.nansum(sysrem_resid[sysrem_iter_i, :, spec_i] * tspec_tiled, axis=1)
+                    np.nansum(
+                        sysrem_resid[sysrem_iter_i, :, spec_i] * tspec_tiled,
+                        axis=1)
 
     # Normalise by median along rv dimension
     #cc_medians = np.nanmedian(cc_values, axis=2)
@@ -275,7 +337,8 @@ def compute_Kp_vsys_map(
     syst_info,
     Kp_lims=(0,400),
     Kp_step=0.5,):
-    """
+    """Function to compute the Kp-Vsys map given a set of cross correlation
+    values from cross_correlate_sysrem_resid.
 
     V_p = K_p sin(2π * φ) + Vsys - v_bary + v_max
 
@@ -287,6 +350,18 @@ def compute_Kp_vsys_map(
     cc_values: 3D float array
         3D float array of cross correlation results with shape:
         [n_sysrem_iter, n_phase, n_rv_step]
+    
+    transit_info: pandas DataFrame
+        Pandas DataFrame with header/computed information about each timestep.
+
+    syst_info: pandas DataFrame
+        DataFrame containing planet/star/system properties.
+
+    Kp_lims: float tuple, default: (0,400)
+        Lower and upper bounds of Kp in km/s to sample between.
+
+    Kp_step: float, default: 0.5
+        Kp step size to use when sampling in km/s.
     """
     # Grab dimensions for convenience
     (n_sysrem_iter, n_phase, n_rv_step) = cc_values.shape
