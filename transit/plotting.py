@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 import transit.utils as tu
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.ticker as plticker
+import matplotlib.colors as colors
 
 def plot_iteration():
     """
@@ -504,3 +506,222 @@ def plot_epoch_model_comp(
         plt.tight_layout()
 
         # Save
+
+
+def plot_sysrem_residuals(
+    waves,
+    resid,):
+    """Function to plot a grid of residuals as output from SYSREM. The grid has
+    n_rows = n_sysrem_iter, and n_cols = n_spec.
+
+    Parameters
+    ----------
+    wave: 2D float array
+        Wavelength vector of shape [n_spec, n_px]
+    
+    resid: 3D float array
+        3D float array of residuals with shape [n_sysrem_iter, n_phase, n_wave]
+    """
+    resid = resid.copy()
+
+    # Grab dimensions for convenience
+    (n_spec, n_px) = waves.shape
+    (n_sysrem_iter, n_phase, n_px_all) = resid.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        ncols=n_spec,
+        #sharex=True,
+        figsize=(18, 6),)
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
+
+    for sr_iter_i in range(n_sysrem_iter):
+        # Set colourbar normalisation for this SYSREM iteration
+        vmin = np.nanmin(resid[sr_iter_i])
+        vmax = np.nanmax(resid[sr_iter_i])
+
+        #print(vmin, vmax)
+
+        for spec_i in range(n_spec):
+            # [x_min, x_max, y_min, y_max]
+            extent = [np.min(waves[spec_i]), np.max(waves[spec_i]), n_phase, 0]
+            px_low = spec_i * n_px
+            px_high = (spec_i+1) * n_px
+           
+            axis = axes[sr_iter_i, spec_i]
+
+            cmap = axis.imshow(
+                X=resid[sr_iter_i, :, px_low:px_high],
+                aspect="auto",
+                interpolation="none",
+                vmin=vmin,
+                vmax=vmax,
+                extent=extent,
+                #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
+                norm=colors.PowerNorm(gamma=5))
+
+            axis.tick_params(axis='both', which='major', labelsize="x-small")
+            axis.xaxis.set_major_locator(plticker.MultipleLocator(base=4))
+            axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=2))
+            axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
+
+            # Only show xticks on the bottom
+            if sr_iter_i != n_sysrem_iter-1:
+                 axes[sr_iter_i, spec_i].set_xticks([])
+
+            # Only show yticks on the left
+            if spec_i != 0:
+                 axes[sr_iter_i, spec_i].set_yticks([])
+
+        # Show just one colour bar per iteration
+        ticks_norm = np.arange(0,1.25,0.25)
+        ticks_rescaled = (ticks_norm * (vmax-vmin) + vmin).astype(int)
+
+        #fig.subplots_adjust(right=0.8)
+        divider = make_axes_locatable(axis)
+        cb_ax = divider.append_axes("right", size="10%", pad="10%")
+
+        #cb_ax = fig.add_axes([0.9, 0.05, 0.025, 0.9])  # [L, B, W, H]
+        cbar = fig.colorbar(cmap, cax=cb_ax, aspect=5)
+        #cbar.ax.set_yticklabels(ticks_rescaled)
+        #cbar.set_label("Mean Wavelength of Spectral Segment")
+
+
+def plot_sysrem_cc_1D(
+    cc_rvs,
+    cc_values,):
+    """Function to plot a 1D plot of the values obtained by cross correlating
+    against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
+    and n_cols = 1. By 1D it is meant that the x axis is the RV value used in
+    the cross correlation, and the y axis is the cross correlation value, with
+    a colour bar representing the phase.
+
+    Parameters
+    ----------
+    rv_steps: 1D float array
+        Vector of RV steps of length [n_rv_step]
+    
+    cc_values: 3D float array
+        3D float array of cross correlation results with shape:
+        [n_sysrem_iter, n_phase, n_rv_step]
+    """
+    # Grab dimensions for convenience
+    (n_sysrem_iter, n_phase, n_rv_step) = cc_values.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        ncols=1,
+        sharex=True,
+        figsize=(18, 6),)
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
+
+    for sr_iter_i in range(n_sysrem_iter):
+        # Grab axis for convenience
+        axis = axes[sr_iter_i]
+
+        std = np.nanstd(cc_values[sr_iter_i])
+
+        # Plot each phase as a separate line
+        for phase_i in range(n_phase):
+            # Get the colour for this phase
+            cmap = cm.get_cmap("magma")
+            colour = cmap(phase_i/n_phase)
+
+            axis.plot(
+                cc_rvs,
+                cc_values[sr_iter_i, phase_i],#/std,
+                c=colour,)
+
+        axis.tick_params(axis='both', which='major', labelsize="x-small")
+        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=10))
+        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=5))
+
+        # Only show xticks on the bottom
+        if sr_iter_i != n_sysrem_iter-1:
+            axis.set_xticks([])
+
+        # Colour bar
+        ticks_norm = np.arange(0,1.25,0.25)
+        ticks_rescaled = (ticks_norm * n_phase).astype(int)
+
+        divider = make_axes_locatable(axis)
+        cb_ax = divider.append_axes("right", size="1%", pad="1%")
+        cbar = fig.colorbar(
+            cm.ScalarMappable(cmap=cmap), cax=cb_ax, ticks=ticks_norm)
+        cbar.ax.set_yticklabels(ticks_rescaled)
+        cbar.set_label("Phase")
+
+
+def plot_sysrem_cc_2D(
+    cc_rvs,
+    cc_values,):
+    """Function to plot a 2D plot of the values obtained by cross correlating
+    against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
+    and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
+    the cross correlation, and the y axis is the phase, with the cross 
+    correlation value being represented by a colour bar.
+
+    Parameters
+    ----------
+    cc_rvs: 1D float array
+        Vector of RV steps of length [n_rv_step]
+    
+    cc_values: 3D float array
+        3D float array of cross correlation results with shape:
+        [n_sysrem_iter, n_phase, n_rv_step]
+    """
+    # Grab dimensions for convenience
+    (n_sysrem_iter, n_phase, n_rv_step) = cc_values.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        ncols=1,
+        #sharex=True,
+        figsize=(18, 6),)
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
+
+    # [x_min, x_max, y_min, y_max]
+    extent = [np.min(cc_rvs), np.max(cc_rvs), n_phase, 0]
+
+    for sr_iter_i in range(n_sysrem_iter):
+        # Grab axis for convenience
+        axis = axes[sr_iter_i]
+
+        cmap = axis.imshow(
+            X=cc_values[sr_iter_i],
+            aspect="auto",
+            interpolation="none",
+            extent=extent,)
+            #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
+            #norm=colors.PowerNorm(gamma=5))
+
+        axis.tick_params(axis='both', which='major', labelsize="x-small")
+        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=10))
+        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=5))
+        #axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
+
+        # Only show xticks on the bottom
+        if sr_iter_i != n_sysrem_iter-1:
+            axis.set_xticks([])
+
+        # Show just one colour bar per iteration
+        #ticks_norm = np.arange(0,1.25,0.25)
+        #ticks_rescaled = (ticks_norm * (vmax-vmin) + vmin).astype(int)
+
+        #fig.subplots_adjust(right=0.8)
+        divider = make_axes_locatable(axis)
+        cb_ax = divider.append_axes("right", size="1%", pad="1%")
+
+        #cb_ax = fig.add_axes([0.9, 0.05, 0.025, 0.9])  # [L, B, W, H]
+        cbar = fig.colorbar(cmap, cax=cb_ax,)
+        #cbar.ax.set_yticklabels(ticks_rescaled)
+        #cbar.set_label("Mean Wavelength of Spectral Segment")

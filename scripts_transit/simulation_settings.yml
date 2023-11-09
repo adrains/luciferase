@@ -18,8 +18,8 @@ n_transit: 2
 fits_load_dir: "transit_data_wasp107.fits"
 
 # Model stellar spectrum
-#marcs_fits = "synth/marcs_wasp107_4420g4.61z+0.00m0.683t0.plt"
-marcs_fits: "synth/template_wasp107_230623.fits"
+marcs_fits: "synth/marcs_wasp107_4420g4.61z+0.00m0.683t0.plt"
+#marcs_fits: "synth/template_wasp107_230623.fits"
 
 # Model planet spectrum
 planet_wave_fits: "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_wave_R200000.fits"
@@ -27,8 +27,8 @@ planet_spec_fits: "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_flux_R200000.fi
 
 # Molecfit modelled telluric spectra--one per night to be simulated
 molecfit_fits:
-- "data_reduction/molecfit_wasp107_continuum_norm/MODEL/BEST_FIT_MODEL.fits"
-- "data_reduction/wasp_107_n2/BEST_FIT_MODEL_opt.fits"
+- "data_reduction/WASP107/220310_WASP107/molecfit_results/MODEL/BEST_FIT_MODEL.fits"
+- "data_reduction/WASP107/230222_WASP107/molecfit_results/BEST_FIT_MODEL.fits"
 
 # CRIRES+ throughput data from the ETC
 throughput_json_path: "data/crires_etc_throughput_K2148.json"
@@ -60,7 +60,7 @@ correct_for_blaze: True
 # generate n_phase random points between 0 and 2, and use a Savitzky–Golay to
 # smooth this using a window size of savgol_window_frac_size * n_phase and a
 # polynomial order of savgol_poly_order.
-scale_vector_method: "constant_unity" #"smoothed_random"
+scale_vector_method: "smoothed_random"
 savgol_window_frac_size: 0.5
 savgol_poly_order: 3
 
@@ -73,9 +73,9 @@ do_use_uniform_telluric_spec: False
 do_use_uniform_planet_spec: False
 
 # Set this to values > 1 to increase the planetary absorption
-planet_transmission_boost_fac: 1
+planet_transmission_boost_fac: 10
 
 # Target SNR for the brightest order before correcting for the blaze. Used to
 # rescale spectra and affects applied noise. Set to None to not add noise and
 # have 'infinite' SNR.
-target_snr: 100
+target_snr: "None"
