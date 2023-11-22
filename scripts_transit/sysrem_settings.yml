@@ -1,0 +1,82 @@
+# This file contains the common set of parameters for running SYSREM.
+#
+# YAML specifications: https://yaml.org/spec/1.2.2/
+#
+#------------------------------------------------------------------------------
+# Data Settings
+#------------------------------------------------------------------------------
+# Which data cube to load
+label: "simulated_R100000_wasp107_trans_boost_x100_SNR_inf"
+#label: "simulated_R100000_wasp107_trans_boost_x10_SNR_200"
+#label: "wasp107"
+
+save_path: ""
+
+n_transit: 2
+
+#------------------------------------------------------------------------------
+# Template Settings
+#------------------------------------------------------------------------------
+stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
+
+molecfit_fits:
+- "data_reduction/WASP107/220310_WASP107/molecfit_results/MODEL/BEST_FIT_MODEL.fits"
+- "data_reduction/WASP107/230222_WASP107/molecfit_results/BEST_FIT_MODEL.fits"
+
+# Fill value for missing telluric tau values
+tau_fill_value: 0
+
+telluric_trans_bad_px_threshold: 0.5
+
+# Grid of petitRADTRANS planet spectra
+template_fits: "templates/WASP17b/WASP17_templates_all_R100000.fits"
+
+# Single planet spectrum
+# TODO: this will eventually be superceded
+planet_wave_fits: "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_wave_R200000.fits"
+planet_spec_fits: "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_flux_R200000.fits"
+
+#------------------------------------------------------------------------------
+# SYSREM Settings
+#------------------------------------------------------------------------------
+# Which transit to run on.
+# TODO: note that this will probably eventually be removed, but now is useful
+# for testing.
+transit_i: 0
+
+# Number of iterations to run SYSREM for
+n_sysrem_iter: 10
+
+# These segments will be masked out completely. For K2148 this is 2.0-2.07um
+segments_to_mask_completely: [2, 3, 4]
+
+# Set to true if we want to test things by cross-correlating with a telluric
+# template spectrum rather than one from a planet
+cc_with_telluric: False
+
+# Convergence threshold for each SYSREM iteration
+sysrem_convergence_tol: 1.0E-6
+
+# Maximum number of iterations to run while converging SYSREM
+sysrem_max_convergence_iter: 100
+
+# Function used to assess convergence: ['mean', 'median', 'min', 'max']
+sysrem_diff_method: "max"
+
+#------------------------------------------------------------------------------
+# Cross Correlation Settings
+#------------------------------------------------------------------------------
+# Step size for the cross-correlation in km/s
+cc_rv_step: 0.5
+
+# Minimum and maximum extents of the cross correlation in km/s
+cc_rv_lims: [-100,100]
+
+#------------------------------------------------------------------------------
+# Kp-Vsys Settings
+#------------------------------------------------------------------------------
+# Step size for the Kp-Vsys map in km/s
+Kp_step: 1.0
+
+# Minimum and maximum extents of the Kp-Vsys map in km/s
+Kp_lims: [0,400]

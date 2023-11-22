@@ -3,6 +3,7 @@
 import os
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from astropy.io import fits
 import astropy.constants as const
 import matplotlib.pyplot as plt
@@ -2871,3 +2872,363 @@ def calc_continuum_optimisation_resid(
     resid_vect = (norm_sci_flux - telluric_model_flux) / sci_sigma
 
     return resid_vect
+
+#------------------------------------------------------------------------------
+# Non-object oriented continuum normalisation
+#------------------------------------------------------------------------------
+def continuum_normalise_spectra(
+    waves,
+    fluxes,
+    sigmas,
+    detectors,
+    orders,
+    continuum_poly_coeff_path,
+    poly_order=1,):
+    """Function to import polynomial coefficients optimised from a Molecfit
+    best fit telluric model and use them to continuum normalise provided
+    spectra from the same star.
+
+    TODO: This function currently 'works' but the gradient of the polynomial
+    coefficients is clearly incorrect, as the spectra are not properly
+    continuum normalised after the fact.
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Wavelength scale of shape [n_spec, n_px].
+
+    fluxes, sigmas: 3D float array
+        Flux and sigma arrays of spectra with shape [n_phase, n_spec, n_px]
+
+    detectors: int array
+        Array associating spectral segments to CRIRES+ detector number of shape 
+        [n_spec].
+    
+    orders: int array
+        Array associating spectral segments to CRIRES+ order number of shape 
+        [n_spec].
+
+    continuum_poly_coeff_path: str
+        Filepath to the polynomial coefficients saved by 
+        spectra.Observation.dump_continuum_polymomial_coefficients().
+
+    poly_order: int, default: 1
+        Polynomial order
+
+    Returns
+    -------
+    fluxes_norm, sigmas_norm: 3D float array
+        Normalised flux and sigma arrays of spectra with shape
+        [n_phase, n_spec, n_px].
+    """
+    (n_phase, n_spec, n_px) = fluxes.shape
+    fluxes_norm = fluxes.copy()
+    sigmas_norm = sigmas.copy()
+
+    # Load in the continuum polynomial coefficients as a DataFrame, it has
+    # columns [detector, order, lambda_mid, coeff_0, ... coeff_n].
+    cont_poly_coeff_df = pd.read_csv(
+        continuum_poly_coeff_path, dtype={"detector":int, "order":int})
+    
+    coeff_cols = ["coeff_{}".format(i) for i in np.arange(poly_order+1)]
+
+    # Loop over all phases
+    for phase_i in range(n_phase):
+        if phase_i == 0:
+            plt.close("all")
+            fig, (ax_1, ax_2) = plt.subplots(2, sharex=True)
+        
+        # Loop over all spectral segments and normalise using the appropriate
+        # polynomial as matched uniquely to (det_i, ord_i)
+        for spec_i, (det_i, ord_i) in enumerate(zip(detectors, orders)):
+            mask = np.logical_and(
+                cont_poly_coeff_df["detector"].values == det_i,
+                cont_poly_coeff_df["order"].values == ord_i,
+            )
+
+            assert np.sum(mask) == 1
+
+            row = cont_poly_coeff_df[mask].iloc[0]
+
+            coeff = row[coeff_cols].values
+
+            poly = Polynomial(coeff)
+
+            continuum = poly(waves[spec_i])
+            continuum -= np.nanmedian(continuum)
+            continuum += np.nanmedian(fluxes_norm[phase_i, spec_i])
+            #continuum += np.nanmin(continuum)
+
+            if phase_i == 0:
+                flux = fluxes_norm[phase_i, spec_i]
+                #flux /= np.nanmedian(flux)
+
+                #ax_1.plot(waves[spec_i], flux, linewidth=0.5)
+                ax_1.plot(waves[spec_i], continuum, linewidth=0.5)
+
+                #ax_2.plot(waves[spec_i], flux, linewidth=0.5, c="k")
+                #ax_2.plot(waves[spec_i], flux*continuum, linewidth=0.5, c="r")
+                ax_2.plot(waves[spec_i], flux/continuum, linewidth=0.5, c="b")
+
+            fluxes_norm[phase_i, spec_i] = \
+                fluxes_norm[phase_i, spec_i] / continuum
+            sigmas_norm[phase_i, spec_i] = \
+                sigmas_norm[phase_i, spec_i] / continuum
+    
+    return fluxes_norm, sigmas_norm
+
+
+def continuum_normalise_all_spectra_with_telluric_model(
+    waves_sci,
+    fluxes_sci,
+    sigmas_sci,
+    wave_telluric,
+    trans_telluric,
+    wave_stellar,
+    spec_stellar,
+    bcors,
+    rv_star,):
+    """Function to continuum normalise spectra via 1D polynomial to each
+    spectral segment optimised to a telluric spectrum and stellar mask.
+
+    TODO: add option to not make plots by default
+
+    Parameters
+    ----------
+    waves_sci: 2D float array
+        Wavelength vector for science spectra of shape [n_spec, n_px].
+
+    fluxes_sci, sigmas_sci: 3D float array
+        Science flux and sigma arrays of shape [n_phase, n_spec, n_px].
+
+    wave_telluric, trans_telluric: 1D float array
+        Wavelength and transmission vectors for telluric template.
+
+    wave_stellar, spec_stellar: 1D float array
+        Wavelength and spectrum vectors for stellar template.
+
+    bcors: 1D float array
+        Barycentric correction for each phase in km/s of shape [n_phase].
+
+    rv_star: float
+        Radial velocity of the star in km/s.
+
+    Returns
+    -------
+    fluxes_sci_norm, sigmas_sci_norm: 3D float array
+        Continuum normalised science fluxes and sigmas of shape
+        [n_phase, n_spec, n_px].
+
+    poly_coeff_all: 3D float array
+        Best fit polynomial coefficients of shape [n_phase, n_spec, n_order]
+    """
+    (n_phase, n_spec, n_px) = fluxes_sci.shape
+
+    fluxes_sci_norm = np.zeros_like(fluxes_sci)
+    sigmas_sci_norm = np.zeros_like(sigmas_sci)
+    poly_coeff_all = np.zeros((n_phase, n_spec, 2))
+
+    # Construct interpolator for the telluric transmission
+    calc_telluric_trans = interp1d(
+        x=wave_telluric,
+        y=trans_telluric,
+        kind="linear",
+        bounds_error=False,
+        assume_sorted=True)
+    
+    # Construct interpolator for the synthetic stellar spectrum
+    calc_stellar_spec = interp1d(
+        x=wave_stellar,
+        y=spec_stellar,
+        kind="linear",
+        bounds_error=False,
+        assume_sorted=True)
+
+    desc = "Continuum normalising for all phases"
+
+    plt.close("all")
+    fig, (poly_ax, norm_ax) = plt.subplots(2, figsize=(20, 5), sharex=True)
+
+    # Loop over all phases
+    for phase_i in tqdm(range(n_phase), leave=False, desc=desc):
+        # Loop over all spectral segments
+        for spec_i in range(n_spec):
+            # Interpolate telluric vector
+            trans_telluric = calc_telluric_trans(waves_sci[spec_i])
+
+            # Interpolate stellar vector
+            spec_stellar = calc_stellar_spec(
+                waves_sci[spec_i]
+                * (1-(rv_star-bcors[phase_i])/(const.c.si.value/1000)))
+
+            flux_norm, sigma_norm, poly_coeff = \
+                continuum_normalise_spectrum_with_telluric_model(
+                    wave_sci=waves_sci[spec_i],
+                    flux_sci=fluxes_sci[phase_i, spec_i],
+                    sigma_sci=sigmas_sci[phase_i, spec_i],
+                    trans_telluric=trans_telluric,
+                    spec_stellar=spec_stellar,
+                    do_mask_strong_stellar_lines=True,)
+
+            fluxes_sci_norm[phase_i, spec_i] = flux_norm
+            sigmas_sci_norm[phase_i, spec_i] = sigma_norm
+            poly_coeff_all[phase_i, spec_i] = poly_coeff
+
+            # Plot normalised spectrum
+            norm_ax.plot(
+                waves_sci[spec_i],
+                flux_norm,
+                linewidth=0.5,
+                c="k",
+                alpha=0.9)
+            
+            # Overplot telluric transmission
+            norm_ax.plot(
+                waves_sci[spec_i],
+                trans_telluric,
+                linewidth=0.5,
+                c="r",
+                alpha=0.9)
+            
+            # Overplot stellar template used for masking
+            norm_ax.plot(
+                waves_sci[spec_i],
+                spec_stellar,
+                linewidth=0.5, 
+                c="g",
+                alpha=0.9)
+
+            # On separate panel plot best-fit continuum polynomials
+            continuum_poly = Polynomial(poly_coeff)
+            poly_ax.plot(
+                waves_sci[spec_i],
+                fluxes_sci[phase_i, spec_i],
+                linewidth=0.5,
+                c="k",
+                alpha=0.9)
+            
+            poly_ax.plot(
+                waves_sci[spec_i],
+                continuum_poly(waves_sci[spec_i]),
+                linewidth=0.5,
+                c="r",
+                alpha=0.9)
+
+    plt.tight_layout()
+    plt.savefig("plots/sysrem_telluric_norm.pdf")
+
+    return fluxes_sci_norm, sigmas_sci_norm, poly_coeff_all
+
+
+
+def continuum_normalise_spectrum_with_telluric_model(
+    wave_sci,
+    flux_sci,
+    sigma_sci,
+    trans_telluric,
+    spec_stellar,
+    edge_px_to_exclude=20,
+    do_mask_uninformative_model_px=False,
+    do_mask_strong_stellar_lines=False,
+    px_absorption_threshold=0.985,
+    uncontaminated_threshold=0.999,):
+    """Uses a telluric model spectrum from Molecfit to optimise the 
+    polynomial coefficients used for continuum normalisation. This is 
+    possible as different physical process contribute to the stellar and
+    telluric spectra, allowing them to be modelled/treated separately. This
+    function should be used in an interative way to converge on the optimal
+    continuum normalisation. Can also exclude strong science lines if given
+    a template spectrum interpolator.
+
+    Parameters
+    ----------
+    wave_sci, fluxe_sci, sigma_sci: 1D float array
+        Science wave, flux, sigma arrays of shape [n_px].
+
+    trans_telluric: 1D float array
+        Transmission vector for telluric template of shape [n_px].
+
+    spec_stellar: 1D float array
+        Stellar spectrum vector for stellar template of shape [n_px].
+
+    edge_px_to_exclude: int, default: 20
+        Pixels to exclude from each edge of the detector.
+
+    do_mask_uninformative_model_px: boolean, default False
+        If True, will not consider Molecfit model pixels with no telluric
+        absorption (i.e. any pixels with a value of 1.0).
+
+    do_mask_strong_stellar_lines: boolean, default: False
+        If True, we will also exclude strong science lines in addition to
+        excluding the detector edges.
+
+    px_absorption_threshold: float, default: 0.985
+        Continuum normalised pixels with flux values below this will be
+        considered to belong to strong science lines and will be masked
+        out during optimisation.
+
+    uncontaminated_threshold: float, default: 0.999
+        The threshold above which we consider the telluric transmission
+        uncontaminated.
+    """
+    # Start with the initial guess of the coefficients from our 
+    # previously fitted linear polynomial
+    params_init = (1,1)
+
+    # Mask out nans and infs with default values
+    flux = flux_sci.copy()
+    sigma = sigma_sci.copy()
+
+    bad_px_mask = np.logical_or(np.isnan(flux_sci), np.isnan(sigma_sci))
+    
+    # Mask out edge pixels
+    bad_px_mask[:edge_px_to_exclude] = True
+    bad_px_mask[-edge_px_to_exclude:] = True
+
+    # Mask out non-informative model pixels where there is no telluric 
+    # absorption.
+    if do_mask_uninformative_model_px:
+        bad_px_mask = np.logical_or(
+            bad_px_mask,
+            trans_telluric > uncontaminated_threshold,)
+
+    
+    # Mask out strong stellar lines
+    if do_mask_strong_stellar_lines:
+        # Mask out pixels where continuum normalised stellar flux is less
+        # than our absorption threshold
+        bad_px_mask = np.logical_or(
+            bad_px_mask,
+            spec_stellar < px_absorption_threshold,)
+
+    # Set all bad pixels to non-NaN defaults that will exclude them from 
+    # the least squares fit
+    flux[bad_px_mask] = 1
+    sigma[bad_px_mask] = 1E5
+
+    # Setup the list of parameters to pass to our fitting function
+    args = (
+        wave_sci,
+        flux,
+        sigma,
+        trans_telluric,)
+
+    # Do fit
+    ls_fit_dict = least_squares(
+        calc_continuum_optimisation_resid, 
+        params_init, 
+        jac="3-point",
+        args=args,)
+
+    # TODO: Diagnostics
+    pass
+
+    # Normalise by the best-fit continuum
+    poly_coeff = ls_fit_dict["x"]
+    continuum_poly = Polynomial(poly_coeff)
+    continuum = continuum_poly(wave_sci)
+
+    flux_sci_norm = flux_sci / continuum
+    sigma_sci_norm = sigma_sci / continuum
+
+    return flux_sci_norm, sigma_sci_norm, poly_coeff

@@ -8,6 +8,7 @@ import transit.utils as tu
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.ticker as plticker
 import matplotlib.colors as colors
+from tqdm import tqdm
 
 def plot_iteration():
     """
@@ -510,7 +511,8 @@ def plot_epoch_model_comp(
 
 def plot_sysrem_residuals(
     waves,
-    resid,):
+    resid,
+    fig_size=(18,6)):
     """Function to plot a grid of residuals as output from SYSREM. The grid has
     n_rows = n_sysrem_iter, and n_cols = n_spec.
 
@@ -519,21 +521,24 @@ def plot_sysrem_residuals(
     wave: 2D float array
         Wavelength vector of shape [n_spec, n_px]
     
-    resid: 3D float array
-        3D float array of residuals with shape [n_sysrem_iter, n_phase, n_wave]
+    resid: 4D float array
+        3D float array of residuals with shape 
+        [n_sysrem_iter, n_phase, n_spec, n_px]
+
+    fig_size: float array, default: (18,6)
+        Shape of the figure.
     """
     resid = resid.copy()
 
     # Grab dimensions for convenience
-    (n_spec, n_px) = waves.shape
-    (n_sysrem_iter, n_phase, n_px_all) = resid.shape
+    (n_sysrem_iter, n_phase, n_spec, n_px) = resid.shape
 
     plt.close("all")
     fig, axes = plt.subplots(
         nrows=n_sysrem_iter,
         ncols=n_spec,
         #sharex=True,
-        figsize=(18, 6),)
+        figsize=fig_size,)
     
     plt.subplots_adjust(
         left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
@@ -543,25 +548,23 @@ def plot_sysrem_residuals(
         vmin = np.nanmin(resid[sr_iter_i])
         vmax = np.nanmax(resid[sr_iter_i])
 
-        #print(vmin, vmax)
+        desc = "Plotting SYSREM resid for iter #{}".format(sr_iter_i)
 
-        for spec_i in range(n_spec):
+        for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
             # [x_min, x_max, y_min, y_max]
             extent = [np.min(waves[spec_i]), np.max(waves[spec_i]), n_phase, 0]
-            px_low = spec_i * n_px
-            px_high = (spec_i+1) * n_px
            
             axis = axes[sr_iter_i, spec_i]
 
             cmap = axis.imshow(
-                X=resid[sr_iter_i, :, px_low:px_high],
+                X=resid[sr_iter_i, :, spec_i],
                 aspect="auto",
                 interpolation="none",
                 vmin=vmin,
                 vmax=vmax,
-                extent=extent,
+                extent=extent,)
                 #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
-                norm=colors.PowerNorm(gamma=5))
+                #norm=colors.PowerNorm(gamma=5))
 
             axis.tick_params(axis='both', which='major', labelsize="x-small")
             axis.xaxis.set_major_locator(plticker.MultipleLocator(base=4))
@@ -625,8 +628,6 @@ def plot_sysrem_cc_1D(
         # Grab axis for convenience
         axis = axes[sr_iter_i]
 
-        std = np.nanstd(cc_values[sr_iter_i])
-
         # Plot each phase as a separate line
         for phase_i in range(n_phase):
             # Get the colour for this phase
@@ -635,7 +636,7 @@ def plot_sysrem_cc_1D(
 
             axis.plot(
                 cc_rvs,
-                cc_values[sr_iter_i, phase_i],#/std,
+                cc_values[sr_iter_i, phase_i],
                 c=colour,)
 
         axis.tick_params(axis='both', which='major', labelsize="x-small")
@@ -660,7 +661,8 @@ def plot_sysrem_cc_1D(
 
 def plot_sysrem_cc_2D(
     cc_rvs,
-    cc_values,):
+    cc_values,
+    mean_spec_lambdas,):
     """Function to plot a 2D plot of the values obtained by cross correlating
     against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
@@ -675,15 +677,18 @@ def plot_sysrem_cc_2D(
     cc_values: 3D float array
         3D float array of cross correlation results with shape:
         [n_sysrem_iter, n_phase, n_rv_step]
+
+    mean_spec_lambdas: float array
+        Mean values of each spectral segment  shape [n_spec].
     """
     # Grab dimensions for convenience
-    (n_sysrem_iter, n_phase, n_rv_step) = cc_values.shape
+    (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
 
     plt.close("all")
     fig, axes = plt.subplots(
         nrows=n_sysrem_iter,
-        ncols=1,
-        #sharex=True,
+        ncols=n_spec,
+        sharex=True,
         figsize=(18, 6),)
     
     plt.subplots_adjust(
@@ -692,36 +697,43 @@ def plot_sysrem_cc_2D(
     # [x_min, x_max, y_min, y_max]
     extent = [np.min(cc_rvs), np.max(cc_rvs), n_phase, 0]
 
+    # Loop over all SYSREM iterations
     for sr_iter_i in range(n_sysrem_iter):
-        # Grab axis for convenience
-        axis = axes[sr_iter_i]
 
-        cmap = axis.imshow(
-            X=cc_values[sr_iter_i],
-            aspect="auto",
-            interpolation="none",
-            extent=extent,)
-            #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
-            #norm=colors.PowerNorm(gamma=5))
+        desc = "Plotting CC values for SYSREM iter #{}".format(sr_iter_i)
+        
+        # Loop over all spectral segments
+        for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
+            # Grab axis for convenience
+            axis = axes[sr_iter_i, spec_i]
 
-        axis.tick_params(axis='both', which='major', labelsize="x-small")
-        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=10))
-        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=5))
-        #axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
+            cmap = axis.imshow(
+                X=cc_values[sr_iter_i, :, spec_i],
+                aspect="auto",
+                interpolation="none",
+                extent=extent,)
+                #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
+                #norm=colors.PowerNorm(gamma=5))
 
-        # Only show xticks on the bottom
-        if sr_iter_i != n_sysrem_iter-1:
-            axis.set_xticks([])
+            axis.tick_params(axis='both', which='major', labelsize="x-small")
+            axis.xaxis.set_major_locator(plticker.MultipleLocator(base=50))
+            axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=25))
+            axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
 
-        # Show just one colour bar per iteration
-        #ticks_norm = np.arange(0,1.25,0.25)
-        #ticks_rescaled = (ticks_norm * (vmax-vmin) + vmin).astype(int)
+            # Only show titles on the top
+            if sr_iter_i == 0:
+                axis.set_title(
+                    label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
+                    fontsize="x-small")
 
-        #fig.subplots_adjust(right=0.8)
-        divider = make_axes_locatable(axis)
-        cb_ax = divider.append_axes("right", size="1%", pad="1%")
+            # Only show xticks on the bottom
+            if sr_iter_i != n_sysrem_iter-1:
+                axis.set_xticks([])
+            else:
+                axis.set_xlabel("RV Shift (km/s)", fontsize="x-small")
 
-        #cb_ax = fig.add_axes([0.9, 0.05, 0.025, 0.9])  # [L, B, W, H]
-        cbar = fig.colorbar(cmap, cax=cb_ax,)
-        #cbar.ax.set_yticklabels(ticks_rescaled)
-        #cbar.set_label("Mean Wavelength of Spectral Segment")
+            # Only show yticks on the left
+            if spec_i != 0:
+                    axes[sr_iter_i, spec_i].set_yticks([])
+            else:
+                axis.set_ylabel("Phase (#)", fontsize="x-small")

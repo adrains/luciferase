@@ -237,6 +237,7 @@ def run_sysrem(
 def cross_correlate_sysrem_resid(
     waves,
     sysrem_resid,
+    sigma_spec,
     template_wave,
     template_spec,
     cc_rv_step=1,
@@ -252,6 +253,10 @@ def cross_correlate_sysrem_resid(
     sysrem_resid: 4D float array
         Combined (i.e. for multiple spectral segments) set of SYSREM residuals
         of shape [n_sysrem_iter, n_phase, n_spec, n_px].
+
+    sigma_spec: 3D float array
+        Normalised uncertainties for the spectral datacube of shape
+        [n_phase, n_spec, n_px].
 
     template_wave, template_spec: 1D float array
         Wavelength scale and spectrum of template spectrum to be interpolated 
@@ -282,10 +287,11 @@ def cross_correlate_sysrem_resid(
     # Intiialise output array
     cc_values = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
 
-    # Initialise template spectrum interpolator
+    # Initialise template spectrum interpolator. Make sure to subtract 1 from
+    # the template spectrum so both it and the residuals fluctuate about zero.
     temp_interp = interp1d(
         x=template_wave,
-        y=template_spec,
+        y=template_spec-1,
         bounds_error=False,
         fill_value=np.nan,)
 
@@ -309,14 +315,22 @@ def cross_correlate_sysrem_resid(
                 tspec_rv_shift = temp_interp(wave_rv_shift)
 
                 # Tile this to all phases
-                tspec_tiled = np.tile(tspec_rv_shift, n_phase).reshape(
-                    (n_phase, n_px))
+                spec_3D = np.broadcast_to(tspec_rv_shift[None,:], (n_phase, n_px))
+                
+                # Enforce the the phase direction is the same
+                ss = set(spec_3D[:,1024])
+                assert len(ss) == 1
 
-                # Cross correlate
-                cc_values[sysrem_iter_i, :, spec_i, rv_i] = \
-                    np.nansum(
-                        sysrem_resid[sysrem_iter_i, :, spec_i] * tspec_tiled,
-                        axis=1)
+                #tspec_tiled = np.tile(tspec_rv_shift, n_phase).reshape(
+                #    (n_phase, n_px))
+
+                # Calculate the cross correlation weighted by the uncertainties
+                resid = sysrem_resid[sysrem_iter_i, :, spec_i]
+                sigma = sigma_spec[:, spec_i, :]
+                cc_val = np.nansum(resid * spec_3D / sigma**2, axis=1)
+
+                # Store
+                cc_values[sysrem_iter_i, :, spec_i, rv_i] = cc_val
 
     # Normalise by median along rv dimension
     #cc_medians = np.nanmedian(cc_values, axis=2)
