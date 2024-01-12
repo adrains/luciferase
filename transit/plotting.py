@@ -562,9 +562,10 @@ def plot_sysrem_residuals(
                 interpolation="none",
                 vmin=vmin,
                 vmax=vmax,
-                extent=extent,)
+                extent=extent,
                 #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
-                #norm=colors.PowerNorm(gamma=5))
+                #norm=colors.PowerNorm(gamma=5),
+                cmap="PRGn")
 
             axis.tick_params(axis='both', which='major', labelsize="x-small")
             axis.xaxis.set_major_locator(plticker.MultipleLocator(base=4))

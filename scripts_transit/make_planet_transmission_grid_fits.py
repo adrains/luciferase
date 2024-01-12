@@ -79,6 +79,7 @@ for model_i, model_path in enumerate(all_model_paths):
     has_molecules = []
     
     # Extract molecules from path
+    # Assumed format: <planet>_Trans_<mol_1>+<mol_2>+<mol_n.txt
     molecules_in_fn = model_path.split("/")[-1].split("_")[-1][:-4].split("+")
 
     for molecule in MOLECULES:

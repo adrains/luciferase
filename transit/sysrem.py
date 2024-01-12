@@ -14,8 +14,10 @@ def clean_and_compute_initial_resid(
     spectra,
     e_spectra,
     bad_px_mask_init,
-    sigma_threshold_phase=5.0,
-    sigma_threshold_spectral=6.0,):
+    mjds,
+    sigma_threshold_phase=6.0,
+    sigma_threshold_spectral=6.0,
+    n_max_phase_bad_px=5,):
     """Function to clean a spectral data cube prior to running SYSREM. We sigma
     clip along the phase dimension (i.e. the time series of each pixel) as well
     as along the spectral dimension. 
@@ -35,6 +37,8 @@ def clean_and_compute_initial_resid(
     bad_px_mask_init: 2D float array
         Bad px mask of shape [n_phase, n_px].
 
+    mjds: TODO
+    
     sigma_threshold_phase: float, default: 5.0
         The sigma clipping threshold for when sigma clipping along the *phase*
         dimension. Note that this used for both lower and upper bound clipping.
@@ -43,6 +47,8 @@ def clean_and_compute_initial_resid(
         The sigma clipping threshold for when sigma clipping along the 
         *spectral* dimension. Note that we only sigma clip on the upper bound
         so as to not remove deep spectral features.
+
+    n_max_phase_bad_px: TODO
 
     Returns
     -------
@@ -68,9 +74,42 @@ def clean_and_compute_initial_resid(
     sc_mask_phase = np.full_like(bad_px_mask_init, False)
 
     for px_i in range(n_px):
-        sc_mask_phase[:,px_i] = sigma_clip(
+        # Compute mask for px i
+        bad_phase_mask = sigma_clip(
             data=flux[:,px_i],
             sigma=sigma_threshold_phase,).mask
+        
+        # If we have more than the threshold number of bad px, mask out the
+        # entire column
+        if np.sum(bad_phase_mask) > n_max_phase_bad_px:
+            sc_mask_phase[:,px_i] = True
+
+        # Otherwise interpolate the missing values using the times as X values
+        # instead of simply the pixel number
+        else:
+            # Flux interpolator
+            interp_px_time_series_flux = interp1d(
+                x=mjds,
+                y=flux[:,px_i],
+                bounds_error=False,
+                fill_value=np.nan,)
+            
+            # Sigma interpolator
+            interp_px_time_series_err = interp1d(
+                x=mjds,
+                y=e_spectra[:,px_i],
+                bounds_error=False,
+                fill_value=np.nan,)
+            
+            # Interpolate and update
+            flux[:,px_i][bad_phase_mask] = \
+                interp_px_time_series_flux(mjds[bad_phase_mask])
+            
+            e_spectra[:,px_i][bad_phase_mask] = \
+                interp_px_time_series_err(mjds[bad_phase_mask])
+            
+            # Update the bad px mask to just have nan values (i.e. filled)
+            sc_mask_phase[:,px_i] = np.isnan(flux[:,px_i])
         
     # Sigma clip along the spectral dimension. Note that since we're clipping
     # along the spectral dimension, we only clip the *upper* bounds so as to
@@ -101,6 +140,7 @@ def run_sysrem(
     e_spectra,
     bad_px_mask,
     n_iter,
+    mjds,
     tolerance=1E-6,
     max_converge_iter=100,
     diff_method="max",):
@@ -139,6 +179,8 @@ def run_sysrem(
 
     n_iter: int
         The number of SYSREM iterations to run.
+    
+    mjds: TODO
 
     tolerance: float, default: 1E-6
         The convergence threshold for a given SYSREM iteration.
@@ -178,20 +220,23 @@ def run_sysrem(
 
     # Use bad px mask to clean input array and compute initial residual vector
     resid_init, flux, e_flux = clean_and_compute_initial_resid(
-        spectra, e_spectra, bad_px_mask)
+        spectra, e_spectra, bad_px_mask, mjds)
 
     # Store median subtracted residuals
     resid_all[0] = resid_init
+    e_flux = e_flux.T
 
     # Run SYSREM
     for sr_iter_i in range(n_iter):
         print("-"*10, "Iter #{}".format(sr_iter_i+1), "-"*10, sep="\n")
         # Initialise vectors
         cc = np.zeros(n_px)     # gradient
-        aa = np.ones(n_phase)   # airmasses
+        aa = np.ones(n_phase)   # "airmasses"
 
-        # Grab a temporary handle for the current set of residuals
-        resid = resid_all[sr_iter_i]
+        # Grab a temporary handle for the current set of residuals.
+        # Note that we're going to use the transpose here to match Stephanie 
+        # Douglas' (and Ansgar Wehrhahn's) convention.
+        resid = resid_all[sr_iter_i].T.copy()
 
         # Iterate until convergence for cc an aa vectors
         converge_step_i = 0
@@ -199,13 +244,13 @@ def run_sysrem(
 
         while converge_step_i < max_converge_iter and not has_converged:
             # Comnpute an estimate for c for converge_step_i
-            c_num = np.nansum(aa * (resid / e_flux**2).T, axis=1,)
-            c_den = np.nansum(aa ** 2 / e_flux.T**2, axis=1,)
+            c_num = np.nansum(aa * (resid / e_flux**2), axis=1,)
+            c_den = np.nansum(aa ** 2 / e_flux**2, axis=1,)
             cc_est = np.divide(c_num, c_den,)
 
             # Compute an estimate for a at converge_step_i
-            a_num = np.nansum(cc_est[:, None] * (resid / e_flux**2).T, axis=0,)
-            a_den = np.nansum(cc_est[:, None] ** 2 / e_flux.T**2, axis=0,)
+            a_num = np.nansum(cc_est[:, None] * (resid / e_flux**2), axis=0,)
+            a_den = np.nansum(cc_est[:, None] ** 2 / e_flux**2, axis=0,)
             aa_est = np.divide(a_num, a_den,)
 
             # Calculate diff
@@ -228,7 +273,7 @@ def run_sysrem(
 
         # We've converged, compute our new vector of residuals
         systematic = cc[:, None] * aa[None, :]
-        resid_all[sr_iter_i+1] = resid - systematic.T
+        resid_all[sr_iter_i+1] = (resid - systematic).T
 
     # We've completed all iterations, return
     return resid_all
@@ -315,14 +360,12 @@ def cross_correlate_sysrem_resid(
                 tspec_rv_shift = temp_interp(wave_rv_shift)
 
                 # Tile this to all phases
-                spec_3D = np.broadcast_to(tspec_rv_shift[None,:], (n_phase, n_px))
+                spec_3D = np.broadcast_to(
+                    tspec_rv_shift[None,:], (n_phase, n_px))
                 
                 # Enforce the the phase direction is the same
                 ss = set(spec_3D[:,1024])
                 assert len(ss) == 1
-
-                #tspec_tiled = np.tile(tspec_rv_shift, n_phase).reshape(
-                #    (n_phase, n_px))
 
                 # Calculate the cross correlation weighted by the uncertainties
                 resid = sysrem_resid[sysrem_iter_i, :, spec_i]
@@ -331,14 +374,6 @@ def cross_correlate_sysrem_resid(
 
                 # Store
                 cc_values[sysrem_iter_i, :, spec_i, rv_i] = cc_val
-
-    # Normalise by median along rv dimension
-    #cc_medians = np.nanmedian(cc_values, axis=2)
-    #cc_medians_tiled = np.tile(cc_medians, n_rv_steps)
-    #cc_medians_final = np.moveaxis(
-    #    cc_medians_tiled.reshape((n_sysrem_iter,n_rv_steps,n_phase)), 1, 2)
-    
-    #cc_vals_norm = cc_values / cc_medians_final
 
     # All done, return our array of cross correlation results
     return cc_rvs, cc_values

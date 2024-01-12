@@ -77,7 +77,8 @@ RESAMPLING_FAC = 12
 # Poisson statistics is only valid if the units of flux are in raw counts, vs
 # the result of a median/mean/weighted average combination of frames. Percent
 # uncertainty should be used for visualising CRIRES+ master reductions.
-USE_PC_UNCERTAINTY_INSTEAD_OF_SNR = True
+# TODO: unimplemented currently
+#USE_POISSON_UNCERTAINTY_INSTEAD_OF_PIPELINE_SNR = True
 
 # This is the default list of files within the provided directory to work with
 EXTRACTED_FILES = [
@@ -261,14 +262,17 @@ for folder in folders:
                 if obs.spectra_1d[spec_i].seeing_arcsec > FWHM_GOOD_TRESHOLD:
                     fwhm_above_threshold = True
 
-                # Determine our data quality measure: either SNR or % err
-                if USE_PC_UNCERTAINTY_INSTEAD_OF_SNR:
-                    e_flux = obs.spectra_1d[spec_i].sigma
-                    pc_err = np.nanmedian(e_flux) / np.nanmedian(flux) * 100
-                    leg_label = r"{} ($\sigma$~{:0.2f}%)".format(label, pc_err)
-                else:
-                    snr = int(np.nanmedian(flux) / np.sqrt(np.nanmedian(flux)))
-                    leg_label = "{} (S/N~{:0.0f})".format(label, snr)
+                # Report the SNR based on Poisson uncertainties
+                #if USE_POISSON_UNCERTAINTY_INSTEAD_OF_PIPELINE_SNR:
+                #    snr = int(np.nanmedian(flux) / np.sqrt(np.nanmedian(flux)))
+                #    leg_label = "{} (S/N~{:0.0f})".format(label, snr)
+
+                # Report the SNR based on the pipeline uncertainties
+                # TODO: properly implement the scaled Poisson uncertainties
+                # (i.e. scale counts by NDIT, NEXP, NABCYCLES, and GAIN)
+                sigma = obs.spectra_1d[spec_i].sigma
+                snr = np.nanmedian(flux) / np.nanmedian(sigma)
+                leg_label = "{} (S/N~{:0.0f})".format(label, snr)
 
                 # Plot the slit function for A and B frames
                 if label in ["A", "B"]:

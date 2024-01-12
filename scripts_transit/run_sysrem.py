@@ -6,7 +6,6 @@ import transit.utils as tu
 import transit.simulator as sim
 import luciferase.spectra as ls
 import transit.sysrem as sr
-import matplotlib.pyplot as plt
 import transit.plotting as tplt
 import luciferase.utils as lu
 from PyAstronomy.pyasl import instrBroadGaussFast
@@ -133,12 +132,17 @@ else:
 # SYSREM
 #------------------------------------------------------------------------------
 print("Running SYSREM...")
-resid_all = np.zeros((ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
+resid_all = np.full((ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
 
 # Run SYSREM on one spectral segment at a time
 for spec_i in range(n_spec):
+    fmt_txt = "\nSpectral segment {:0.0f}, λ~{:0.0f} nm\n".format(
+            spec_i, np.mean(waves[spec_i]))
+    print("-"*80, fmt_txt, "-"*80,sep="")
+    
     # Skip entirely nan segments
-    if np.nansum(fluxes_norm[:,spec_i,:]) == 0:
+    if spec_i in ss.segments_to_mask_completely:
+        print("\tSkipping...\n")
         continue
 
     resid = sr.run_sysrem(
@@ -146,6 +150,7 @@ for spec_i in range(n_spec):
         e_spectra=sigmas_norm[:,spec_i,:],
         bad_px_mask=bad_px_mask_3D[:,spec_i,:],
         n_iter=ss.n_sysrem_iter,
+        mjds=transit_info_list[ss.transit_i]["mjd_mid"].values,
         tolerance=ss.sysrem_convergence_tol,
         max_converge_iter=ss.sysrem_max_convergence_iter,
         diff_method=ss.sysrem_diff_method,)
