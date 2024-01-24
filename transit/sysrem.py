@@ -17,7 +17,8 @@ def clean_and_compute_initial_resid(
     mjds,
     sigma_threshold_phase=6.0,
     sigma_threshold_spectral=6.0,
-    n_max_phase_bad_px=5,):
+    n_max_phase_bad_px=5,
+    do_clip_spectral_dimension=False,):
     """Function to clean a spectral data cube prior to running SYSREM. We sigma
     clip along the phase dimension (i.e. the time series of each pixel) as well
     as along the spectral dimension. 
@@ -71,16 +72,18 @@ def clean_and_compute_initial_resid(
     # Sigma clip along phase dimension. Note that here we're doing both upper
     # *and* lower bound clipping.
     # TODO: we eventually want to interpolate along the spectral dimension
+    
     sc_mask_phase = np.full_like(bad_px_mask_init, False)
 
     for px_i in range(n_px):
-        # Compute mask for px i
+        # Sigma clip along the phase dimension to compute the bad pixel mask 
+        # for px i
         bad_phase_mask = sigma_clip(
             data=flux[:,px_i],
             sigma=sigma_threshold_phase,).mask
         
         # If we have more than the threshold number of bad px, mask out the
-        # entire column
+        # entire column (i.e. mask out px_i)
         if np.sum(bad_phase_mask) > n_max_phase_bad_px:
             sc_mask_phase[:,px_i] = True
 
@@ -110,16 +113,20 @@ def clean_and_compute_initial_resid(
             
             # Update the bad px mask to just have nan values (i.e. filled)
             sc_mask_phase[:,px_i] = np.isnan(flux[:,px_i])
+
+            # HACK: this should always be 0 right?
+            assert np.sum(np.isnan(flux[:,px_i])) == 0
         
     # Sigma clip along the spectral dimension. Note that since we're clipping
     # along the spectral dimension, we only clip the *upper* bounds so as to
     # not remove absorption features.
     sc_mask_spec = np.full_like(bad_px_mask_init, False)
 
-    for phase_i in range(n_phase):
-        sc_mask_spec[phase_i,:] = sigma_clip(
-            data=flux[phase_i,:],
-            sigma_upper=sigma_threshold_spectral,).mask
+    if do_clip_spectral_dimension:
+        for phase_i in range(n_phase):
+            sc_mask_spec[phase_i,:] = sigma_clip(
+                data=flux[phase_i,:],
+                sigma_upper=sigma_threshold_spectral,).mask
         
     # Combine bad px masks
     bad_px_mask = np.logical_or(
@@ -143,7 +150,9 @@ def run_sysrem(
     mjds,
     tolerance=1E-6,
     max_converge_iter=100,
-    diff_method="max",):
+    diff_method="max",
+    sigma_threshold_phase=6.0,
+    sigma_threshold_spectral=6.0,):
     """Function to run the iterative SYSREM algorithm on a set of fluxes and 
     uncertainties. Note that this only runs on a single spectral segment at a
     time.
@@ -220,7 +229,12 @@ def run_sysrem(
 
     # Use bad px mask to clean input array and compute initial residual vector
     resid_init, flux, e_flux = clean_and_compute_initial_resid(
-        spectra, e_spectra, bad_px_mask, mjds)
+        spectra=spectra,
+        e_spectra=e_spectra,
+        bad_px_mask_init=bad_px_mask,
+        mjds=mjds,
+        sigma_threshold_phase=sigma_threshold_phase,
+        sigma_threshold_spectral=sigma_threshold_spectral,)
 
     # Store median subtracted residuals
     resid_all[0] = resid_init

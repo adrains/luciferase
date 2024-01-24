@@ -40,6 +40,16 @@ scale_components = []
 
 line = "-"*80
 
+# Print summary
+print(line, "\nSimulation Settings\n", line, sep="")
+if ss.target_snr is None:
+    print("\tSNR\t\tinf")
+else:
+    print("\tSNR\t\t{:0.0f}".format(ss.target_snr))
+print("\tBoost Fac\t{:0.0f}x".format(ss.planet_transmission_boost_fac))
+print("\tBlaze Corr\t{}".format(ss.correct_for_blaze))
+print("\tScale Vec\t{}\n".format(ss.scale_vector_method))
+
 # Run separately for each transit
 for transit_i in range(ss.n_transit):
     print(line, "\nModelling transit #{}\n".format(transit_i), line, sep="")
@@ -111,10 +121,14 @@ for trans_i in range(ss.n_transit):
 # Save results to fits
 # -----------------------------------------------------------------------------
 # Construct save file name
-if ss.target_snr is None or ss.target_snr.upper() == "NONE":
-    target_snr = np.inf
-else:
+if type(ss.target_snr) == float or type(ss.target_snr) == int:
     target_snr = ss.target_snr
+
+elif ss.target_snr is None or ss.target_snr.upper() == "NONE":
+    target_snr = np.inf
+
+else:
+    raise Exception("Something went wrong")
 
 fn_label = "{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
     ss.label, ss.planet_transmission_boost_fac, target_snr)
@@ -123,7 +137,7 @@ fn_label = "{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
 tu.save_transit_info_to_fits(
     waves=waves,
     obs_spec_list=model_flux_list,
-    sigmas_list=model_sigma_list,
+    sigmas_list=model_flux_list,
     n_transits=ss.n_transit,
     detectors=det,
     orders=orders,

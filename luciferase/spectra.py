@@ -3074,13 +3074,17 @@ def continuum_normalise_all_spectra_with_telluric_model(
             sigmas_sci_norm[phase_i, spec_i] = sigma_norm
             poly_coeff_all[phase_i, spec_i] = poly_coeff
 
+            # -----------------------------------------------------------------
+            # Diagnostic plot
+            # -----------------------------------------------------------------
             # Plot normalised spectrum
             norm_ax.plot(
                 waves_sci[spec_i],
                 flux_norm,
                 linewidth=0.5,
                 c="k",
-                alpha=0.9)
+                alpha=0.9,
+                label="Normalised Flux",)
             
             # Overplot telluric transmission
             norm_ax.plot(
@@ -3088,7 +3092,8 @@ def continuum_normalise_all_spectra_with_telluric_model(
                 trans_telluric,
                 linewidth=0.5,
                 c="r",
-                alpha=0.9)
+                alpha=0.9,
+                label="Telluric Transmission",)
             
             # Overplot stellar template used for masking
             norm_ax.plot(
@@ -3096,7 +3101,17 @@ def continuum_normalise_all_spectra_with_telluric_model(
                 spec_stellar,
                 linewidth=0.5, 
                 c="g",
-                alpha=0.9)
+                alpha=0.9,
+                label="Stellar Template")
+            
+            # Overplot stellar template used for masking
+            norm_ax.plot(
+                waves_sci[spec_i],
+                trans_telluric*spec_stellar,
+                linewidth=0.5, 
+                c="b",
+                alpha=0.9,
+                label="Stellar + Telluric")
 
             # On separate panel plot best-fit continuum polynomials
             continuum_poly = Polynomial(poly_coeff)
@@ -3114,6 +3129,18 @@ def continuum_normalise_all_spectra_with_telluric_model(
                 c="r",
                 alpha=0.9)
 
+    # Plot (unique) legend and adjust linewidths
+    handles, labels = norm_ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+
+    leg = norm_ax.legend(
+        by_label.values(),
+        by_label.keys(),
+        fontsize="small",
+        loc="lower center",
+        ncol=4,)
+
+    #plt.legend(loc="upper center",)
     plt.tight_layout()
     plt.savefig("plots/sysrem_telluric_norm.pdf")
 
@@ -3211,7 +3238,7 @@ def continuum_normalise_spectrum_with_telluric_model(
         wave_sci,
         flux,
         sigma,
-        trans_telluric,)
+        trans_telluric*spec_stellar,)
 
     # Do fit
     ls_fit_dict = least_squares(

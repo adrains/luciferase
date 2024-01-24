@@ -78,6 +78,17 @@ bad_px_mask_3D = np.tile(
 for spec_i in ss.segments_to_mask_completely:
     bad_px_mask_3D[:,spec_i,:] = np.full((n_phase, n_px), True)
 
+# DEBUGGING: Drop segments
+if ss.do_drop_segments:
+    # Slice arrays
+    waves = waves[ss.segments_to_keep, :]
+    fluxes_norm = fluxes_norm[:, ss.segments_to_keep,]
+    sigmas_norm = sigmas_norm[:, ss.segments_to_keep, :]
+    bad_px_mask_3D = bad_px_mask_3D[:,ss.segments_to_keep,]
+
+    # Update dimensions
+    (n_phase, n_spec, n_px) = fluxes_norm.shape
+
 #------------------------------------------------------------------------------
 # Import planet spectra
 #------------------------------------------------------------------------------
@@ -141,7 +152,7 @@ for spec_i in range(n_spec):
     print("-"*80, fmt_txt, "-"*80,sep="")
     
     # Skip entirely nan segments
-    if spec_i in ss.segments_to_mask_completely:
+    if spec_i in ss.segments_to_mask_completely and not ss.do_drop_segments:
         print("\tSkipping...\n")
         continue
 
@@ -153,11 +164,15 @@ for spec_i in range(n_spec):
         mjds=transit_info_list[ss.transit_i]["mjd_mid"].values,
         tolerance=ss.sysrem_convergence_tol,
         max_converge_iter=ss.sysrem_max_convergence_iter,
-        diff_method=ss.sysrem_diff_method,)
+        diff_method=ss.sysrem_diff_method,
+        sigma_threshold_phase=ss.sigma_threshold_phase,
+        sigma_threshold_spectral=ss.sigma_threshold_spectral,)
     
     resid_all[:,:,spec_i,:] = resid
 
 tplt.plot_sysrem_residuals(waves, resid_all)
+
+#assert False
 
 #------------------------------------------------------------------------------
 # Run Cross Correlation

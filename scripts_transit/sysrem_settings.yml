@@ -6,8 +6,13 @@
 # Data Settings
 #------------------------------------------------------------------------------
 # Which data cube to load
-label: "simulated_R100000_wasp107_trans_boost_x100_SNR_inf"
+#label: "simulated_R100000_wasp107_trans_boost_x1000_SNR_200"
+#label: "simulated_R100000_wasp107_trans_boost_x100_SNR_200"
 #label: "simulated_R100000_wasp107_trans_boost_x10_SNR_200"
+
+label: "simulated_R100000_wasp107_trans_boost_x1000_SNR_inf"
+#label: "simulated_R100000_wasp107_trans_boost_x100_SNR_inf"
+#label: "simulated_R100000_wasp107_trans_boost_x10_SNR_inf"
 #label: "wasp107"
 
 save_path: ""
@@ -39,16 +44,25 @@ planet_spec_fits: "data/W107b_spec_H2O_main_iso_CO_all_iso_clear_flux_R200000.fi
 #------------------------------------------------------------------------------
 # SYSREM Settings
 #------------------------------------------------------------------------------
+# Sigma thresholds for sigma clipping
+sigma_threshold_phase: 5.0
+sigma_threshold_spectral: 5.0
+
 # Which transit to run on.
 # TODO: note that this will probably eventually be removed, but now is useful
 # for testing.
 transit_i: 0
 
 # Number of iterations to run SYSREM for
-n_sysrem_iter: 10
+n_sysrem_iter: 5
 
 # These segments will be masked out completely. For K2148 this is 2.0-2.07um
 segments_to_mask_completely: [2, 3, 4]
+
+# Alternatively, for testing purposes we can just plain cut drop the number
+# of segments to speed things up.
+do_drop_segments: True
+segments_to_keep: [15, 16, 17]
 
 # Set to true if we want to test things by cross-correlating with a telluric
 # template spectrum rather than one from a planet

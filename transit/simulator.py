@@ -1119,11 +1119,9 @@ def simulate_transit_single_epoch(
     r_tel_prim,
     r_tel_cen_ob,
     throughput_json_path,
-    target_snr,
     do_equid_lambda_resample=True,
     fill_throughput_value=0,
     planet_transmission_boost_fac=1,
-    correct_for_blaze=True,
     constant_gain=2,):
     """Simulate a single epoch of a planet during transit by modelling the
     stellar, planetary, and telluric components. This function takes into
@@ -1212,13 +1210,6 @@ def simulate_transit_single_epoch(
         Filepath to the CRIRES+ JSON file containing instrument transfer
         functions as a function of wavelength.
 
-    target_snr: float or None
-        Target SNR such that the median of the brightest spectral segment has
-        SNR = target_snr. Uncertainties are then computed as Poisson
-        uncertainties, and noise applied by sampling from a normal distribution
-        with mean as the scale signal, and width the uncertainties. If set to
-        None, the spectrum is not rescaled and no noise is applied.
-
     do_equid_lambda_resample: boolean, default: True
         Whether to resample wavelength and flux arrays onto a new wavelength
         scale with equidistant lambda sampling prior to broadening. This is
@@ -1231,11 +1222,6 @@ def simulate_transit_single_epoch(
     planet_transmission_boost_fac: float, default: 1
         Whether to artificially boost the strength of planetary absorption by
         some factor for testing. By default set to 1 (i.e. disabled).
-
-    correct_for_blaze: boolean, default: True
-        Whether or not to correct for the effect of the blaze function once
-        we've simulated the complete transfer function and computed 
-        uncertainties.
 
     constant_gain: float, default: 2
         Detector gain to use. TODO: Update this to be more realistic.
@@ -1419,55 +1405,6 @@ def simulate_transit_single_epoch(
     flux_counts = flux_counts_per_sec * transit_epoch["exptime_sec"]
 
     # -------------------------------------------------------------------------
-    # Add noise [Optional], compute uncertainties
-    # -------------------------------------------------------------------------
-    print("\tComputing uncertainties...")
-    # If we've been provided a target SNR, apply noise. We benchmark to be the
-    # median for the order with the most signal and find the scale factor
-    # needed to adjust such that the Poisson uncertainty gives us the desired
-    # SNR, then scale the entire spectrum by that value.
-    if target_snr is not None:
-        # Flux has shape [n_spec, n_wave]
-        max_counts = np.max(np.nanmedian(flux_counts, axis=1))
-
-        # Compute the scale factor as:
-        #  snr_target = counts_orig * scale_fac / sqrt(counts_orig * scale_fac)
-        #  scale_fac = snr_target^2 / counts_orig
-        sf = target_snr**2 / max_counts
-
-        # Scale entire spectrum
-        flux_counts *= sf
-
-        # Compute the uncertainties
-        sigma_counts = flux_counts**0.5
-
-        # Assuming Gaussian uncertainties, resample the spectra to add noise
-        flux_counts = np.random.normal(loc=flux_counts, scale=sigma_counts)
-
-        # Clip this to be >= 0
-        flux_counts = np.clip(flux_counts, a_min=0, a_max=None,)
-
-    # Otherwise no noise, scale factor = 1, Poisson uncertainties
-    else:
-        sf = 1
-        sigma_counts = flux_counts**0.5
-
-    # -------------------------------------------------------------------------
-    # [Optional] Remove the effect of the blaze
-    # -------------------------------------------------------------------------
-    # So that we properly calculate and propagate uncertainties, if we want to
-    # remove the effect of the blaze we do that here (rather than just not
-    # applying it to begin with). By doing it this way our rescaled spectrum
-    # retains the same SNR.
-    if correct_for_blaze:
-        flux_counts, sigma_counts = remove_instrumental_blaze_function(
-            wave=wave_observed,
-            flux=flux_counts,
-            sigma=sigma_counts,
-            throughput_json_path=throughput_json_path,
-            fill_throughput_value=fill_throughput_value,)
-    
-    # -------------------------------------------------------------------------
     # Prepare component spectra
     # -------------------------------------------------------------------------
     # Finally we prepare our 'component' spectra--the uncombined stellar flux,
@@ -1485,16 +1422,8 @@ def simulate_transit_single_epoch(
         wave=wave_observed,
         flux=flux_component,
         gain=constant_gain,) * transit_epoch["exptime_sec"]
-    
-    if correct_for_blaze:
-        flux_component_counts, _ = remove_instrumental_blaze_function(
-            wave=wave_observed,
-            flux=flux_component_counts,
-            sigma=np.zeros_like(flux_component_counts),
-            throughput_json_path=throughput_json_path,
-            fill_throughput_value=fill_throughput_value,)
 
-    component_spectra["stellar_flux"] = flux_component_counts * sf
+    component_spectra["stellar_flux"] = flux_component_counts
     
     # Tellurics
     component_spectra["telluric_tau"] = tau_obs
@@ -1502,8 +1431,19 @@ def simulate_transit_single_epoch(
     # Planet
     component_spectra["planet_trans"] = planet_trans_obs
 
+    # -------------------------------------------------------------------------
+    # Final Sanity Check
+    # -------------------------------------------------------------------------
+    # Something has gone wrong if we have an all nan vector, so raise an
+    # exception just in case.
+    if (np.sum(~np.isnan(flux_counts)) == 0
+        or np.sum(~np.isnan(component_spectra["stellar_flux"])) == 0
+        or np.sum(~np.isnan(component_spectra["telluric_tau"])) == 0
+        or np.sum(~np.isnan(component_spectra["planet_trans"])) == 0):
+        raise ValueError("All nan vector detected!")
+
     # All done
-    return flux_counts, sigma_counts, component_spectra
+    return flux_counts, component_spectra
 
 
 def simulate_transit_multiple_epochs(
@@ -1727,7 +1667,7 @@ def simulate_transit_multiple_epochs(
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}...".format(epoch_i))
-        flux_counts, sigma_counts, _ = simulate_transit_single_epoch(
+        flux_counts, _ = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
@@ -1743,14 +1683,68 @@ def simulate_transit_multiple_epochs(
             r_tel_prim=r_tel_prim,
             r_tel_cen_ob=r_tel_cen_ob,
             do_equid_lambda_resample=do_equid_lambda_resample,
-            target_snr=target_snr,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
-            planet_transmission_boost_fac=planet_transmission_boost_fac,
-            correct_for_blaze=correct_for_blaze,)
+            planet_transmission_boost_fac=planet_transmission_boost_fac,)
 
         fluxes_model_all[epoch_i] = flux_counts
-        sigma_model_all[epoch_i] = sigma_counts
+
+    # -------------------------------------------------------------------------
+    # Add noise [Optional], compute uncertainties
+    # -------------------------------------------------------------------------
+    print("\tComputing uncertainties...")
+    # If we've been provided a target SNR, apply noise. We need to do this here
+    # once we've generated spectra for the entire transit so that our SNR 
+    # scaling preserves flux changes over the transit. We benchmark to the
+    # median for the order with the most signal and find the scale factor
+    # needed to adjust such that the Poisson uncertainty gives us the desired
+    # SNR, then scale the entire spectrum by that value.
+    if target_snr is not None:
+        print("Applying noise...")
+        # Flux has shape [n_phase, n_spec, n_wave], compute median flux for
+        # each order over the entire time series and then scale to the order
+        # with the most flux.
+        median_order_fluxes = \
+            np.nanmedian(np.nanmedian(fluxes_model_all, axis=2), axis=0)
+        max_counts = np.nanmax(median_order_fluxes)
+
+        # Compute the scale factor as:
+        #  snr_target = counts_orig * scale_fac / sqrt(counts_orig * scale_fac)
+        #  scale_fac = snr_target^2 / counts_orig
+        sf = target_snr**2 / max_counts
+
+        # Scale entire spectrum
+        fluxes_model_all *= sf
+
+        # Compute the uncertainties
+        sigma_counts = fluxes_model_all**0.5
+
+        # Assuming Gaussian uncertainties, resample the spectra to add noise
+        fluxes_model_all = \
+            np.random.normal(loc=fluxes_model_all, scale=sigma_counts)
+
+        # Clip this to be >= 0
+        fluxes_model_all = np.clip(fluxes_model_all, a_min=0, a_max=None,)
+
+    # Otherwise no noise, scale factor = 1, Poisson uncertainties
+    else:
+        sf = 1
+        sigma_model_all = fluxes_model_all**0.5
+
+    # -------------------------------------------------------------------------
+    # [Optional] Remove the effect of the blaze
+    # -------------------------------------------------------------------------
+    # So that we properly calculate and propagate uncertainties, if we want to
+    # remove the effect of the blaze we do that here (rather than just not
+    # applying it to begin with). By doing it this way our rescaled spectrum
+    # retains the same SNR.
+    if correct_for_blaze:
+        fluxes_model_all, sigma_model_all = remove_instrumental_blaze_function(
+            wave=wave_observed,
+            flux=fluxes_model_all,
+            sigma=sigma_model_all,
+            throughput_json_path=throughput_json_path,
+            fill_throughput_value=fill_throughput_value,)
 
     # -------------------------------------------------------------------------
     # Prepare component spectra
@@ -1772,7 +1766,7 @@ def simulate_transit_multiple_epochs(
     rest_frame_epoch["v_y_start"] = delta_rv
     rest_frame_epoch["v_y_end"] = 0
     
-    _, _, component_vectors = simulate_transit_single_epoch(
+    _, component_vectors = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
@@ -1788,11 +1782,23 @@ def simulate_transit_multiple_epochs(
             r_tel_prim=r_tel_prim,
             r_tel_cen_ob=r_tel_cen_ob,
             do_equid_lambda_resample=do_equid_lambda_resample,
-            target_snr=target_snr,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
-            planet_transmission_boost_fac=planet_transmission_boost_fac,
-            correct_for_blaze=correct_for_blaze,)
+            planet_transmission_boost_fac=planet_transmission_boost_fac,)
+
+    # [Optional] Apply blaze correction to component spectra
+    if correct_for_blaze:
+        flux_component_counts, _ = remove_instrumental_blaze_function(
+            wave=wave_observed,
+            flux=component_vectors["stellar_flux"],
+            sigma=np.zeros_like(component_vectors["stellar_flux"]),
+            throughput_json_path=throughput_json_path,
+            fill_throughput_value=fill_throughput_value,)
+
+        component_vectors["stellar_flux"] = flux_component_counts
+
+    # Scale component spectra
+    component_vectors["stellar_flux"] *= sf
 
     # Add in scale vector
     component_vectors["scale_vector"] = scale_vector
