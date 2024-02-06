@@ -1122,12 +1122,16 @@ def simulate_transit_single_epoch(
     do_equid_lambda_resample=True,
     fill_throughput_value=0,
     planet_transmission_boost_fac=1,
+    convert_from_transmission_to_radius=True,
     constant_gain=2,):
     """Simulate a single epoch of a planet during transit by modelling the
     stellar, planetary, and telluric components. This function takes into
     account the different velocities of each component, instrumental/velocity
     broadening of spectra, and the instrumental transfer function to return
-    a modelled 'observed' spectrum in units of counts.
+    a modelled 'observed' spectrum in units of counts. 
+
+    Note that this function does *not* return uncertainties, as it is best
+    to compute those once all epochs of a transit have been modelled.
 
     We use the same formalism to the Aronson Method here, in that we model:
      - The stellar flux (doppler shift gamma)
@@ -1149,6 +1153,14 @@ def simulate_transit_single_epoch(
     since we'll be dropping the resolution by ~half, but might be worth
     considering resampling to finer wavelength scale before doing any
     broadening.
+
+    HACK: we currently assume that the planet always blocks a fraction of the 
+    total flux equivalent to Rp/R*, despite the fact this isn't physically the
+    case. I guess to do this properly you'd need to interpolate the stellar
+    flux in x, y, and flux, then do an integral over the area blocked by the
+    planet.
+
+    TODO: change all mention of the planet 'transmission'.
 
     Parameters
     ----------
@@ -1228,8 +1240,8 @@ def simulate_transit_single_epoch(
 
     Returns
     -------
-    flux_counts, sigma_counts: float array
-        Modelled flux and sigma arrays corresponding to wavelengths of shape 
+    flux_counts: float array
+        Modelled flux array corresponding to wavelengths of shape 
         [n_spec, n_wave].
 
     component_spectra: dict of float arrays
@@ -1270,6 +1282,7 @@ def simulate_transit_single_epoch(
     # Planet *is* transiting
     # -------------------------------------------------------------------------
     # Only do next two steps if planet is actually in-transit at the mid-point
+    # TODO: is this assumpton correct?
     if transit_epoch["is_in_transit_mid"]:
         # ---------------------------------------------------------------------
         # Planet flux
@@ -1284,6 +1297,39 @@ def simulate_transit_single_epoch(
         norm_trans_planet = trans_planet / np.max(trans_planet)
         tau_planet = -np.log(norm_trans_planet) * planet_transmission_boost_fac
         trans_planet = np.exp(-tau_planet)
+
+        # TODO: temporary compatability HACK
+        # If we've been given the planet spectrum in the form of a transmission
+        # spectrum, we want to convert this to an effective radius. 
+        # 
+        # Per FL, the formula to calculate the transmission spectrum is:
+        #   trans = 1 - ((modelspectrum + planet.Rp)**2  / planet.Rs**2)
+        #
+        # Meaning the reverse is:
+        #   radius = Rs * (1-trans)^0.5 - Rp
+        if convert_from_transmission_to_radius:
+            r_e = const.R_earth   # Earth radii in metres
+            r_sun = const.R_sun   # Solar radii in metres
+
+            # Compute planet transmission radius as a function of wavelength
+            Rp_re =  syst_info.loc["r_planet_rearth", "value"]
+            Rs_re = \
+                (syst_info.loc["r_star_rsun", "value"] * r_sun / r_e).value
+           
+            # NOTE: the sign here is important on Rp_re....FL might have gotten
+            # it wrong? Surely with a tranmission of 1 the planet has have
+            # radius equal to itself?
+            Rs_re_eff = Rs_re * np.sqrt(1 - trans_planet) + Rp_re
+
+        # Otherwise already assume that the planet spectrum is in the right
+        # format
+        else:
+            Rs_re_eff = trans_planet
+
+        # Now compute the planet/star area ratio as a function of radius
+        area_star = np.pi * Rs_re **2
+        area_planet_eff = np.pi * Rs_re_eff **2
+        planet_blocking_frac_eff = area_planet_eff / area_star
 
         # Smear planet flux. The physically realistic way to do this is create
         # and combine flux from number of 'sub-exposures' where each is shifted
@@ -1300,27 +1346,34 @@ def simulate_transit_single_epoch(
         if smear_R < instr_resolving_power:
             print("Warning--smeared R is < instrument R.")
 
-        planet_trans_smeared = instrBroadGaussFast(
+        planet_blocking_frac_smeared = instrBroadGaussFast(
             wvl=wave_planet,
-            flux=trans_planet,
+            flux=planet_blocking_frac_eff,
             resolution=smear_R,
             equid=do_equid_lambda_resample,)
 
-        # Doppler shift planet transmission to velocity δ_j, broaden to
+        # Doppler shift planet blocking fraction to velocity δ_j, broaden to
         # instrumental resolution, and interpolate to instrumental scale
-        planet_trans_obs = shift_spec_and_convert_to_instrumental_scale(
+        planet_blocking_frac_obs = shift_spec_and_convert_to_instrumental_scale(
             wave_old=wave_planet,
-            flux_old=planet_trans_smeared,
+            flux_old=planet_blocking_frac_smeared,
             wave_obs=wave_observed,
             doppler_shift=transit_epoch["delta"],
             instr_resolving_power=instr_resolving_power,
             do_equid_lambda_resample=do_equid_lambda_resample,)
-
+        
         # ---------------------------------------------------------------------
-        # Blocked stellar flux (assuming an entirely opaque planet)
+        # Blocked stellar flux (per unit area)
         # ---------------------------------------------------------------------
         print("\tSimulating blocked flux...")
         # Interpolate flux to the mu value of the planet centre
+        #
+        # Since we're assuming that the planet shadow is composed of flux of
+        # only a single mu value, we want to scale this spectrum such that it
+        # represents the integrated flux per unit are of the star. Then we can
+        # freely scale this with planet_blocking_frac_obs to get the blocked
+        # flux.
+        #
         # TODO: at small planet sizes this is a valid approximation, but the
         # better solution would be to integrate the flux of an arbitrary circle
         # with radius r_planet and central coordinates x and y within the 
@@ -1330,16 +1383,10 @@ def simulate_transit_single_epoch(
             mus=mus_marcs,
             mu_selected=transit_epoch["mu_mid"],)
         
-        # Scale this flux such that it represents the blocked flux
-        r_e = const.R_earth.value   # Earth radii in metres
-        r_sun = const.R_sun.value   # Solar radii in metres
-
-        r_p = syst_info.loc["r_planet_rearth", "value"] * r_e
-        r_s = syst_info.loc["r_star_rsun", "value"] * r_sun
-
+        # Scale this spectrum using the total integrated flux of the star such
+        # that it represents the flux per unit area
         flux_at_mu_integrated = simps(x=wave_marcs, y=flux_at_mu)
-        area_ratio = (transit_epoch["planet_area_frac_mid"] * r_p**2 / r_s**2)
-        scale_fac = area_ratio * flux_total_integrated / flux_at_mu_integrated
+        scale_fac = flux_total_integrated / flux_at_mu_integrated
         flux_shadow_opaque = flux_at_mu * scale_fac
 
         # Doppler shift stellar flux to velocity β_j, broaden to instrumental
@@ -1357,7 +1404,7 @@ def simulate_transit_single_epoch(
     # -------------------------------------------------------------------------
     else:
         print("\tPlanet not transiting")
-        planet_trans_obs = 0
+        planet_blocking_frac_obs = 0
         flux_shadow_opaque_obs = 0
 
     # -------------------------------------------------------------------------
@@ -1378,7 +1425,7 @@ def simulate_transit_single_epoch(
     flux_model_ob = calc_model_flux(
         stellar_flux=stellar_flux_obs,
         telluric_tau=tau_obs,
-        planet_trans=planet_trans_obs,
+        planet_trans=planet_blocking_frac_obs,
         shadow_flux_opaque=flux_shadow_opaque_obs,
         airmass=transit_epoch["airmass"],
         scale=scale_val,)
@@ -1429,7 +1476,7 @@ def simulate_transit_single_epoch(
     component_spectra["telluric_tau"] = tau_obs
 
     # Planet
-    component_spectra["planet_trans"] = planet_trans_obs
+    component_spectra["planet_trans"] = planet_blocking_frac_obs
 
     # -------------------------------------------------------------------------
     # Final Sanity Check
@@ -1475,6 +1522,10 @@ def simulate_transit_multiple_epochs(
     """Simulates an entire transit with many epochs using multiple calls to
     simulate_transit_single_epoch. See docstrings of calc_model_flux and
     simulate_transit_single_epoch for more detail.
+
+    TODO: add a warning for or correct the interpolation issues that happen
+    when one of the input spectra is shorter than the observed wavelength
+    range.
 
     Parameters
     ----------

@@ -8,6 +8,8 @@ import luciferase.spectra as ls
 import transit.sysrem as sr
 import transit.plotting as tplt
 import luciferase.utils as lu
+import astropy.units as u
+from astropy import constants as const
 from PyAstronomy.pyasl import instrBroadGaussFast
 
 #------------------------------------------------------------------------------
@@ -172,8 +174,6 @@ for spec_i in range(n_spec):
 
 tplt.plot_sysrem_residuals(waves, resid_all)
 
-#assert False
-
 #------------------------------------------------------------------------------
 # Run Cross Correlation
 #------------------------------------------------------------------------------
@@ -197,6 +197,7 @@ cc_vals_subbed = cc_values - cc_values_median
 
 # Combine all segments into single mean CCF
 cc_values_mean = np.nanmean(cc_values, axis=2)
+cc_values_sum = np.nansum(cc_values, axis=2)
 
 # Plot cross RV vs correlation value in a separate panel in for each SYSREM
 # iteration. We colour code each line by the phase number.
@@ -204,7 +205,13 @@ tplt.plot_sysrem_cc_1D(cc_rvs, cc_values_mean,)
 
 # Instead plot the cross correlation as a 2D map (RV vs phase) where the colour
 # bar is the cross correlation value.
-tplt.plot_sysrem_cc_2D(cc_rvs, cc_vals_subbed, np.mean(waves,axis=1))
+planet_rvs = \
+    transit_info_list[ss.transit_i]["delta"].values*const.c.cgs.to(u.km/u.s)
+tplt.plot_sysrem_cc_2D(
+    cc_rvs,
+    cc_vals_subbed,
+    np.mean(waves,axis=1),
+    planet_rvs=planet_rvs,)
 
 # Plot the Kp vs Vsys map
 Kp_steps, Kp_vsys_map = sr.compute_Kp_vsys_map(

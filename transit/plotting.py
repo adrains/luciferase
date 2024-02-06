@@ -685,7 +685,8 @@ def plot_sysrem_cc_1D(
 def plot_sysrem_cc_2D(
     cc_rvs,
     cc_values,
-    mean_spec_lambdas,):
+    mean_spec_lambdas,
+    planet_rvs=None,):
     """Function to plot a 2D plot of the values obtained by cross correlating
     against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
@@ -703,6 +704,9 @@ def plot_sysrem_cc_2D(
 
     mean_spec_lambdas: float array
         Mean values of each spectral segment  shape [n_spec].
+
+    planet_rvs: 1D float array or None, default: None
+        Array of planet RVs of shape [n_phase].
     """
     # Grab dimensions for convenience
     (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
@@ -713,6 +717,10 @@ def plot_sysrem_cc_2D(
         ncols=n_spec,
         sharex=True,
         figsize=(18, 6),)
+    
+    # For consistency, ensure we have a 2D array of axes (even if we don't)
+    if n_spec == 1:
+        axes = axes[:,None]
     
     plt.subplots_adjust(
         left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
@@ -739,8 +747,8 @@ def plot_sysrem_cc_2D(
                 #norm=colors.PowerNorm(gamma=5))
 
             axis.tick_params(axis='both', which='major', labelsize="x-small")
-            axis.xaxis.set_major_locator(plticker.MultipleLocator(base=50))
-            axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=25))
+            axis.xaxis.set_major_locator(plticker.MultipleLocator(base=10))
+            axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=5))
             axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
 
             # Only show titles on the top
@@ -760,3 +768,7 @@ def plot_sysrem_cc_2D(
                     axes[sr_iter_i, spec_i].set_yticks([])
             else:
                 axis.set_ylabel("Phase (#)", fontsize="x-small")
+
+            # Plot planet trace if we have it
+            if planet_rvs is not None:
+                axis.plot(planet_rvs, np.arange(n_phase), "--", color="white",)
