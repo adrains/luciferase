@@ -685,8 +685,10 @@ def plot_sysrem_cc_1D(
 def plot_sysrem_cc_2D(
     cc_rvs,
     cc_values,
-    mean_spec_lambdas,
-    planet_rvs=None,):
+    mean_spec_lambdas=None,
+    planet_rvs=None,
+    fig_size=(18, 6),
+    plot_label="",):
     """Function to plot a 2D plot of the values obtained by cross correlating
     against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
@@ -702,11 +704,17 @@ def plot_sysrem_cc_2D(
         3D float array of cross correlation results with shape:
         [n_sysrem_iter, n_phase, n_rv_step]
 
-    mean_spec_lambdas: float array
+    mean_spec_lambdas: float array or None, default: None
         Mean values of each spectral segment  shape [n_spec].
 
     planet_rvs: 1D float array or None, default: None
         Array of planet RVs of shape [n_phase].
+    
+    fig_size: float tuple, default: (18, 6)
+        Size of the figure.
+
+    plot_label: str, default: ""
+        Unique identifier label to add to plot filename.
     """
     # Grab dimensions for convenience
     (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
@@ -716,7 +724,7 @@ def plot_sysrem_cc_2D(
         nrows=n_sysrem_iter,
         ncols=n_spec,
         sharex=True,
-        figsize=(18, 6),)
+        figsize=fig_size,)
     
     # For consistency, ensure we have a 2D array of axes (even if we don't)
     if n_spec == 1:
@@ -751,8 +759,8 @@ def plot_sysrem_cc_2D(
             axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=5))
             axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
 
-            # Only show titles on the top
-            if sr_iter_i == 0:
+            # Only show titles on the top (and if we've been given them)
+            if sr_iter_i == 0 and mean_spec_lambdas is not None:
                 axis.set_title(
                     label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
                     fontsize="x-small")
@@ -772,3 +780,16 @@ def plot_sysrem_cc_2D(
             # Plot planet trace if we have it
             if planet_rvs is not None:
                 axis.plot(planet_rvs, np.arange(n_phase), "--", color="white",)
+
+    if plot_label == "":
+        plt.savefig("plots/crosscorr_2D.pdf")
+        plt.savefig("plots/crosscorr_2D.png", dpi=300)
+    else:
+        plt.savefig("plots/crosscorr_2D_{}.pdf".format(plot_label))
+        plt.savefig("plots/crosscorr_2D_{}.png".format(plot_label), dpi=300)
+
+
+def plot_kp_vsys_map():
+    """
+    """
+    pass

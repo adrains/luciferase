@@ -186,6 +186,10 @@ cc_rvs, cc_values = sr.cross_correlate_sysrem_resid(
     cc_rv_step=ss.cc_rv_step,
     cc_rv_lims=ss.cc_rv_lims,)
 
+
+# ------
+# Correct the per-segment cc
+# ------
 # Subtract minimum value for each [sysrem_i, phase_i, spec_i]
 # HACK: Currently the cross-correlation peak isn't hugely significant over the
 # 'background', meaning that to see anything we need to subtract the median
@@ -195,32 +199,54 @@ cc_values_median = np.broadcast_to(
     np.nanmedian(cc_values, axis=3)[:,:,:,None], cc_values.shape)
 cc_vals_subbed = cc_values - cc_values_median
 
+# ------
+# Correct the total cc
+# ------
+cc_values_total = np.nansum(cc_values, axis=2)[:,:,None,:]
+cc_values_total_median = np.broadcast_to(
+    np.nanmedian(cc_values_total, axis=3)[:,:,:,None], cc_values_total.shape)
+cc_vals_total_subbed = cc_values_total - cc_values_total_median
+
 # Combine all segments into single mean CCF
-cc_values_mean = np.nanmean(cc_values, axis=2)
-cc_values_sum = np.nansum(cc_values, axis=2)
+#cc_values_mean = np.nanmean(cc_values, axis=2)
+#cc_values_sum = np.nansum(cc_values, axis=2)
 
 # Plot cross RV vs correlation value in a separate panel in for each SYSREM
 # iteration. We colour code each line by the phase number.
-tplt.plot_sysrem_cc_1D(cc_rvs, cc_values_mean,)
+#tplt.plot_sysrem_cc_1D(cc_rvs, cc_values_mean,)
 
 # Instead plot the cross correlation as a 2D map (RV vs phase) where the colour
 # bar is the cross correlation value.
 planet_rvs = \
     transit_info_list[ss.transit_i]["delta"].values*const.c.cgs.to(u.km/u.s)
+
+# First plot the cross-correlation one order at a time
 tplt.plot_sysrem_cc_2D(
-    cc_rvs,
-    cc_vals_subbed,
-    np.mean(waves,axis=1),
-    planet_rvs=planet_rvs,)
+    cc_rvs=cc_rvs,
+    cc_values=cc_vals_subbed,
+    mean_spec_lambdas=np.mean(waves,axis=1),
+    planet_rvs=planet_rvs,
+    plot_label=ss.label,)
+
+# Now plot the combined cross-correlation
+tplt.plot_sysrem_cc_2D(
+    cc_rvs=cc_rvs,
+    cc_values=cc_vals_total_subbed,
+    mean_spec_lambdas=None,
+    planet_rvs=planet_rvs,
+    fig_size=(6,6),
+    plot_label="comb_{}".format(ss.label),)
+
+assert False
 
 # Plot the Kp vs Vsys map
 Kp_steps, Kp_vsys_map = sr.compute_Kp_vsys_map(
     cc_rvs=cc_rvs,
-    cc_values=cc_values_mean,
+    cc_values=cc_vals_total_subbed[:,:,0,:],
     transit_info=transit_info_list[ss.transit_i],
     syst_info=syst_info,
     Kp_lims=ss.Kp_lims,
     Kp_step=ss.Kp_step,)
 
 # Plot Kp-Vsys map
-pass
+tplt.plot_kp_vsys_map()
