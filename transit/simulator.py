@@ -1855,3 +1855,59 @@ def simulate_transit_multiple_epochs(
     component_vectors["scale_vector"] = scale_vector
 
     return fluxes_model_all, sigma_model_all, component_vectors
+
+
+def make_sim_info_df(sim_settings_obj,):
+    """Create a pandas dataframe to record the simulation settings for a given
+    simulation. This can be passed to transit.utils.save_transit_info_to_fits
+    to save as a fits table.
+
+    Parameters
+    ----------
+    sim_settings_ob: transit.utils.YAMLSettings obj
+        YAMLSettings object containing attributes for each of the simulation
+        settings we want to save.
+
+    Returns
+    -------
+    sim_info: pandas dataframe
+        Pandas dataframe version of the simulation settings.
+    """
+    # Shorter handle for convenience
+    ss = sim_settings_obj
+
+    # Note that fits table objects cannot have non-str objects, so we need to
+    # make sure to not have 'None' in the table.
+    if ss.target_snr is None:
+        snr = "inf"
+    else:
+        snr = ss.target_snr
+
+    data = [
+        ["n_transit", ss.n_transit],
+        ["base_ob_info", ss.fits_load_dir],
+        ["marcs_fits", ss.marcs_fits],
+        ["planet_spec", ss.planet_spec_fits],
+        ["throughput_json_path", ss.throughput_json_path],
+        ["instr_resolving_power", ss.instr_resolving_power],
+        ["do_equid_lambda_resample", ss.do_equid_lambda_resample],
+        ["fill_throughput_value", ss.fill_throughput_value],
+        ["tau_fill_value", ss.tau_fill_value],
+        ["correct_for_blaze", ss.correct_for_blaze],
+        ["scale_vector_method", ss.scale_vector_method],
+        ["savgol_window_frac_size", ss.savgol_window_frac_size],
+        ["savgol_poly_order", ss.savgol_poly_order],
+        ["do_use_uniform_stellar_spec", ss.do_use_uniform_stellar_spec],
+        ["do_use_uniform_telluric_spec", ss.do_use_uniform_telluric_spec],
+        ["do_use_uniform_planet_spec", ss.do_use_uniform_planet_spec],
+        ["planet_transmission_boost_fac", ss.planet_transmission_boost_fac],
+        ["target_snr", snr],]
+    
+    # Insert Molecfit info
+    for mf_i, mf in enumerate(ss.molecfit_fits):
+        data.insert(4+mf_i, ["molecfit_fits_{}".format(mf_i), mf])
+
+    sim_info = pd.DataFrame(data=data, columns=["setting", "value"], dtype=str)
+    sim_info.set_index("setting", inplace=True)
+
+    return sim_info

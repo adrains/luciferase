@@ -949,7 +949,8 @@ def save_transit_info_to_fits(
     transit_info_list,
     syst_info,
     fits_save_dir,
-    label,):
+    label,
+    sim_info=None,):
     """Saves prepared wavelength, spectra, sigma, detector, order, transit, and
     planet information in a single multi-extension fits file ready for use for
     modelling with the Aronson method.
@@ -1025,6 +1026,10 @@ def save_transit_info_to_fits(
     label: string
         Label to be included in the filename of format
         transit_data_{}.fits where {} is the label.
+
+    sim_info: pandas DataFrame, default: None
+        Pandas DataFrame containing the simulation settings if we're saving the
+        output of a simulation. Not saved if None.
     """
     # Intialise HDU List
     hdu = fits.HDUList()
@@ -1074,6 +1079,12 @@ def save_transit_info_to_fits(
         transit_tab.header["EXTNAME"] = (
             "TRANSIT_INFO_{}".format(transit_i), "Observation info table")
         hdu.append(transit_tab)
+
+    # [optional] HDU N: table of simulation settings
+    if sim_info is not None:
+        sim_tab = fits.BinTableHDU(Table.from_pandas(sim_info.reset_index()))
+        sim_tab.header["EXTNAME"] = ("SIM_INFO", "Simulation settings table")
+        hdu.append(sim_tab)
 
     # Done, save
     label = label.replace(" ", "").replace("-", "")

@@ -133,6 +133,9 @@ else:
 fn_label = "{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
     ss.label, ss.planet_transmission_boost_fac, target_snr)
 
+# Construct fits table of simulation information
+sim_info = sim.make_sim_info_df(ss)
+
 # Save results to new fits file
 tu.save_transit_info_to_fits(
     waves=waves,
@@ -144,7 +147,8 @@ tu.save_transit_info_to_fits(
     transit_info_list=transit_info_list,
     syst_info=syst_info,
     fits_save_dir=ss.save_path,
-    label=fn_label,)
+    label=fn_label,
+    sim_info=sim_info,)
 
 # Add the component spectra.  Note that we assume that flux and planet trans
 # is constant across transits, but that our tau  and scale vectors vary.
