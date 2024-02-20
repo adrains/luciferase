@@ -1281,8 +1281,15 @@ def simulate_transit_single_epoch(
     # -------------------------------------------------------------------------
     # Planet *is* transiting
     # -------------------------------------------------------------------------
-    # Only do next two steps if planet is actually in-transit at the mid-point
-    # TODO: is this assumpton correct?
+    # Only run if the planet is in transit at the midpoint of the exposure.
+    # This assumption is incorrect, but should only affect ~1 exposure on
+    # either side of transit, and only a very minor amount since the planet
+    # will only be blocking a very small fraction of the star.
+    #
+    # TODO: to do this properly, we probably need to calculate the average
+    # blocking fraction of the planet, which isn't necessarily the same as the
+    # blocking fraction at the midpoint. Our current approach should be a good
+    # enough approximation for now.
     if transit_epoch["is_in_transit_mid"]:
         # ---------------------------------------------------------------------
         # Planet flux
@@ -1330,6 +1337,13 @@ def simulate_transit_single_epoch(
         area_star = np.pi * Rs_re **2
         area_planet_eff = np.pi * Rs_re_eff **2
         planet_blocking_frac_eff = area_planet_eff / area_star
+
+        # Account for the fact that the planet might be only partially in
+        # transit. This multiplication is one of three kinds of values:
+        # 1) frac = 0       -->    not transiting (and we shouldn't be here)
+        # 2) 0 < frac < 1   -->    partial transit (blocking frac gets smaller)
+        # 3) frac = 1       -->    full transit (multiplication does nothing)
+        planet_blocking_frac_eff *= transit_epoch["planet_area_frac_mid"]
 
         # Smear planet flux. The physically realistic way to do this is create
         # and combine flux from number of 'sub-exposures' where each is shifted
@@ -1805,6 +1819,7 @@ def simulate_transit_multiple_epochs(
     # than....this.
     rest_frame_epoch = transit_epoch.copy()
     rest_frame_epoch["is_in_transit_mid"] = True
+    rest_frame_epoch["planet_area_frac_mid"] = 1    # Don't zero planet signal!
     rest_frame_epoch["mu_mid"] = 1
     rest_frame_epoch["airmass"] = 1
     rest_frame_epoch["gamma"] = 0
