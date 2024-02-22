@@ -5,6 +5,9 @@
 ### Data Cube Preparation
 `prepare_transit_model_fits.py` prepares a cleaned .fits data cube of shape [n_transit, n_phase, n_spectrum, n_px] on a uniform wavelength grid given a set of reduced CRIRES+ transits. This requires a CSV file containing information about the planet, but otherwise runs entirely from the reduced CRIRES+ data.
 
+### Planet Template Preparation
+`make_planet_transmission_grid_fits.py` combines separate planet atmosphere templates modelled (i.e. with petitRADTRANS) with different molecular species into a single fits datacube. The datacube has three HDUs ('WAVE', 'SPEC', and 'TEMPLATE_INFO') and this datacube is the expected format of planet spectra expected by the simulator.
+
 ### Simulated Transmission Spectroscopy 'Observations'
 `simulate_transit.py` generates synthetic transit observations using the 'header' information (e.g. RA, DEC, observatory, exposure, barcyentric velocity) from an observed transit and known planet properties (e.g. orbital elements, radius, mass) to generate synthetic observations given a set of stellar spectrum, planet spectrum, and telluric transmission files. The details of this simulation are controlled from `simulation_settings.yml`.
 
