@@ -15,11 +15,11 @@ from PyAstronomy.pyasl import instrBroadGaussFast
 # Settings
 #------------------------------------------------------------------------------
 # Molecules to look for. These will be extracted from the file names.
-MOLECULES = ["CH4", "CO", "CO2", "H2O"]
+MOLECULES = ["CH4", "CO", "CO2", "H2O", "H2S", "NH3"]
 
 # Folder to look for templates. Templates are assumed to already be in the
 # formate of transmission spectra.
-folder = "templates/WASP17b"
+folder = "templates/WASP107b_prt_lbc"
 
 # Any files in this folder with extension as ext are considered templates
 ext = "txt"
@@ -30,7 +30,10 @@ new_resolving_power = 100000
 # Since we've dropped the resolution, we drop the wavelength sampling too.
 wl_downsample_fac = 10
 
-fits_save_name = "WASP17_templates_all_R{}.fits".format(new_resolving_power)
+fits_save_name = "WASP107b_templates_all_R{}.fits".format(new_resolving_power)
+
+# Whether we need to transpose our input planet spectrum or not
+do_transpose_input = True
 
 #------------------------------------------------------------------------------
 # Spectra extraction, convolution, and resampling
@@ -46,7 +49,11 @@ for model_i, model_path in enumerate(all_model_paths):
         model_i+1, len(all_model_paths), model_path))
     
     # Extract spectrum
-    template = np.loadtxt(model_path)
+    if do_transpose_input:
+        template = np.loadtxt(model_path).T
+    else:
+        template = np.loadtxt(model_path)
+
     wave = template[:,0]
     spec = template[:,1]
     
@@ -78,9 +85,9 @@ for model_i, model_path in enumerate(all_model_paths):
     # Store molecular information
     has_molecules = []
     
-    # Extract molecules from path
-    # Assumed format: <planet>_Trans_<mol_1>+<mol_2>+<mol_n.txt
-    molecules_in_fn = model_path.split("/")[-1].split("_")[-1][:-4].split("+")
+    # Extract molecules from path. If we split on '_' then we should be able
+    # to check the list for all our molecules.
+    molecules_in_fn = model_path.split("/")[-1].split("_")
 
     for molecule in MOLECULES:
         if molecule in molecules_in_fn:

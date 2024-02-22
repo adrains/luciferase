@@ -46,6 +46,7 @@ if ss.target_snr is None:
     print("\tSNR\t\tinf")
 else:
     print("\tSNR\t\t{:0.0f}".format(ss.target_snr))
+print("\tSpecies\t\t{}".format(", ".join(ss.species_to_model)))
 print("\tBoost Fac\t{:0.0f}x".format(ss.planet_transmission_boost_fac))
 print("\tBlaze Corr\t{}".format(ss.correct_for_blaze))
 print("\tScale Vec\t{}\n".format(ss.scale_vector_method))
@@ -59,8 +60,8 @@ for transit_i in range(ss.n_transit):
             syst_info=syst_info,
             transit_info=transit_info_list[transit_i],
             marcs_fits=ss.marcs_fits,
-            planet_wave_fits=ss.planet_wave_fits,
-            planet_spec_fits=ss.planet_spec_fits,
+            planet_fits=ss.planet_fits,
+            planet_species_to_model=ss.species_to_model,
             molecfit_fits=ss.molecfit_fits[transit_i],
             throughput_json_path=ss.throughput_json_path,
             target_snr=ss.target_snr,
@@ -130,8 +131,13 @@ elif ss.target_snr is None or ss.target_snr.upper() == "NONE":
 else:
     raise Exception("Something went wrong")
 
-fn_label = "{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
-    ss.label, ss.planet_transmission_boost_fac, target_snr)
+# Construct file name with alphabetical list of species + other important info
+species = ss.species_to_model
+species.sort()
+species_str = "_".join(species)
+
+fn_label = "{}_{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
+    ss.label, species_str, ss.planet_transmission_boost_fac, target_snr)
 
 # Construct fits table of simulation information
 sim_info = sim.make_sim_info_df(ss)
