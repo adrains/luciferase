@@ -20,10 +20,12 @@ save_path = ""
 star_name = "wasp107"
 
 # Location of the 
-planet_properties_file = "transit_scripts/planet_data_wasp107.csv"
+planet_properties_file = "scripts_transit/planet_data_wasp107.csv"
 
 # Data directories where each folder contains observations for a single transit
 planet_root_dirs = [
+    #"/home/arains/gto/220310_WASP107",
+    #"/home/arains/gto/230222_WASP107",
     "/Users/arains/data/220310_WASP107/",
     "/Users/arains/data/230222_WASP107/",
 ]
@@ -57,6 +59,19 @@ for transit_i, trans_dir in enumerate(planet_root_dirs):
     waves, fluxes, sigmas, detectors, orders, transit_info = \
         tu.extract_nodding_time_series(root_dir=trans_dir)
     
+    # Do cross-correlation
+    wave_out, fluxes_corr, sigmas_corr, rvs, ds, cc = tu.regrid_single_night(
+        waves=waves,
+        fluxes=fluxes, 
+        sigmas=sigmas,
+        detectors=detectors,
+        orders=orders,
+        nod_positions=transit_info["nod_pos"].values,
+        reference_nod_pos="A",
+        make_debug_plots=True,
+        interpolation_method="linear",
+        do_rigid_regrid_per_detector=False,)
+
     # TODO: we might need to do a cross correlation and interpolate the A/B
     # frame wavelength scale in cases where the PSF is smaller than the slit 
     # width.

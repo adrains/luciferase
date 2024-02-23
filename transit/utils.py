@@ -427,16 +427,15 @@ def regrid_single_night(
     cc_step_kms=0.5,
     interpolation_method="linear",
     do_sigma_clipping=True,
-    sigma_clip_level=5,
-    make_debug_plots=False,):
+    sigma_clip_level_upper=3,
+    sigma_clip_level_lower=5,
+    make_debug_plots=False,
+    do_rigid_regrid_per_detector=False,
+    edge_px_to_ignore=40,):
     """Function to regrid a single night onto a uniform wavelength scale and
     shift all spectra to the same wavelength frame. This is done by selecting
     either A or B as the reference, and then we use the central phase for that
     nod position as our adopted wavelength scale and reference.
-
-    Note that currently this function does a 'rigid' cross-correlation once for
-    each detector and each phase. This does not seem to be sufficient, however,
-    as only 1-2 orders appear optimally regridded. TODO: fix this.
 
     Parameters
     ----------
@@ -479,6 +478,13 @@ def regrid_single_night(
     make_debug_plots: bool, default: False
         Whether to plot diagnostic plots.
 
+    do_rigid_regrid_per_detector: bool, default: False
+        If true, we use the median RV shift from each detector for regridding.
+        If false, we use the RV shift from each order individually.
+    
+    edge_px_to_ignore: int, default: 40
+        The number of pixels to ignore from the edge of each detector.
+
     Returns
     -------
     wave_out: 2D float array
@@ -486,11 +492,12 @@ def regrid_single_night(
     
     fluxes_corr, sigmas_corr: 3D float array
         Regridded flux and sigma arrays of shape (n_phase, n_spec, n_px).
-        
+    
+    rv_shifts: TODO
+
     doppler_shifts: TODO
     
     cc_values_all: TODO
-    
     """
     # -------------------------------------------------------------------------
     # Setup
@@ -503,13 +510,14 @@ def regrid_single_night(
     fluxes_corr = np.full_like(fluxes, np.nan)
     sigmas_corr = np.full_like(sigmas, np.nan)
 
-    # Initialise output grid of Doppler shifts
-    doppler_shifts = np.full((n_phase, 3), np.nan)
+    # Initialise output grid of rv and doppler shifts
+    rv_shifts = np.full((n_phase, n_spec), np.nan)
+    doppler_shifts = np.full((n_phase, n_spec), np.nan)
 
     # Initialise CC rv steps and grid of CC values
     cc_rvs = np.arange(cc_range_kms[0], cc_range_kms[1], cc_step_kms)
 
-    cc_values_all = np.zeros((n_phase, 3, len(cc_rvs)))
+    cc_values_all = np.zeros((n_phase, n_spec, len(cc_rvs)))
 
     # -------------------------------------------------------------------------
     # Loop over all detectors
@@ -524,6 +532,10 @@ def regrid_single_night(
         waves_d = waves[:, det_mask]
         fluxes_d = fluxes[:, det_mask]
         sigmas_d = sigmas[:, det_mask]
+
+        # Count the number of orders on this detector (this may not be the same
+        # for all detectors)
+        n_ord = fluxes_d.shape[1]
 
         # Our reference phase will be the middle (in time) phase for either A
         # or B frames (depending on the value of reference_nod_pos)
@@ -544,9 +556,15 @@ def regrid_single_night(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 ref_bad_px_mask = sigma_clip(
-                    data=spec_ref, sigma_upper=sigma_clip_level).mask
+                    data=spec_ref, 
+                    sigma_upper=sigma_clip_level_upper,
+                    sigma_lower=sigma_clip_level_lower).mask
         else:
             ref_bad_px_mask = np.full_like(spec_ref, False)
+
+        if edge_px_to_ignore > 0:
+            ref_bad_px_mask[:, :edge_px_to_ignore] = True
+            ref_bad_px_mask[:, -edge_px_to_ignore:] = True
 
         # Create an interpolator for the reference spectrum (ignoring bad px)
         interp_ref_flux = interp1d(
@@ -556,77 +574,122 @@ def regrid_single_night(
             bounds_error=False,)
 
         # ---------------------------------------------------------------------
-        # Cross-correlate for all phases
+        # Run separately for each order on this detector
         # ---------------------------------------------------------------------
-        desc = "Cross-correlating for det #{:0.0f}".format(det_i)
+        for ord_i in range(n_ord):
+            # Determine the spectral segment index for ease of indexing
+            spec_ii = np.arange(n_spec)
+            spec_i = spec_ii[det_mask][ord_i]
 
-        for phase_i in tqdm(range(n_phase), desc=desc, leave=False):
-            # Grab vectors for this phase, of shape (n_spec/3, n_px)
-            ww = waves_d[phase_i]
-            ff = fluxes_d[phase_i]
-            ss = sigmas_d[phase_i]
+            # -----------------------------------------------------------------
+            # Cross-correlate for all phases
+            # -----------------------------------------------------------------
+            desc = "Cross-correlating for det #{:0.0f}, ord #{:0.0f}".format(
+                det_i, ord_i)
 
-            # [Optional] Sigma clip the upper bounds to remove cosmics that
-            # might interfere with the cross-correlation. Note that we will
-            # then RV shift the *non-clipped* fluxes for output, rather than
-            # these clipped fluxes
-            mm = np.isnan(ff)
+            for phase_i in tqdm(range(n_phase), desc=desc, leave=False):
+                # Grab vectors for this phase, of shape (n_px)
+                ww = waves_d[phase_i, ord_i]
+                ff = fluxes_d[phase_i, ord_i]
+                ss = sigmas_d[phase_i, ord_i]
 
-            if do_sigma_clipping:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    sci_bad_px_mask = sigma_clip(
-                        data=ff, sigma_upper=sigma_clip_level).mask
-            
-                mm = np.logical_and(mm, sci_bad_px_mask)
+                # [Optional] Sigma clip the upper bounds to remove cosmics that
+                # might interfere with the cross-correlation. Note that we will
+                # then RV shift the *non-clipped* fluxes for output, rather
+                # than these clipped fluxes
+                mm = np.isnan(ff)
 
-            # Initialise cross correlation array for this phase
-            cc_values = np.zeros_like(cc_rvs)
+                if do_sigma_clipping:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        sci_bad_px_mask = sigma_clip(
+                            data=ff,
+                            sigma_upper=sigma_clip_level_upper,
+                            sigma_lower=sigma_clip_level_lower).mask
+                
+                    mm = np.logical_and(mm, sci_bad_px_mask)
 
-            # Run cross correlation
-            for rv_i, rv in enumerate(cc_rvs):
-                # Interpolate reference spectrum to rv
-                flux_ref = \
-                    interp_ref_flux(wave_ref * (1-rv/(const.c.si.value/1000)))
+                # Initialise cross correlation array for this phase
+                cc_values = np.zeros_like(cc_rvs)
 
-                # Compute normalised cross correlation
-                cc_values[rv_i] = (np.nansum(ff[~mm] * flux_ref[~mm]) 
-                    / np.sqrt(np.nansum(ff[~mm]**2)
-                              * np.nansum(flux_ref[~mm]**2)))
+                # Run cross correlation
+                for rv_i, rv in enumerate(cc_rvs):
+                    # Interpolate reference spectrum to rv
+                    flux_ref = interp_ref_flux(
+                        wave_ref[ord_i] * (1-rv/(const.c.si.value/1000)))
 
-            # Determine rv that gives cross correlation maximum
-            rv_opt =  cc_rvs[np.argmax(cc_values)]
+                    # Compute normalised cross correlation
+                    cc_values[rv_i] = (np.nansum(ff[~mm] * flux_ref[~mm]) 
+                        / np.sqrt(np.nansum(ff[~mm]**2)
+                                * np.nansum(flux_ref[~mm]**2)))
 
-            # Compute equivalent doppler shift and store. Note that this has
-            # the opposite sign since we're now shifting the science flux and
-            # not the reference flux.
-            doppler_shifts[phase_i, det_i-1] = \
-                1 + rv_opt/(const.c.si.value/1000)
+                # Determine rv that gives cross correlation maximum
+                rv_opt =  cc_rvs[np.argmax(cc_values)]
+                rv_shifts[phase_i, spec_i] = rv_opt
 
-            # Since we've done this in a rigid way for the whole detector at
-            # once, we can now interpolate the science flux and sigma vectors
-            # (i.e not the reference) into the appropriate frame.
-            interp_sci_flux = interp1d(
-                x=ww.ravel(),
-                y=ff.ravel(),
-                kind=interpolation_method,
-                bounds_error=False,)
-            
-            interp_sci_sigma = interp1d(
-                x=ww.ravel(),
-                y=ss.ravel(),
-                kind=interpolation_method,
-                bounds_error=False,)
+                # Compute equivalent doppler shift and store. Note that this
+                # has the opposite sign since we're now shifting the science
+                # flux and not the reference flux.
+                ds_opt = 1 + rv_opt/(const.c.si.value/1000)
+                doppler_shifts[phase_i, spec_i] = ds_opt
 
-            # Interpolate flux and sigmas using this doppler shift
-            fluxes_corr[phase_i, det_mask] = \
-                interp_sci_flux(ww * doppler_shifts[phase_i, det_i-1])
-            
-            sigmas_corr[phase_i, det_mask] = \
-                interp_sci_sigma(ww * doppler_shifts[phase_i, det_i-1])
+                # Store the cross correlation values
+                cc_values_all[phase_i, spec_i] = cc_values
 
-            # store
-            cc_values_all[phase_i, det_i-1] = cc_values
+                # -------------------------------------------------------------
+                # Do per-order cross correlation
+                # -------------------------------------------------------------
+                # If we're doing a per-order regrid (rather than rigid per
+                # detector) then we need to do the RV shift here
+                if not do_rigid_regrid_per_detector:
+                    interp_sci_flux = interp1d(
+                        x=ww,
+                        y=ff,
+                        kind=interpolation_method,
+                        bounds_error=False,)
+                    
+                    interp_sci_sigma = interp1d(
+                        x=ww,
+                        y=ss,
+                        kind=interpolation_method,
+                        bounds_error=False,)
+
+                    # Interpolate flux and sigmas using this doppler shift
+                    fluxes_corr[phase_i, spec_i] = interp_sci_flux(ww * ds_opt)
+                    sigmas_corr[phase_i, spec_i] = \
+                        interp_sci_sigma(ww * ds_opt)
+
+        # -----------------------------------------------------------------
+        # Or do rigid cross-correlation for this whole detector
+        # -----------------------------------------------------------------
+        # Otherwise we do a rigid regrid per detector now that we've looped
+        # over all orders for this detector.
+        if do_rigid_regrid_per_detector:
+            for phase_i in range(n_phase):
+                # Compute the median shift for this order
+                ds_opt = np.median(doppler_shifts[phase_i, det_mask])
+
+                # Since we've done this in a rigid way for the whole detector
+                # at once, we can now interpolate the science flux and sigma
+                # vectors (i.e not the reference) into the appropriate frame.
+                interp_sci_flux = interp1d(
+                    x=waves_d[phase_i].ravel(),
+                    y=fluxes_d[phase_i].ravel(),
+                    kind=interpolation_method,
+                    bounds_error=False,)
+                
+                interp_sci_sigma = interp1d(
+                    x=waves_d[phase_i].ravel(),
+                    y=sigmas_d[phase_i].ravel(),
+                    kind=interpolation_method,
+                    bounds_error=False,)
+
+                # Interpolate flux and sigmas using this doppler shift
+                fluxes_corr[phase_i, det_mask] = \
+                    interp_sci_flux(waves_d[phase_i] * ds_opt)
+                
+                sigmas_corr[phase_i, det_mask] = \
+                    interp_sci_sigma(waves_d[phase_i] * ds_opt)
 
     # -------------------------------------------------------------------------
     # [Optional] Visualisation for debugging
@@ -649,11 +712,11 @@ def regrid_single_night(
             else:
                 colour = "b"
             
-            for di in range(3):
+            for spec_i in range(n_spec):
                 # Plot the data
                 axis_cc.plot(
                     cc_rvs,
-                    cc_values_all[pi,di],#/np.max(cc_values_all[pi,di]),
+                    cc_values_all[pi,spec_i],#/np.max(cc_values_all[pi,di]),
                     linewidth=0.5,
                     color=colour)
                 
@@ -662,7 +725,7 @@ def regrid_single_night(
                 #model = modeling.models.Gaussian1D()
                 #fitted_model = fitter(model, np.arange(-50,50,0.5), cc[0,0,:])
 
-    return wave_out, fluxes_corr, sigmas_corr, doppler_shifts, cc_values_all
+    return wave_out, fluxes_corr, sigmas_corr, rv_shifts, doppler_shifts, cc_values_all
 
 
 def doppler_shift(x, y, gamma, y2):
