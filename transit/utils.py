@@ -1258,6 +1258,7 @@ def save_transit_info_to_fits(
     syst_info,
     fits_save_dir,
     label,
+    cc_rv_shifts_list=None,
     sim_info=None,):
     """Saves prepared wavelength, spectra, sigma, detector, order, transit, and
     planet information in a single multi-extension fits file ready for use for
@@ -1335,6 +1336,12 @@ def save_transit_info_to_fits(
         Label to be included in the filename of format
         transit_data_{}.fits where {} is the label.
 
+    cc_rv_shifts_list: list of 2D float arrays
+        List (length n_transits) of RV offsets determined by cross correlation
+        for each spectral segment, with each 2D float array having shape 
+        [n_phase_i, n_spec] with n_phase_i being the number of phases observed
+        for transit_i.
+
     sim_info: pandas DataFrame, default: None
         Pandas DataFrame containing the simulation settings if we're saving the
         output of a simulation. Not saved if None.
@@ -1369,24 +1376,33 @@ def save_transit_info_to_fits(
 
     # Loop over all transits
     for transit_i in range(n_transits):
-        # HDU 4 + transit_i*3: observed spectra
+        # HDU 4 + transit_i*4: observed spectra
         spec_img =  fits.PrimaryHDU(obs_spec_list[transit_i])
         spec_img.header["EXTNAME"] = (
             "OBS_SPEC_{}".format(transit_i), "Observed spectra")
         hdu.append(spec_img)
 
-        # HDU 5 + transit_i*3: observed spectra uncertainties
+        # HDU 5 + transit_i*4: observed spectra uncertainties
         sigmas_img =  fits.PrimaryHDU(sigmas_list[transit_i])
         sigmas_img.header["EXTNAME"] = (
             "SIGMAS_{}".format(transit_i), "Observed spectra uncertainties")
         hdu.append(sigmas_img)
 
-        # HDU 6 + transit_i*3: table of information for each phase
+        # HDU 6 + transit_i*4: table of information for each phase
         transit_tab = fits.BinTableHDU(
             Table.from_pandas(transit_info_list[transit_i]))
         transit_tab.header["EXTNAME"] = (
             "TRANSIT_INFO_{}".format(transit_i), "Observation info table")
         hdu.append(transit_tab)
+
+        # [Optional] If we've regridded the data, we can also save the RV
+        # shifts between each detector.
+        if cc_rv_shifts_list is not None:
+            # HDU 7 + transit_i*4:
+            rv_img =  fits.PrimaryHDU(cc_rv_shifts_list[transit_i])
+            rv_img.header["EXTNAME"] = (
+                "CC_RV_{}".format(transit_i), "RV offsets per order from CC.")
+            hdu.append(rv_img)
 
     # [optional] HDU N: table of simulation settings
     if sim_info is not None:
@@ -2184,6 +2200,7 @@ def compute_detector_limits(fluxes):
 def interpolate_wavelength_scale(
     waves,
     fluxes,
+    sigmas,
     px_min,
     px_max,):
     """
@@ -2194,14 +2211,12 @@ def interpolate_wavelength_scale(
     grid. When doing this, the minimum and maximum wavelengths adopted for each
     spectral segment are the maximum possible range shared by *alll* phases.
 
-    TODO: interpolate uncertainties too.
-
     TODO: check interpolation looks sensible.
 
     Parameters
     ----------
-    waves, fluxes: 3D float array
-        Array of wavelength scale or fluxes of shape [n_phase, n_spec, n_px].
+    waves, fluxes, sigmas: 3D float array
+        Wavelength, flux, and sigmas vectors of shape [n_phase, n_spec, n_px].
 
     px_min, px_max: int
         Range of useful detector pixels avoiding bad edge pixels, that is 
@@ -2212,8 +2227,8 @@ def interpolate_wavelength_scale(
     wave_new: 2D float array
         Global wavelength scale of shape [n_spec, n_px].
 
-    obs: 2D float array
-        Regridded flux array of shape [n_phase, n_spec, n_px].
+    obs, obs_sigmas: 2D float array
+        Regridded flux and sigma arrays of shape [n_phase, n_spec, n_px].
     """
     # Grab array dimensions for convenience
     n_phase = fluxes.shape[0]
@@ -2226,8 +2241,9 @@ def interpolate_wavelength_scale(
     # Intialise new wavelength vector common for all phases
     wave_new = np.zeros((n_spec,n_wave))
 
-    # Intialise new flux array with common wavelength scale
+    # Intialise new flux and sigma arrays with common wavelength scale
     obs = fluxes.copy()
+    obs_sigma = sigmas.copy()
 
     # Loop over all spectral segments
     desc = "Interpolating wavelengths for {} spectral segments".format(n_spec)
@@ -2240,8 +2256,9 @@ def interpolate_wavelength_scale(
         # Create a new wavelength scale for this spectral segment
         wave_new[spec_i] = np.arange(n_wave)/n_wave * (wl_max-wl_min) + wl_min
 
-        # Now interpolate the fluxes to this new wavelength scale
+        # Interpolate to new wavelength scale
         for phase_i in range(0, n_phase):
+            # Interpolate fluxes 
             fluxes_2 = bezier_init(
                 x=wave_adopted[phase_i, spec_i],
                 y=fluxes[phase_i, spec_i],)
@@ -2251,8 +2268,19 @@ def interpolate_wavelength_scale(
                 y_a=fluxes[phase_i, spec_i],
                 y2_a=fluxes_2,
                 x_interp=wave_new[spec_i],)
+            
+            # Interpolate sigmas 
+            obs_sigma_2 = bezier_init(
+                x=wave_adopted[phase_i, spec_i],
+                y=sigmas[phase_i, spec_i],)
 
-    return wave_new, obs
+            obs_sigma[phase_i, spec_i] = bezier_interp(
+                x_a=wave_adopted[phase_i, spec_i],
+                y_a=sigmas[phase_i, spec_i],
+                y2_a=obs_sigma_2,
+                x_interp=wave_new[spec_i],)
+
+    return wave_new, obs, obs_sigma
 
 
 def sigma_clip_observations(

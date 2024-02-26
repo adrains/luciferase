@@ -47,6 +47,10 @@ detectors_all = []
 orders_all = []
 transit_info_all = []
 
+# Regridding diagnostic arrays
+cc_rv_shifts_all = []
+cc_ds_shifts_all = []
+
 # Cleaned arrays
 fluxes_cleaned_all = []
 sigmas_cleaned_all = []
@@ -59,7 +63,15 @@ for transit_i, trans_dir in enumerate(planet_root_dirs):
     waves, fluxes, sigmas, detectors, orders, transit_info = \
         tu.extract_nodding_time_series(root_dir=trans_dir)
     
-    # Do cross-correlation
+    # Grab dimensions for convenience
+    (n_phase, n_spec, n_px) = fluxes.shape
+
+    # Regrid this night onto a single wavelength scale and correct offsets in
+    # the wavelength scale over the night and between A/B nodding positions.
+    # rvs and ds are the radial velocities and doppler shifts respectively
+    # found for each spectral segment, but if do_rigid_regrid_per_detector is
+    # True then we simply use the median of this on a per-detector basis for
+    # the regridding.
     wave_out, fluxes_corr, sigmas_corr, rvs, ds, cc = tu.regrid_single_night(
         waves=waves,
         fluxes=fluxes, 
@@ -77,18 +89,23 @@ for transit_i, trans_dir in enumerate(planet_root_dirs):
     # width.
     pass
 
-    # Save all the arrays for this transit
-    waves_all.append(waves)
+    # Save all the arrays for this transit. Note that for convience when using
+    # interpolate_wavelength_scale later we broadcast wave_out to all phases.
+    waves_all.append(np.broadcast_to(wave_out, (n_phase, n_spec, n_px)))
     fluxes_all.append(fluxes)
     sigmas_all.append(sigmas)
     detectors_all.append(detectors)
     orders_all.append(orders)
     transit_info_all.append(transit_info)
 
+    # Store the regridding diagnostics
+    cc_rv_shifts_all.append(rvs)
+    cc_ds_shifts_all.append(ds)
+
 # -----------------------------------------------------------------------------
 # Interpolate all fluxes across phase and transit onto common wavelength scale
 # -----------------------------------------------------------------------------
-# Stack all transits along the phase dimension for regridding purposes.
+# Stack all transits along the phase dimension to regid on inter-night basis
 if N_TRANSITS > 1:
     wave_stacked = np.vstack(waves_all)
     fluxes_stacked = np.vstack(fluxes_all)
@@ -108,9 +125,10 @@ px_min, px_max = tu.compute_detector_limits(fluxes_stacked)
 
 # Interpolate wavelength scale
 print("Interpolating wavelength scale...")
-wave_interp, fluxes_interp = tu.interpolate_wavelength_scale(
+wave_interp, fluxes_interp, sigmas_interp = tu.interpolate_wavelength_scale(
     waves=wave_stacked,
     fluxes=fluxes_stacked,
+    sigmas=sigmas_stacked,
     px_min=px_min,
     px_max=px_max,)
 
@@ -128,7 +146,7 @@ for transit_i in range(N_TRANSITS):
 
     # Extract the fluxes and sigmas for our current transit
     fluxes = fluxes_interp[phase_low:phase_high]
-    sigma = sigmas_stacked[phase_low:phase_high]    # TODO: properly interp
+    sigma = sigmas_interp[phase_low:phase_high]
     transit_info = transit_info_all[transit_i]
 
     # Calculate mus and rvs and add them to our existing dataframes
@@ -185,4 +203,5 @@ tu.save_transit_info_to_fits(
     transit_info_list=transit_info_all,
     syst_info=syst_info,
     fits_save_dir=save_path,
-    label=star_name,)
+    label=star_name,
+    cc_rv_shifts_list=cc_rv_shifts_all,)
