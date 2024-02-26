@@ -43,13 +43,16 @@ line = "-"*80
 # Print summary
 print(line, "\nSimulation Settings\n", line, sep="")
 if ss.target_snr is None:
-    print("\tSNR\t\tinf")
+    print("\tSNR\t\t\tinf")
 else:
-    print("\tSNR\t\t{:0.0f}".format(ss.target_snr))
-print("\tSpecies\t\t{}".format(", ".join(ss.species_to_model)))
-print("\tBoost Fac\t{:0.0f}x".format(ss.planet_transmission_boost_fac))
-print("\tBlaze Corr\t{}".format(ss.correct_for_blaze))
-print("\tScale Vec\t{}\n".format(ss.scale_vector_method))
+    print("\tSNR\t\t\t{:0.0f}".format(ss.target_snr))
+print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_model)))
+print("\tBoost Fac\t\t{:0.0f}x".format(ss.planet_transmission_boost_fac))
+print("\tBlaze Corr\t\t{}".format(ss.correct_for_blaze))
+print("\tScale Vec\t\t{}".format(ss.scale_vector_method))
+print("\tUniform stellar\t\t{}".format(ss.do_use_uniform_stellar_spec))
+print("\tUniform telluric\t{}".format(ss.do_use_uniform_telluric_spec))
+print("\tUniform planet\t\t{}\n".format(ss.do_use_uniform_planet_spec))
 
 # Run separately for each transit
 for transit_i in range(ss.n_transit):
@@ -97,26 +100,6 @@ flux_components = np.array(flux_components)
 telluric_components = np.array(telluric_components)
 planet_components = np.array(planet_components)
 
-# -----------------------------------------------------------------------------
-# Diagnostic plots
-# -----------------------------------------------------------------------------
-# Plot the simulated 'observed' spectra for all epochs
-tplt.plot_all_input_spectra(
-    waves=waves,
-    fluxes_all_list=model_flux_list,
-    transit_info_list=transit_info_list,
-    n_transits=ss.n_transit,)
-
-# Plot the component spectra (one pdf per transit).
-for trans_i in range(ss.n_transit):
-    tplt.plot_component_spectra(
-        waves=waves,
-        fluxes=flux_components[trans_i],
-        telluric_tau=telluric_components[trans_i],
-        planet_trans=planet_components[trans_i],
-        scale_vector=scale_components[trans_i],
-        transit_num=trans_i,
-        star_name=ss.star_name,)
 
 # -----------------------------------------------------------------------------
 # Save results to fits
@@ -136,8 +119,14 @@ species = ss.species_to_model
 species.sort()
 species_str = "_".join(species)
 
-fn_label = "{}_{}_trans_boost_x{:0.0f}_SNR_{:0.0f}".format(
-    ss.label, species_str, ss.planet_transmission_boost_fac, target_snr)
+fn_label = "_".join([
+    "{}".format(ss.label),
+    "{}".format(species_str),
+    "stellar_{:0.0f}".format(int(not ss.do_use_uniform_stellar_spec)),
+    "telluric_{:0.0f}".format(int(not ss.do_use_uniform_telluric_spec)),
+    "planet_{:0.0f}".format(int(not ss.do_use_uniform_planet_spec)),
+    "boost_{:0.0f}".format(ss.planet_transmission_boost_fac),
+    "SNR_{:0.0f}".format(target_snr),])
 
 # Construct fits table of simulation information
 sim_info = sim.make_sim_info_df(ss)
@@ -166,3 +155,24 @@ tu.save_simulated_transit_components_to_fits(
     tau=telluric_components,
     trans=planet_components[0],
     scale=scale_components,)
+
+# -----------------------------------------------------------------------------
+# Diagnostic plots
+# -----------------------------------------------------------------------------
+# Plot the simulated 'observed' spectra for all epochs
+tplt.plot_all_input_spectra(
+    waves=waves,
+    fluxes_all_list=model_flux_list,
+    transit_info_list=transit_info_list,
+    n_transits=ss.n_transit,)
+
+# Plot the component spectra (one pdf per transit).
+for trans_i in range(ss.n_transit):
+    tplt.plot_component_spectra(
+        waves=waves,
+        fluxes=flux_components[trans_i],
+        telluric_tau=telluric_components[trans_i],
+        planet_trans=planet_components[trans_i],
+        scale_vector=scale_components[trans_i],
+        transit_num=trans_i,
+        star_name=ss.star_name,)

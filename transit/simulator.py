@@ -1716,7 +1716,8 @@ def simulate_transit_multiple_epochs(
     # The planet should have constant planet radii with wavelength if we're
     # simulating the transit of a planet without an atmosphere.
     if do_use_uniform_planet_spec:
-        trans_planet = np.ones_like(syst_info.loc["r_planet_rearth", "value"])
+        trans_planet = np.full_like(
+            trans_planet, syst_info.loc["r_planet_rearth", "value"])
     
     # Load telluric spectrum
     telluric_wave, telluric_tau, _ = load_telluric_spectrum(
