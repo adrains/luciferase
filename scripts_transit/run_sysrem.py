@@ -94,51 +94,34 @@ if ss.do_drop_segments:
 #------------------------------------------------------------------------------
 # Import planet spectra
 #------------------------------------------------------------------------------
-# Load in Fabio's grid of planet models
-# TODO: add an option to convert to nm inside the function
-yaml_settings_file = "scripts_transit/transit_model_settings.yml"
-ms = tu.load_yaml_settings(yaml_settings_file)
-
+# Load in petitRADRTRANS datacube of templates
 templ_wave, templ_spec_all, templ_info = \
-    tu.load_transmission_templates_from_fits(fits_file=ms.template_fits)
+    tu.load_transmission_templates_from_fits(fits_file=ss.template_fits)
 
-# Convert to nm
-templ_wave /= 10
-
-# Clip edges
+# Clip edges to avoid edge effects introduced by interpolation
 templ_spec_all = templ_spec_all[:,10:-10]
 templ_wave = templ_wave[10:-10]
 
 molecules = templ_info.columns.values
 
 # Pick a template
-templ_i = 6     # H2O model
-templ_spec = templ_spec_all[templ_i]
+templ_i = 1     # H2O model
 
-# -------------
-# Load in Ansgar's planet spectrum
-wave_planet, trans_planet = sim.load_planet_spectrum(
-    wave_file=ss.planet_wave_fits,
-    spec_file=ss.planet_spec_fits,)
-
-# Convert to nm
-wave_planet /= 10
-
+# The datacube spectra are at R~200,000, so we need to further downsample
 trans_planet_instr = instrBroadGaussFast(
-        wvl=wave_planet,
-        flux=trans_planet,
+        wvl=templ_wave,
+        flux=templ_spec_all[templ_i],
         resolution=100000,
         equid=True,)
 
-# ------------------
-# For testing, we can use the telluric vector to cross correlate against
+# [Optional] For testing, we can use the telluric vector for cross correlation
 if ss.cc_with_telluric:
     wave_template = telluric_wave
     spectrum_template = telluric_trans
 
 # Otherwise run on a planet spectrum
 else:
-    wave_template = wave_planet
+    wave_template = templ_wave
     spectrum_template = trans_planet_instr
 
 #------------------------------------------------------------------------------
@@ -236,8 +219,6 @@ tplt.plot_sysrem_cc_2D(
     planet_rvs=planet_rvs,
     fig_size=(6,6),
     plot_label="comb_{}".format(ss.label),)
-
-assert False
 
 # Plot the Kp vs Vsys map
 Kp_steps, Kp_vsys_map = sr.compute_Kp_vsys_map(
