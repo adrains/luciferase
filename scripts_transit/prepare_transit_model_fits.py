@@ -11,6 +11,7 @@ information necessary to run the Aronson method.
 """
 import numpy as np
 import transit.utils as tu
+import transit.plotting as tplt
 
 # -----------------------------------------------------------------------------
 # Setup and Options
@@ -26,8 +27,10 @@ planet_properties_file = "scripts_transit/planet_data_wasp107.csv"
 planet_root_dirs = [
     #"/home/arains/gto/220310_WASP107",
     #"/home/arains/gto/230222_WASP107",
-    "/Users/arains/data/220310_WASP107/",
-    "/Users/arains/data/230222_WASP107/",
+    #"/Users/arains/data/220310_WASP107/",
+    #"/Users/arains/data/230222_WASP107/",
+    "/Users/arains/data/wasp107b_final/wasp107b_N1_20220310/",
+    "/Users/arains/data/wasp107b_final/wasp107b_N2_20230222/",
 ]
 
 N_TRANSITS = len(planet_root_dirs)
@@ -46,15 +49,15 @@ sigmas_all = []
 detectors_all = []
 orders_all = []
 transit_info_all = []
+nod_positions_all = []
 
-# Regridding diagnostic arrays
-cc_rv_shifts_all = []
-cc_ds_shifts_all = []
-
-# Cleaned arrays
+# Cleaned + split arrays
 fluxes_cleaned_all = []
 sigmas_cleaned_all = []
 bad_px_mask_all = []
+
+cc_rv_shifts_all = []
+cc_ds_shifts_all = []
 
 # Extract data for each transit
 for transit_i, trans_dir in enumerate(planet_root_dirs):
@@ -66,24 +69,6 @@ for transit_i, trans_dir in enumerate(planet_root_dirs):
     # Grab dimensions for convenience
     (n_phase, n_spec, n_px) = fluxes.shape
 
-    # Regrid this night onto a single wavelength scale and correct offsets in
-    # the wavelength scale over the night and between A/B nodding positions.
-    # rvs and ds are the radial velocities and doppler shifts respectively
-    # found for each spectral segment, but if do_rigid_regrid_per_detector is
-    # True then we simply use the median of this on a per-detector basis for
-    # the regridding.
-    wave_out, fluxes_corr, sigmas_corr, rvs, ds, cc = tu.regrid_single_night(
-        waves=waves,
-        fluxes=fluxes, 
-        sigmas=sigmas,
-        detectors=detectors,
-        orders=orders,
-        nod_positions=transit_info["nod_pos"].values,
-        reference_nod_pos="A",
-        make_debug_plots=True,
-        interpolation_method="linear",
-        do_rigid_regrid_per_detector=False,)
-
     # TODO: we might need to do a cross correlation and interpolate the A/B
     # frame wavelength scale in cases where the PSF is smaller than the slit 
     # width.
@@ -91,16 +76,15 @@ for transit_i, trans_dir in enumerate(planet_root_dirs):
 
     # Save all the arrays for this transit. Note that for convience when using
     # interpolate_wavelength_scale later we broadcast wave_out to all phases.
-    waves_all.append(np.broadcast_to(wave_out, (n_phase, n_spec, n_px)))
+    waves_all.append(waves)
     fluxes_all.append(fluxes)
     sigmas_all.append(sigmas)
     detectors_all.append(detectors)
     orders_all.append(orders)
     transit_info_all.append(transit_info)
 
-    # Store the regridding diagnostics
-    cc_rv_shifts_all.append(rvs)
-    cc_ds_shifts_all.append(ds)
+    # For convenience of regridding later, we also save the nod positions
+    nod_positions_all.append(transit_info["nod_pos"].values)
 
 # -----------------------------------------------------------------------------
 # Interpolate all fluxes across phase and transit onto common wavelength scale
@@ -112,25 +96,51 @@ if N_TRANSITS > 1:
     sigmas_stacked = np.vstack(sigmas_all)
     detectors_stacked = np.vstack(detectors_all)
     orders_stacked = np.vstack(orders_all)
+    nod_positions_stacked = np.hstack(nod_positions_all)
 else:
     wave_stacked = waves_all[0]
     fluxes_stacked = fluxes_all[0]
     fluxes_stacked = sigmas_all[0]
     detectors_stacked = detectors_all[0]
     orders_stacked = orders_all[0]
+    nod_positions_stacked = nod_positions_all[0]
+
+# Using the stacked data, regrid onto a single common wavelength scale
+# Regrid the stacked data onto a single wavelength scale and correct offsets in
+# the wavelength scale between A/B nodding positions.rvs and ds are the radial
+# velocities and doppler shifts respectively found for each spectral segment, 
+# but if do_rigid_regrid_per_detector is True then we simply use the median of
+# this on a per-detector basis for the regridding.
+wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, ds_all, cc_all = \
+    tu.regrid_single_night(
+        waves=wave_stacked,
+        fluxes=fluxes_stacked,
+        sigmas=sigmas_stacked,
+        detectors=detectors_stacked,
+        orders=orders_stacked,
+        nod_positions=nod_positions_stacked,
+        reference_nod_pos="A",
+        do_sigma_clipping=True,
+        sigma_clip_level_upper=6,
+        sigma_clip_level_lower=6,
+        make_debug_plots=False,
+        interpolation_method="linear",
+        do_rigid_regrid_per_detector=False,
+        n_ref_div=5,
+        n_orders_to_group=2,)
 
 # Determine bad pixel mask for edge pixels (imin, imax)
-print("Determining pixel limits...")
-px_min, px_max = tu.compute_detector_limits(fluxes_stacked)
+#print("Determining pixel limits...")
+#px_min, px_max = tu.compute_detector_limits(fluxes_stacked)
 
 # Interpolate wavelength scale
-print("Interpolating wavelength scale...")
-wave_interp, fluxes_interp, sigmas_interp = tu.interpolate_wavelength_scale(
-    waves=wave_stacked,
-    fluxes=fluxes_stacked,
-    sigmas=sigmas_stacked,
-    px_min=px_min,
-    px_max=px_max,)
+#print("Interpolating wavelength scale...")
+#wave_interp, fluxes_interp, sigmas_interp = tu.interpolate_wavelength_scale(
+#    waves=wave_stacked,
+#    fluxes=fluxes_stacked,
+#    sigmas=sigmas_stacked,
+#    px_min=px_min,
+#    px_max=px_max,)
 
 # -----------------------------------------------------------------------------
 # Main operation
@@ -145,8 +155,8 @@ for transit_i in range(N_TRANSITS):
     phase_high = phase_low + fluxes_all[transit_i].shape[0]
 
     # Extract the fluxes and sigmas for our current transit
-    fluxes = fluxes_interp[phase_low:phase_high]
-    sigma = sigmas_interp[phase_low:phase_high]
+    fluxes = fluxes_interp_all[phase_low:phase_high]
+    sigma = sigmas_interp_all[phase_low:phase_high]
     transit_info = transit_info_all[transit_i]
 
     # Calculate mus and rvs and add them to our existing dataframes
@@ -165,6 +175,7 @@ for transit_i in range(N_TRANSITS):
     fluxes_cleaned_all.append(fluxes_interp_clipped)
     sigmas_cleaned_all.append(sigma)
     bad_px_mask_all.append(bad_px_mask)
+    cc_rv_shifts_all.append(rvs_all[phase_low:phase_high])
 
     # Update low bound
     phase_low = phase_high
@@ -189,12 +200,16 @@ for spec_i in range(N_SPEC):
 detectors = detectors_stacked[0]
 orders = orders_stacked[0]
 
+# Diagnostic plots
+tplt.plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors)
+tplt.plot_regrid_diagnostics_img(np.vstack(fluxes_cleaned_all), detectors, wave_adopt)
+
 # -----------------------------------------------------------------------------
 # Saving fits
 # -----------------------------------------------------------------------------
 # Save all arrays and dataframes
 tu.save_transit_info_to_fits(
-    waves=wave_interp,
+    waves=wave_adopt,
     obs_spec_list=fluxes_cleaned_all,
     sigmas_list=sigmas_cleaned_all,
     n_transits=N_TRANSITS,

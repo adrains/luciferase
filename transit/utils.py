@@ -431,7 +431,9 @@ def regrid_single_night(
     sigma_clip_level_lower=5,
     make_debug_plots=False,
     do_rigid_regrid_per_detector=False,
-    edge_px_to_ignore=40,):
+    n_orders_to_group=1,
+    edge_px_to_ignore=40,
+    n_ref_div=2,):
     """Function to regrid a single night onto a uniform wavelength scale and
     shift all spectra to the same wavelength frame. This is done by selecting
     either A or B as the reference, and then we use the central phase for that
@@ -484,6 +486,10 @@ def regrid_single_night(
     
     edge_px_to_ignore: int, default: 40
         The number of pixels to ignore from the edge of each detector.
+
+    n_ref_div: TODO
+
+    n_orders_to_group: TODO
 
     Returns
     -------
@@ -542,7 +548,7 @@ def regrid_single_night(
         phases = np.arange(n_phase)
         nod_positions_ref = nod_positions == reference_nod_pos
         phases_ref_pos = phases[nod_positions_ref]
-        phase_ref_i = phases_ref_pos[len(phases_ref_pos)//2]
+        phase_ref_i = phases_ref_pos[len(phases_ref_pos)//n_ref_div]
 
         # Store reference wavelength vector
         wave_out[det_mask] = waves_d[phase_ref_i]
@@ -551,16 +557,18 @@ def regrid_single_night(
         spec_ref = fluxes_d[phase_ref_i]
 
         # [Optional] Sigma clip our reference spectrum to avoid the impact of
-        # bad px on the cross-correlation. 
+        # bad px on the cross-correlation.
+        ref_bad_px_mask = ~np.isfinite(spec_ref)
+
         if do_sigma_clipping:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                ref_bad_px_mask = sigma_clip(
-                    data=spec_ref, 
+                sc_mask = sigma_clip(
+                    data=spec_ref,
                     sigma_upper=sigma_clip_level_upper,
                     sigma_lower=sigma_clip_level_lower).mask
-        else:
-            ref_bad_px_mask = np.full_like(spec_ref, False)
+                
+                ref_bad_px_mask = np.logical_or(ref_bad_px_mask, sc_mask)
 
         if edge_px_to_ignore > 0:
             ref_bad_px_mask[:, :edge_px_to_ignore] = True
@@ -597,8 +605,8 @@ def regrid_single_night(
                 # might interfere with the cross-correlation. Note that we will
                 # then RV shift the *non-clipped* fluxes for output, rather
                 # than these clipped fluxes
-                mm = np.isnan(ff)
-
+                mm = ~np.isfinite(ff)
+                
                 if do_sigma_clipping:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
@@ -642,15 +650,19 @@ def regrid_single_night(
                 # If we're doing a per-order regrid (rather than rigid per
                 # detector) then we need to do the RV shift here
                 if not do_rigid_regrid_per_detector:
+                    # Create a bad px mask
+                    bad_px_sci = np.logical_or(
+                        ~np.isfinite(ff), ~np.isfinite(ff))
+
                     interp_sci_flux = interp1d(
-                        x=ww,
-                        y=ff,
+                        x=ww[~bad_px_sci],
+                        y=ff[~bad_px_sci],
                         kind=interpolation_method,
                         bounds_error=False,)
                     
                     interp_sci_sigma = interp1d(
-                        x=ww,
-                        y=ss,
+                        x=ww[~bad_px_sci],
+                        y=ss[~bad_px_sci],
                         kind=interpolation_method,
                         bounds_error=False,)
 
@@ -659,13 +671,19 @@ def regrid_single_night(
                     sigmas_corr[phase_i, spec_i] = \
                         interp_sci_sigma(ww * ds_opt)
 
-        # -----------------------------------------------------------------
-        # Or do rigid cross-correlation for this whole detector
-        # -----------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # Alternatively do rigid cross-correlation for this whole detector
+        # ---------------------------------------------------------------------
         # Otherwise we do a rigid regrid per detector now that we've looped
         # over all orders for this detector.
         if do_rigid_regrid_per_detector:
+            print("Doing rigid CC")
             for phase_i in range(n_phase):
+                # Create a bad px mask
+                bad_px_sci = np.logical_or(
+                    ~np.isfinite(fluxes_d[phase_i]),
+                    ~np.isfinite(sigmas_d[phase_i]))
+
                 # Compute the median shift for this order
                 ds_opt = np.median(doppler_shifts[phase_i, det_mask])
 
@@ -673,14 +691,14 @@ def regrid_single_night(
                 # at once, we can now interpolate the science flux and sigma
                 # vectors (i.e not the reference) into the appropriate frame.
                 interp_sci_flux = interp1d(
-                    x=waves_d[phase_i].ravel(),
-                    y=fluxes_d[phase_i].ravel(),
+                    x=waves_d[phase_i][bad_px_sci].ravel(),
+                    y=fluxes_d[phase_i][bad_px_sci].ravel(),
                     kind=interpolation_method,
                     bounds_error=False,)
                 
                 interp_sci_sigma = interp1d(
-                    x=waves_d[phase_i].ravel(),
-                    y=sigmas_d[phase_i].ravel(),
+                    x=waves_d[phase_i][bad_px_sci].ravel(),
+                    y=sigmas_d[phase_i][bad_px_sci].ravel(),
                     kind=interpolation_method,
                     bounds_error=False,)
 
@@ -690,6 +708,77 @@ def regrid_single_night(
                 
                 sigmas_corr[phase_i, det_mask] = \
                     interp_sci_sigma(waves_d[phase_i] * ds_opt)
+                
+        # ---------------------------------------------------------------------
+        # Or do a semi-rigid cross-correlation considering a few orders
+        # ---------------------------------------------------------------------
+        # TODO
+        elif n_orders_to_group > 1:
+            print("Grouping every {:0.0f} orders for CC".format(n_orders_to_group))
+            # Grouping the orders together is easy if n_ord is divisible by
+            # n_orders_to_group in which case each order only gets
+            # considered once. If not, at least one order will be considered
+            # multiple times for the very last set.
+            if n_ord % n_orders_to_group == 0:
+                n_set = n_ord // n_orders_to_group
+                uneven_division = False
+            else:
+                n_set = n_set = n_ord // n_orders_to_group + 1
+                uneven_division = True
+
+            # Loop over all phases as normal
+            for phase_i in range(n_phase):
+                # Loop over all order groupings
+                for set_i in range(n_set):
+                    # Determine the lower and upper orders to be considered for
+                    # each grouping. In the case where we have an unequal
+                    # division of groups into the total number of orders, we
+                    # need to give the final group special consideration.
+                    if set_i == n_set-1 and uneven_division:
+                        ord_low = n_ord - n_orders_to_group
+                        ord_high = n_set
+                    else:
+                        ord_low = set_i * n_orders_to_group
+                        ord_high = set_i * n_orders_to_group + n_orders_to_group
+
+                    # Grab references to the waves/fluxes/sigmas for this
+                    # group. They'll have shape [n_orders_to_group, n_px]
+                    wave_group = waves_d[phase_i][ord_low:ord_high]
+                    flux_group = fluxes_d[phase_i][ord_low:ord_high]
+                    sigma_group = sigmas_d[phase_i][ord_low:ord_high]
+
+                    # Create a bad px mask
+                    bad_px_sci = np.logical_or(
+                        ~np.isfinite(flux_group),
+                        ~np.isfinite(sigma_group))
+
+                    # Compute the *mean* doppler shift for this order grouping
+                    ds_opt = np.mean(doppler_shifts[phase_i, det_mask][ord_low:ord_high])
+
+                    # TODO Since we've done this in a rigid way for the whole detector
+                    # at once, we can now interpolate the science flux and sigma
+                    # vectors (i.e not the reference) into the appropriate frame.
+                    interp_sci_flux = interp1d(
+                        x=wave_group[bad_px_sci].ravel(),
+                        y=flux_group[bad_px_sci].ravel(),
+                        kind=interpolation_method,
+                        bounds_error=False,)
+                    
+                    interp_sci_sigma = interp1d(
+                        x=wave_group[bad_px_sci].ravel(),
+                        y=sigma_group[bad_px_sci].ravel(),
+                        kind=interpolation_method,
+                        bounds_error=False,)
+
+                    # Interpolate flux and sigmas using this doppler shift
+                    fluxes_corr[phase_i, det_mask][ord_low:ord_high] = \
+                        interp_sci_flux(wave_group * ds_opt)
+                    
+                    sigmas_corr[phase_i, det_mask][ord_low:ord_high] = \
+                        interp_sci_sigma(wave_group * ds_opt)
+                
+        else:
+            raise Exception("Error--shouldn't be here!")
 
     # -------------------------------------------------------------------------
     # [Optional] Visualisation for debugging
@@ -1358,13 +1447,13 @@ def save_transit_info_to_fits(
     hdu.append(wave_img)
 
     # HDU 1: detectors
-    detector_img =  fits.PrimaryHDU(detectors)
+    detector_img =  fits.PrimaryHDU(detectors.astype("int32"))
     detector_img.header["EXTNAME"] = (
         "DETECTORS", "CRIRES+ detector associated with each spectal segment")
     hdu.append(detector_img)
 
     # HDU 2: orders
-    order_img =  fits.PrimaryHDU(orders)
+    order_img =  fits.PrimaryHDU(orders.astype("int32"))
     order_img.header["EXTNAME"] = (
         "ORDERS", "CRIRES+ grating order associated with each spectal segment")
     hdu.append(order_img)
@@ -1502,8 +1591,8 @@ def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
     with fits.open(fits_file, mode="readonly") as fits_file:
         # Load data constant across transits
         waves = fits_file["WAVES"].data.astype(float)
-        detectors = fits_file["DETECTORS"].data.astype(float)
-        orders = fits_file["ORDERS"].data.astype(float)
+        detectors = fits_file["DETECTORS"].data.astype("int32")
+        orders = fits_file["ORDERS"].data.astype("int32")
         syst_info = Table(fits_file["SYST_INFO"].data).to_pandas()
 
         # Set header for syst_info
@@ -2362,11 +2451,13 @@ def sigma_clip_observations(
             flux = obs_spec[:, spec_i, px_i]
 
             # Iteratively sigma clip along the phase dimension
-            clipped_fluxes_ma = sigma_clip(
-                data=flux,
-                sigma_lower=sigma_lower,
-                sigma_upper=sigma_upper,
-                maxiters=max_iterations,)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                clipped_fluxes_ma = sigma_clip(
+                    data=flux,
+                    sigma_lower=sigma_lower,
+                    sigma_upper=sigma_upper,
+                    maxiters=max_iterations,)
 
             clipped_fluxes = clipped_fluxes_ma.data
             bad_px = clipped_fluxes_ma.mask

@@ -793,3 +793,77 @@ def plot_kp_vsys_map():
     """
     """
     pass
+
+
+def plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors,):
+    """Plot RVs as output from regridding.
+    """
+    plt.close("all")
+    fig, (ax_ord, ax_det) = plt.subplots(2, figsize=(20,6), sharex=True)
+    cmap = cm.get_cmap("plasma")
+
+    # Panel #1: RV for each spectral segment
+    cmap = cm.get_cmap("plasma")
+    for spec_i in range(18):
+        wl_mid = ((np.median(wave_adopt[spec_i]) - np.min(wave_adopt)) 
+            / (np.max(wave_adopt) - np.min(wave_adopt)))
+        colour = cmap(wl_mid)
+        ax_ord.plot(
+            rvs_all[:,spec_i],
+            color=colour,
+            label="{:0.2f} nm".format(np.median(wave_adopt[spec_i])))
+    ax_ord.set_ylabel("RV (km/s)")
+
+    # Add legend (but sort)
+    # https://stackoverflow.com/questions/22263807/
+    # how-is-order-of-items-in-matplotlib-legend-determined
+    handles, labels = ax_ord.get_legend_handles_labels()
+    labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
+    ax_ord.legend(handles, labels, loc="upper center", ncol=6)
+    plt.tight_layout()
+
+    # Panel #2: median RV for each detector
+    for det_i in [1,2,3]:
+        det_mask = detectors == det_i
+        rvs = np.median(rvs_all[:, det_mask], axis=1)
+        ax_det.plot(rvs, label="Detector {:0.0f}".format(det_i))
+    ax_det.set_xlabel("Phase")
+    ax_det.set_ylabel("RV (km/s)")
+    ax_det.legend(loc="lower center", ncol=3)
+    
+    ax_det.set_xlim(-0.5, len(rvs_all)+0.5)
+    ax_det.xaxis.set_major_locator(plticker.MultipleLocator(base=5))
+    ax_det.xaxis.set_minor_locator(plticker.MultipleLocator(base=1))
+
+    plt.tight_layout()
+
+
+def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
+    """Plot aligned spectra as output from regridding.
+    """
+    (n_phase, n_spec, n_px) = fluxes.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(3, sharey=True, figsize=(20,10))
+
+    for det_i in range(3):
+        det_mask = detectors == det_i+1
+        fluxes_det = fluxes[:, det_mask].reshape(n_phase, n_spec//3 * n_px)
+        fluxes_det_clipped = sigma_clip(data=fluxes_det, sigma_upper=4)
+        axes[det_i].imshow(
+            fluxes_det_clipped, aspect="auto", interpolation="none")
+        axes[det_i].set_title("Detector #{:0.0f}".format(det_i+1))
+        axes[det_i].set_ylabel("Phase")
+
+        wave_mids = np.median(wave_adopt[det_mask], axis=1)
+        for wl_i, wl in enumerate(wave_mids):
+            px = n_px//2 + wl_i * n_px
+            phase = n_phase // 2
+            txt = axes[det_i].text(
+                x=px,
+                y=phase,
+                s="{:0.0f} nm".format(wl),
+                horizontalalignment="center",)
+            txt.set_bbox(dict(facecolor="white", alpha=0.4, edgecolor="white"))
+
+    plt.tight_layout()
