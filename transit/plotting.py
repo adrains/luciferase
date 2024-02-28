@@ -811,7 +811,7 @@ def plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors,):
         ax_ord.plot(
             rvs_all[:,spec_i],
             color=colour,
-            label="{:0.2f} nm".format(np.median(wave_adopt[spec_i])))
+            label="{:0.0f} nm".format(int(np.median(wave_adopt[spec_i]))))
     ax_ord.set_ylabel("RV (km/s)")
 
     # Add legend (but sort)
@@ -855,7 +855,7 @@ def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
         axes[det_i].set_title("Detector #{:0.0f}".format(det_i+1))
         axes[det_i].set_ylabel("Phase")
 
-        wave_mids = np.median(wave_adopt[det_mask], axis=1)
+        wave_mids = np.median(wave_adopt[det_mask], axis=1).astype(int)
         for wl_i, wl in enumerate(wave_mids):
             px = n_px//2 + wl_i * n_px
             phase = n_phase // 2

@@ -111,36 +111,28 @@ else:
 # velocities and doppler shifts respectively found for each spectral segment, 
 # but if do_rigid_regrid_per_detector is True then we simply use the median of
 # this on a per-detector basis for the regridding.
-wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, ds_all, cc_all = \
-    tu.regrid_single_night(
+wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, cc_rvs, cc_all = \
+    tu.regrid_all_phases(
         waves=wave_stacked,
         fluxes=fluxes_stacked,
         sigmas=sigmas_stacked,
         detectors=detectors_stacked,
-        orders=orders_stacked,
         nod_positions=nod_positions_stacked,
         reference_nod_pos="A",
+        cc_range_kms=(-20,20),
+        cc_step_kms=0.1,
         do_sigma_clipping=True,
-        sigma_clip_level_upper=6,
-        sigma_clip_level_lower=6,
+        sigma_clip_level_upper=3,
+        sigma_clip_level_lower=3,
         make_debug_plots=False,
         interpolation_method="linear",
         do_rigid_regrid_per_detector=False,
         n_ref_div=5,
-        n_orders_to_group=2,)
+        n_orders_to_group=1,)
 
 # Determine bad pixel mask for edge pixels (imin, imax)
 #print("Determining pixel limits...")
 #px_min, px_max = tu.compute_detector_limits(fluxes_stacked)
-
-# Interpolate wavelength scale
-#print("Interpolating wavelength scale...")
-#wave_interp, fluxes_interp, sigmas_interp = tu.interpolate_wavelength_scale(
-#    waves=wave_stacked,
-#    fluxes=fluxes_stacked,
-#    sigmas=sigmas_stacked,
-#    px_min=px_min,
-#    px_max=px_max,)
 
 # -----------------------------------------------------------------------------
 # Main operation
@@ -201,8 +193,9 @@ detectors = detectors_stacked[0]
 orders = orders_stacked[0]
 
 # Diagnostic plots
+fluxes_cleaned_stacked = np.vstack(fluxes_cleaned_all)
 tplt.plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors)
-tplt.plot_regrid_diagnostics_img(np.vstack(fluxes_cleaned_all), detectors, wave_adopt)
+tplt.plot_regrid_diagnostics_img(fluxes_cleaned_stacked, detectors, wave_adopt)
 
 # -----------------------------------------------------------------------------
 # Saving fits
