@@ -1840,6 +1840,92 @@ def load_simulated_model_results_from_fits(
     return \
         model_obs, model_flux, model_tau, model_trans, model_scale, model_mask
 
+# -----------------------------------------------------------------------------
+# Save/load SYSREM results
+# -----------------------------------------------------------------------------
+def save_sysrem_residuals_to_fits(
+    fits_load_dir,
+    label,
+    n_transit,
+    sysrem_resid,):
+    """Function to save a datacube of sysrem residuals to a fits HDU. The
+    residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px) or 
+    (n_transit, n_sysrem_iter, n_phase, n_spec, n_px) .
+
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    sysrem_resid: 4D or 5D float array
+       Datacube of SYSREM residuals of shape 
+       (n_sysrem_iter, n_phase, n_spec, n_px) or 
+       (n_transit, n_sysrem_iter, n_phase, n_spec, n_px).
+    """
+    # HDU info
+    ext_name = "SYSREM_RESID"
+    ext_desc = "Residuals after running SYSREM."
+
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="update") as fits_file:
+        # First check if the HDU already exists
+        if ext_name in fits_file:
+            fits_file[ext_name].data = sysrem_resid
+        
+        # Not there, make and append
+        else:
+            hdu = fits.PrimaryHDU(sysrem_resid)
+            hdu.header["EXTNAME"] = (ext_name, ext_desc)
+            fits_file.append(hdu)
+
+        fits_file.flush()
+
+
+def load_sysrem_residuals_from_fits(
+    fits_load_dir,
+    label,
+    n_transit,):
+    """Function to load a datacube of sysrem residuals from a fits HDU. The
+    residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px) or 
+    (n_transit, n_sysrem_iter, n_phase, n_spec, n_px) .
+
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    Returns
+    -------
+    sysrem_resid: 4D or 5D float array
+       Datacube of SYSREM residuals of shape 
+       (n_sysrem_iter, n_phase, n_spec, n_px) or 
+       (n_transit, n_sysrem_iter, n_phase, n_spec, n_px).
+    """
+    # Construct fits path
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    # Open the fits file and grab the data
+    with fits.open(fits_file, mode="readonly") as fits_file:
+        sysrem_resid = fits_file["SYSREM_RESID"].data.astype(float)
+
+    return sysrem_resid
+
 
 # -----------------------------------------------------------------------------
 # 

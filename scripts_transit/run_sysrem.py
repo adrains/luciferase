@@ -155,6 +155,14 @@ for spec_i in range(n_spec):
     
     resid_all[:,:,spec_i,:] = resid
 
+# Save residuals
+tu.save_sysrem_residuals_to_fits(
+    fits_load_dir=ss.save_path,
+    label=ss.label,
+    n_transit=ss.n_transit,
+    sysrem_resid=resid_all,)
+
+# Plotting
 tplt.plot_sysrem_residuals(waves, resid_all)
 
 #------------------------------------------------------------------------------
