@@ -12,6 +12,7 @@ information necessary to run the Aronson method.
 import numpy as np
 import transit.utils as tu
 import transit.plotting as tplt
+import transit.tables as ttab
 
 # -----------------------------------------------------------------------------
 # Setup and Options
@@ -100,7 +101,7 @@ if N_TRANSITS > 1:
 else:
     wave_stacked = waves_all[0]
     fluxes_stacked = fluxes_all[0]
-    fluxes_stacked = sigmas_all[0]
+    sigmas_stacked = sigmas_all[0]
     detectors_stacked = detectors_all[0]
     orders_stacked = orders_all[0]
     nod_positions_stacked = nod_positions_all[0]
@@ -213,3 +214,9 @@ tu.save_transit_info_to_fits(
     fits_save_dir=save_path,
     label=star_name,
     cc_rv_shifts_list=cc_rv_shifts_all,)
+
+# -----------------------------------------------------------------------------
+# LaTeX table
+# -----------------------------------------------------------------------------
+ttab.make_observations_table(
+    transit_info_all, fluxes_cleaned_all, sigmas_cleaned_all)
