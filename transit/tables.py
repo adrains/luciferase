@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from astropy.time import Time
+from collections import OrderedDict
 
 def make_observations_table(
     transit_info_list,
@@ -140,3 +141,284 @@ def make_observations_table(
 
     table = header + table_rows + footer
     np.savetxt("paper/table_obs_tab.tex", table, fmt="%s")
+
+
+# -----------------------------------------------------------------------------
+# System Summary
+# -----------------------------------------------------------------------------
+def make_table_system_summary(syst_info,):
+    """Make the LaTeX table to summarise the system information.
+
+    Parameters
+    ----------
+    syst_info: pandas DataFrame
+        DataFrame of system information with columns:
+        ['parameter', 'value', 'sigma', 'reference', 'bib_ref', 'comment']
+    """
+    # Load in the TESS target info
+    cols = [
+        "Parameter",
+        "Unit",
+        "Value",
+        "Reference",]
+    
+    header = []
+    table_rows = []
+    footer = []
+    notes = []
+    
+    # Construct the header of the table
+    header.append("\\begin{table}")
+    header.append("\\centering")
+    header.append("\\caption{System info}")
+    header.append("\\label{tab:syst_info}")
+    
+    header.append("\\begin{tabular}{%s}" % ("c"*len(cols)))
+    header.append("\hline")
+    header.append((("%s & "*len(cols))[:-2] + r"\\") % tuple(cols))
+    header.append("\hline")
+
+    # -------------------------------------------------------------------------
+    # Star
+    # -------------------------------------------------------------------------
+    table_rows.append(r"\multicolumn{4}{c}{Star} \\")
+    table_rows.append("\hline")
+
+    # IDs
+    id_gaia = syst_info.loc["gaia_dr3_id", "value"]
+    ref_gaia = syst_info.loc["gaia_dr3_id", "bib_ref"]
+
+    id_2mass = syst_info.loc["2mass_id", "value"]
+    ref_2mass = syst_info.loc["2mass_id", "bib_ref"]
+
+    table_rows.append(r"Gaia DR3 ID & - & {} & \citet{{{}}} \\".format(
+        id_gaia, ref_gaia))
+    table_rows.append(r"2MASS ID & - & {} & \citet{{{}}} \\".format(
+        id_2mass, ref_2mass))
+    
+    # RA
+    ra = float(syst_info.loc["ra_deg", "value"])
+    ra_hr = np.floor(ra / 15)
+    ra_min = np.floor((ra / 15 - ra_hr) * 60)
+    ra_sec = ((ra / 15 - ra_hr) * 60 - ra_min) * 60
+    ra_str = "{:02.0f} {:02.0f} {:05.2f}".format(ra_hr, ra_min, ra_sec)
+
+    ra_ref = syst_info.loc["ra_deg", "bib_ref"]
+
+    table_rows.append(r"RA & hh:mm:ss.ss & {} & \citet{{{}}} \\".format(
+        ra_str, ra_ref))
+
+    # DEC
+    dec = float(syst_info.loc["dec_deg", "value"])
+    dec_deg = np.floor(dec)
+    dec_min = np.floor((dec - dec_deg) * 60)
+    dec_sec = ((dec - dec_deg) * 60 - dec_min) * 60
+    dec_str = "{:+02.0f} {:02.0f} {:05.2f}".format(dec_deg, dec_min, dec_sec)
+
+    dec_ref = syst_info.loc["dec_deg", "bib_ref"]
+
+    table_rows.append(r"Dec & dd:mm:ss.ss & {} & \citet{{{}}} \\".format(
+        dec_str, dec_ref))
+    
+    # Plx
+    plx = syst_info.loc["plx", "value"]
+    e_plx = syst_info.loc["plx", "sigma"]
+
+    plx_ref = syst_info.loc["plx", "bib_ref"]
+
+    table_rows.append(r"Parallax & mas & ${}\pm{}$ & \citet{{{}}} \\".format(
+        plx, e_plx, plx_ref))
+
+    # Distance
+    dist = syst_info.loc["dist_pc", "value"]
+    e_dist = syst_info.loc["dist_pc", "sigma"]
+
+    dist_ref = syst_info.loc["dist_pc", "bib_ref"]
+
+    table_rows.append(r"Distance & pc & ${}\pm{}$ & \citet{{{}}} \\".format(
+        dist, e_dist, dist_ref))
+
+    # Systemic RV
+    rv_syst = syst_info.loc["rv_star", "value"]
+    e_rv_syst = syst_info.loc["rv_star", "sigma"]
+
+    rv_syst_ref = syst_info.loc["rv_star", "bib_ref"]
+
+    table_rows.append(
+        r"RV & km\,s$^{{-1}}$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        rv_syst, e_rv_syst, rv_syst_ref))
+
+    # K mag
+    k_mag = syst_info.loc["K_mag_2mass", "value"]
+    e_k_mag = syst_info.loc["K_mag_2mass", "sigma"]
+
+    k_mag_ref = syst_info.loc["K_mag_2mass", "bib_ref"]
+
+    table_rows.append(
+        r"$K_S$ mag & - & ${}\pm{}$ & \citet{{{}}} \\".format(
+        k_mag, e_k_mag, k_mag_ref))
+    
+    # Mass
+    m_star = syst_info.loc["m_star_msun", "value"]
+    e_m_star = syst_info.loc["m_star_msun", "sigma"]
+
+    m_star_ref = syst_info.loc["m_star_msun", "bib_ref"]
+
+    table_rows.append(
+        r"$M_\star$ & $M_\odot$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        m_star, e_m_star, m_star_ref))
+
+    # Radius
+    r_star = syst_info.loc["r_star_rsun", "value"]
+    e_r_star = syst_info.loc["r_star_rsun", "sigma"]
+
+    r_star_ref = syst_info.loc["r_star_rsun", "bib_ref"]
+
+    table_rows.append(
+        r"$R_\star$ & $R_\odot$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        r_star, e_r_star, r_star_ref))
+
+    # Teff
+    teff = syst_info.loc["teff_k", "value"]
+    e_teff = syst_info.loc["teff_k", "sigma"]
+
+    teff_ref = syst_info.loc["teff_k", "bib_ref"]
+
+    table_rows.append(
+        r"$T_{{\rm eff}}$ & K & ${}\pm{}$ & \citet{{{}}} \\".format(
+        teff, e_teff, teff_ref))
+
+    # vsini
+    vsini = syst_info.loc["vsini", "value"]
+    e_vsini = syst_info.loc["vsini", "sigma"]
+
+    vsini_ref = syst_info.loc["vsini", "bib_ref"]
+
+    table_rows.append(r"$v \sin i$ & km\,s$^{{-1}}$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        vsini, e_vsini, vsini_ref))
+
+    # -------------------------------------------------------------------------
+    # Planet
+    # -------------------------------------------------------------------------
+    table_rows.append("\hline")
+    table_rows.append(r"\multicolumn{4}{c}{Planet} \\")
+    table_rows.append("\hline")
+
+    # Mass
+    m_p = syst_info.loc["m_planet_mearth", "value"]
+    e_m_p = syst_info.loc["m_planet_mearth", "sigma"]
+
+    m_p_ref = syst_info.loc["m_planet_mearth", "bib_ref"]
+
+    table_rows.append(
+        r"$M_P$ & $M_\oplus$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        m_p, e_m_p, m_p_ref))
+
+    # Radius
+    r_p = syst_info.loc["r_planet_rearth", "value"]
+    e_r_p = syst_info.loc["r_planet_rearth", "sigma"]
+
+    r_p_ref = syst_info.loc["r_planet_rearth", "bib_ref"]
+
+    table_rows.append(
+        r"$R_P$ & $R_\oplus$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        r_p, e_r_p, r_p_ref))
+
+    # a, semi-major axis
+    sma = syst_info.loc["a_planet_au", "value"]
+    e_sma = syst_info.loc["a_planet_au", "sigma"]
+
+    sma_ref = syst_info.loc["a_planet_au", "bib_ref"]
+
+    table_rows.append(r"$a$ & AU & ${}\pm{}$ & \citet{{{}}} \\".format(
+        sma, e_sma, sma_ref))
+
+    # e, ccentricity
+    ecc = syst_info.loc["e_planet", "value"]
+    e_ecc = syst_info.loc["e_planet", "sigma"]
+
+    ecc_ref = syst_info.loc["e_planet", "bib_ref"]
+
+    table_rows.append(r"$e$ & - & ${}\pm{}$ & \citet{{{}}} \\".format(
+        ecc, e_ecc, ecc_ref))
+
+    # i, inclination
+    inc = syst_info.loc["i_planet_deg", "value"]
+    e_inc = syst_info.loc["i_planet_deg", "sigma"]
+
+    inc_ref = syst_info.loc["i_planet_deg", "bib_ref"]
+
+    table_rows.append(r"$i$ & deg & ${}\pm{}$ & \citet{{{}}} \\".format(
+        inc, e_inc, inc_ref))
+
+    # Omega, longitude of the ascending node in degrees
+
+    # omega, argument of periapsis in degrees
+
+    # K star rv
+    k_star = syst_info.loc["k_star_mps", "value"]
+    e_k_star = syst_info.loc["k_star_mps", "sigma"]
+
+    k_star_ref = syst_info.loc["K_mag_2mass", "bib_ref"]
+
+    table_rows.append(
+        r"$K$ & m\,s$^{{-1}}$ & ${}\pm{}$ & \citet{{{}}} \\".format(
+        k_star, e_k_star, k_star_ref))
+
+    # Transit duration
+    trans_dur = syst_info.loc["transit_dur_hours", "value"]
+    e_trans_dur = syst_info.loc["transit_dur_hours", "sigma"]
+
+    trans_dur_ref = syst_info.loc["transit_dur_hours", "bib_ref"]
+
+    table_rows.append(
+        r"Transit Duration & hr & ${}\pm{}$ & \citet{{{}}} \\".format(
+        trans_dur, e_trans_dur, trans_dur_ref))
+
+    # jd0
+    jd0 = syst_info.loc["jd0_days", "value"]
+    e_jd0 = syst_info.loc["jd0_days", "sigma"]
+
+    jd0_ref = syst_info.loc["jd0_days", "bib_ref"]
+
+    table_rows.append(r"JD (mid) & day & ${}\pm{}$ & \citet{{{}}} \\".format(
+        jd0, e_jd0, jd0_ref))
+
+    # period
+    period = syst_info.loc["period_planet_days", "value"]
+    e_period = syst_info.loc["period_planet_days", "sigma"]
+
+    period_ref = syst_info.loc["period_planet_days", "bib_ref"]
+
+    table_rows.append(r"$P$ & day & ${}$ & \citet{{{}}} \\".format(
+        period, period_ref))
+    
+    # -------------------------------------------------------------------------
+    # Wrap up
+    # -------------------------------------------------------------------------
+    # Finish the table
+    footer.append("\\hline")
+    footer.append("\\end{tabular}")
+    
+    # Add notes section with references
+    notes.append("\\begin{minipage}{\linewidth}")
+    notes.append("\\vspace{0.1cm}")
+    
+    notes.append("\\textbf{Notes:} $^a$ TESS Object of Interest ID, "
+                 "$^b$ TESS Input Catalogue ID "
+                 "\citep{stassun_tess_2018, stassun_revised_2019},"
+                 "$^c$2MASS \citep{skrutskie_two_2006}, "
+                 "$^c$Gaia \citep{brown_gaia_2018} - "
+                 " note that Gaia parallaxes listed here have been "
+                 "corrected for the zeropoint offset, "
+                 "$^d$Number of candidate planets, NASA Exoplanet Follow-up "
+                 "Observing Program for TESS \\\\")
+    
+    notes.append("\\end{minipage}")
+    footer.append("\\end{table}")
+    
+    # Write the tables
+    table = header + table_rows + footer# + notes
+
+    # Write the table
+    np.savetxt("paper/table_system_info.tex", table, fmt="%s")
