@@ -179,7 +179,7 @@ def blaze_corr_fits(
                         # Blaze correct science frame & propagate uncertainties
                         sci_fits[det].data[sci_spec_col] = sci / blz
                         sci_fits[det].data[sci_sigma_col] = \
-                            sci * np.sqrt((e_sci/sci)**2 + (e_blz/blz)**2)
+                            sci/blz * np.sqrt((e_sci/sci)**2 + (e_blz/blz)**2)
 
         # Save updated fits file
         sci_fits.flush()
