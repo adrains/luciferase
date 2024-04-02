@@ -4,6 +4,7 @@ detrending for the purpose of exoplanet transmission spectroscopy.
 SYSREM:
     https://ui.adsabs.harvard.edu/abs/2005MNRAS.356.1466T/abstract
 """
+import warnings
 import numpy as np
 from astropy.stats import sigma_clip
 from tqdm import tqdm
@@ -71,38 +72,42 @@ def clean_and_compute_initial_resid(
 
     # Sigma clip along phase dimension. Note that here we're doing both upper
     # *and* lower bound clipping.
-    # TODO: we eventually want to interpolate along the spectral dimension
-    
+
     sc_mask_phase = np.full_like(bad_px_mask_init, False)
 
     for px_i in range(n_px):
         # Sigma clip along the phase dimension to compute the bad pixel mask 
         # for px i
-        bad_phase_mask = sigma_clip(
-            data=flux[:,px_i],
-            sigma=sigma_threshold_phase,).mask
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            bad_phase_mask = sigma_clip(
+                data=flux[:,px_i],
+                sigma=sigma_threshold_phase,).mask
         
         # If we have more than the threshold number of bad px, mask out the
         # entire column (i.e. mask out px_i)
         if np.sum(bad_phase_mask) > n_max_phase_bad_px:
             sc_mask_phase[:,px_i] = True
 
+        # If the first or last phase is a bad px, then mask out the entire row
+        # since we can't interpolate them.
+        elif bad_phase_mask[0] or bad_phase_mask[-1]:
+            sc_mask_phase[:,px_i] = True
+
         # Otherwise interpolate the missing values using the times as X values
         # instead of simply the pixel number
         else:
-            # Flux interpolator
+            # Flux interpolator (interpolating only good px)
             interp_px_time_series_flux = interp1d(
-                x=mjds,
-                y=flux[:,px_i],
-                bounds_error=False,
-                fill_value=np.nan,)
+                x=mjds[~bad_phase_mask],
+                y=flux[:,px_i][~bad_phase_mask],
+                bounds_error=True,)
             
-            # Sigma interpolator
+            # Sigma interpolator (interpolating only good px)
             interp_px_time_series_err = interp1d(
-                x=mjds,
-                y=e_spectra[:,px_i],
-                bounds_error=False,
-                fill_value=np.nan,)
+                x=mjds[~bad_phase_mask],
+                y=e_spectra[:,px_i][~bad_phase_mask],
+                bounds_error=True,)
             
             # Interpolate and update
             flux[:,px_i][bad_phase_mask] = \
@@ -124,9 +129,11 @@ def clean_and_compute_initial_resid(
 
     if do_clip_spectral_dimension:
         for phase_i in range(n_phase):
-            sc_mask_spec[phase_i,:] = sigma_clip(
-                data=flux[phase_i,:],
-                sigma_upper=sigma_threshold_spectral,).mask
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                sc_mask_spec[phase_i,:] = sigma_clip(
+                    data=flux[phase_i,:],
+                    sigma_upper=sigma_threshold_spectral,).mask
         
     # Combine bad px masks
     bad_px_mask = np.logical_or(

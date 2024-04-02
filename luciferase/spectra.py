@@ -2871,6 +2871,9 @@ def calc_continuum_optimisation_resid(
     # Compute residuals
     resid_vect = (norm_sci_flux - telluric_model_flux) / sci_sigma
 
+    if np.sum(~np.isfinite(resid_vect)) != 0:
+        raise ValueError("Non-finite residuals!")
+
     return resid_vect
 
 #------------------------------------------------------------------------------
@@ -3033,6 +3036,7 @@ def continuum_normalise_all_spectra_with_telluric_model(
         x=wave_telluric,
         y=trans_telluric,
         kind="linear",
+        fill_value=1.0,
         bounds_error=False,
         assume_sorted=True)
     
@@ -3219,7 +3223,9 @@ def continuum_normalise_spectrum_with_telluric_model(
             bad_px_mask,
             trans_telluric > uncontaminated_threshold,)
 
-    
+    if np.sum(~np.isfinite(flux[~bad_px_mask])) != 0:
+        raise ValueError("Non-finite pixels remaining!")
+
     # Mask out strong stellar lines
     if do_mask_strong_stellar_lines:
         # Mask out pixels where continuum normalised stellar flux is less

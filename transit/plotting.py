@@ -836,6 +836,8 @@ def plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors,):
     ax_det.xaxis.set_minor_locator(plticker.MultipleLocator(base=1))
 
     plt.tight_layout()
+    plt.savefig("plots/regrid_diagnostic_rv.pdf")
+    plt.savefig("plots/regrid_diagnostic_rv.png", dpi=300)
 
 
 def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
@@ -865,5 +867,7 @@ def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
                 s="{:0.0f} nm".format(wl),
                 horizontalalignment="center",)
             txt.set_bbox(dict(facecolor="white", alpha=0.4, edgecolor="white"))
-
+    
     plt.tight_layout()
+    plt.savefig("plots/regrid_diagnostic_img.pdf")
+    plt.savefig("plots/regrid_diagnostic_img.png", dpi=300)
