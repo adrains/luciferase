@@ -380,6 +380,9 @@ def cross_correlate_sysrem_resid(
                 # Interpolate to wavelength scale
                 tspec_rv_shift = temp_interp(wave_rv_shift)
 
+                if np.nansum(tspec_rv_shift) == 0:
+                    raise ValueError("All nan interpolated array")
+
                 # Tile this to all phases
                 spec_3D = np.broadcast_to(
                     tspec_rv_shift[None,:], (n_phase, n_px))
@@ -392,6 +395,11 @@ def cross_correlate_sysrem_resid(
                 resid = sysrem_resid[sysrem_iter_i, :, spec_i]
                 sigma = sigma_spec[:, spec_i, :]
                 cc_val = np.nansum(resid * spec_3D / sigma**2, axis=1)
+                
+                #cc_num = np.nansum(resid * spec_3D, axis=1)
+                #cc_den = np.sqrt(
+                #    np.nansum(resid**2, axis=1) * np.nansum(spec_3D**2, axis=1))
+                #cc_val = cc_num / cc_den
 
                 # Store
                 cc_values[sysrem_iter_i, :, spec_i, rv_i] = cc_val

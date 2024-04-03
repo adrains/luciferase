@@ -928,8 +928,8 @@ def load_planet_properties(planet_properties_file):
         delim_whitespace=True,
         comment="#",
         quotechar='"',
-        index_col="parameter",
-        dtype={"value":float, "sigma":float})
+        index_col="parameter",)
+        #dtype={"value":str, "sigma":str})
 
     return syst_info
 
@@ -1841,16 +1841,144 @@ def load_simulated_model_results_from_fits(
         model_obs, model_flux, model_tau, model_trans, model_scale, model_mask
 
 # -----------------------------------------------------------------------------
+# Save/load normalised spectra
+# -----------------------------------------------------------------------------
+def save_normalised_spectra_to_fits(
+    fits_load_dir,
+    label,
+    n_transit,
+    waves_norm,
+    fluxes_norm,
+    sigmas_norm,
+    bad_px_mask_norm,
+    transit_i,):
+    """Function to save normalised wave, flux, sigma, and bad px arrays as a
+    set of fits HDUs.
+
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    waves_norm: 2D float array
+        Wavelength vector of shape [n_spec, n_px].
+
+    fluxes_norm, sigmas_norm: 3D float array
+        Normalised flux and sigma vectors of shape [n_phase, n_spec, n_px].
+
+    bad_px_mask_norm: 3D bool array
+        Bad pixel mask corresponding to flux and sigma vectors, of shape
+        [n_phase, n_spec, n_px].
+
+    transit_i: int
+        The transit night number.
+    """
+    # Input checking
+    ti = int(transit_i)
+
+    # Pair the extensions with their data
+    extensions = {
+        "WAVES_NORM_{}".format(ti):(
+            waves_norm, "Wavelength vector for normalised fluxes."),
+        "FLUXES_NORM_{}".format(ti):(
+            fluxes_norm, "Continuum normalised fluxes."),
+        "SIGMAS_NORM_{}".format(ti):(
+            sigmas_norm, "Continuum normalised sigmas."),
+        "BAD_PX_NORM_{}".format(ti):(
+            bad_px_mask_norm.astype(int), "Bad px mask for norm. fluxes."),
+    }
+
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="update") as fits_file:
+        for extname in extensions.keys():
+            # First check if the HDU already exists
+            if extname in fits_file:
+                fits_file[extname].data = extensions[extname][0]
+            
+            # Not there, make and append
+            else:
+                hdu = fits.PrimaryHDU(extensions[extname][0])
+                hdu.header["EXTNAME"] = \
+                    (extname, extensions[extname][1])
+                fits_file.append(hdu)
+
+            fits_file.flush()
+
+
+def load_normalised_spectra_from_fits(
+    fits_load_dir,
+    label,
+    n_transit,
+    transit_i,):
+    """Function to load normalised wave, flux, sigma, and bad px arrays from a
+    set of fits HDUs.
+
+    Parameters
+    ----------
+    fits_load_dir: string
+        Directory to load the fits file from.
+
+    label: string
+        Label to be included in the filename.
+
+    n_transit: int
+        Number of transits saved to this fits file.
+
+    transit_i: int
+        The transit night number.
+        
+    Returns
+    -------
+    waves_norm: 2D float array
+        Wavelength vector of shape [n_spec, n_px].
+
+    fluxes_norm, sigmas_norm: 3D float array
+        Normalised flux and sigma vectors of shape [n_phase, n_spec, n_px].
+
+    bad_px_mask_norm: 3D bool array
+        Bad pixel mask corresponding to flux and sigma vectors, of shape
+        [n_phase, n_spec, n_px].
+    """
+    # Input checking
+    ti = int(transit_i)
+
+    # Load in the fits file
+    fits_file = os.path.join(
+        fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_file, mode="readonly") as fits_file:
+        # Load data constant across transits
+        waves_norm = fits_file["WAVES_NORM_{}".format(ti)].data.astype(float)
+        fluxes_norm = fits_file["FLUXES_NORM_{}".format(ti)].data.astype(float)
+        sigmas_norm = fits_file["SIGMAS_NORM_{}".format(ti)].data.astype(float)
+        bad_px_mask_norm = \
+            fits_file["BAD_PX_NORM_{}".format(ti)].data.astype(bool)
+
+    # All done, return
+    return waves_norm, fluxes_norm, sigmas_norm, bad_px_mask_norm
+
+
+# -----------------------------------------------------------------------------
 # Save/load SYSREM results
 # -----------------------------------------------------------------------------
 def save_sysrem_residuals_to_fits(
     fits_load_dir,
     label,
     n_transit,
-    sysrem_resid,):
+    sysrem_resid,
+    transit_i,):
     """Function to save a datacube of sysrem residuals to a fits HDU. The
-    residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px) or 
-    (n_transit, n_sysrem_iter, n_phase, n_spec, n_px) .
+    residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px), with the
+    transit/night number in the extension name.
 
     Parameters
     ----------
@@ -1867,9 +1995,12 @@ def save_sysrem_residuals_to_fits(
        Datacube of SYSREM residuals of shape 
        (n_sysrem_iter, n_phase, n_spec, n_px) or 
        (n_transit, n_sysrem_iter, n_phase, n_spec, n_px).
+
+    transit_i: int
+        The transit night number.
     """
     # HDU info
-    ext_name = "SYSREM_RESID"
+    ext_name = "SYSREM_RESID_{:0.0f}".format(transit_i)
     ext_desc = "Residuals after running SYSREM."
 
     # Load in the fits file
@@ -1893,10 +2024,11 @@ def save_sysrem_residuals_to_fits(
 def load_sysrem_residuals_from_fits(
     fits_load_dir,
     label,
-    n_transit,):
+    n_transit,
+    transit_i):
     """Function to load a datacube of sysrem residuals from a fits HDU. The
-    residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px) or 
-    (n_transit, n_sysrem_iter, n_phase, n_spec, n_px) .
+    residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px), with the
+    transit/night number in the extension name.
 
     Parameters
     ----------
@@ -1909,6 +2041,9 @@ def load_sysrem_residuals_from_fits(
     n_transit: int
         Number of transits saved to this fits file.
 
+    transit_i: int
+        The transit night number.
+
     Returns
     -------
     sysrem_resid: 4D or 5D float array
@@ -1920,9 +2055,11 @@ def load_sysrem_residuals_from_fits(
     fits_file = os.path.join(
         fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
 
+    ext_name = "SYSREM_RESID_{:0.0f}".format(transit_i)
+
     # Open the fits file and grab the data
     with fits.open(fits_file, mode="readonly") as fits_file:
-        sysrem_resid = fits_file["SYSREM_RESID"].data.astype(float)
+        sysrem_resid = fits_file[ext_name].data.astype(float)
 
     return sysrem_resid
 
