@@ -2838,11 +2838,17 @@ def calc_continuum_optimisation_resid(
     sci_wave,
     sci_flux,
     sci_sigma,
-    telluric_model_flux,):
+    telluric_model_flux,
+    fixed_gradient=None,):
     """Calculates the residuals between a continuum normalised observed science
     spectrum and the best fit molecfit model. Called to optimise over the 
     polynomial coefficients in params to get the best possible continuum
     normalisation.
+
+    Currently only two options are supported, both of which assume a linear
+    polynomial fit, but differ in whether the gradient is fixed or not.
+        1) 1st order polynomial (len(params) = 2, fixed_gradient = None)
+        2) 0th order polynomial (len(params) = 1, fixed_gradient = float)
 
     Parameters
     ----------
@@ -2856,13 +2862,30 @@ def calc_continuum_optimisation_resid(
     telluric_model_flux: float array
         Model telluric absorption normalised to 1.0.
 
+    fixed_gradient: float or None
+        Fixed value of the gradient to adopt when fitting.
+
     Returns
     -------
     resid_vect: float array
         Uncertainty weighted residuals vector.
     """
+    # Normal case: fit 1st order polynomial
+    if fixed_gradient is None and len(params) == 2:
+        coeffs = params
+
+    # Special case: fit 1st order polynomial with fixed gradient
+    elif fixed_gradient is not None and len(params) == 1:
+        coeffs = (params[0], fixed_gradient)
+
+    # Unimplemented
+    else:
+        raise ValueError("Unimplemented case!")
+
+    print(coeffs)
+
     # Calculate the continuum
-    continuum_poly = Polynomial(params)
+    continuum_poly = Polynomial(coeffs)
     continuum = continuum_poly(sci_wave)
 
     # Continuum normalise our science flux
@@ -2994,6 +3017,9 @@ def continuum_normalise_all_spectra_with_telluric_model(
     """Function to continuum normalise spectra via 1D polynomial to each
     spectral segment optimised to a telluric spectrum and stellar mask.
 
+    Note that we enforce the same gradient for the polynomial for each spectral
+    segment, but individual phases can have their own intercept.
+
     TODO: add option to not make plots by default
 
     Parameters
@@ -3048,15 +3074,70 @@ def continuum_normalise_all_spectra_with_telluric_model(
         bounds_error=False,
         assume_sorted=True)
 
-    desc = "Continuum normalising for all phases"
+    desc = "Continuum normalising for all spectral segments"
 
     plt.close("all")
     fig, (poly_ax, norm_ax) = plt.subplots(2, figsize=(20, 5), sharex=True)
 
-    # Loop over all phases
-    for phase_i in tqdm(range(n_phase), leave=False, desc=desc):
-        # Loop over all spectral segments
-        for spec_i in range(n_spec):
+    # We want our continuum normalisation--which is a linear polynomial fit--to
+    # be consistent as a function of phase. This means that the gradient of the
+    # fit should be *constant* as a function of phase (i.e. the *shape* of our
+    # spectra should be consistent) but the offset/intercept should be allowed
+    # to float (i.e. the *flux* of our spectra should be allowed to change). We
+    # accomplish this by first doing a 1st order polynomial fit to all phases
+    # for a given spectral segment. We then compute and adopt the mean gradient
+    # before doing another 0th order polynomial fit to determine the new
+    # optimal offset/intercept term.
+
+    # Loop over all spectral segments
+    #for spec_i in range(n_spec):
+    for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
+        # ---------------------------------------------------------------------
+        # 1st order polynomial fit
+        # ---------------------------------------------------------------------
+        # Here we do a 1st order polynomial fit to determine the unique
+        # gradient and intercept terms for each phase.
+
+        # Initialise array to keep track of per-phase fitted coefficients for
+        # the 1st order polynomial fit.
+        poly_coeff_for_spec_i = np.zeros((n_phase, 2))
+
+        # Loop over all phases
+        for phase_i in range(n_phase):
+            # Interpolate telluric vector
+            trans_telluric = calc_telluric_trans(waves_sci[spec_i])
+
+            # Interpolate stellar vector
+            spec_stellar = calc_stellar_spec(
+                waves_sci[spec_i]
+                * (1-(rv_star-bcors[phase_i])/(const.c.si.value/1000)))
+
+            _, _, poly_coeff = \
+                continuum_normalise_spectrum_with_telluric_model(
+                    wave_sci=waves_sci[spec_i],
+                    flux_sci=fluxes_sci[phase_i, spec_i],
+                    sigma_sci=sigmas_sci[phase_i, spec_i],
+                    trans_telluric=trans_telluric,
+                    spec_stellar=spec_stellar,
+                    do_mask_strong_stellar_lines=True,)
+
+            poly_coeff_for_spec_i[phase_i] = poly_coeff
+
+        # Compute mean gradient + intercept. Polynomials are sorted [N_0, N_1].
+        mean_grad = np.nanmean(poly_coeff_for_spec_i, axis=0)[1]
+        mean_intercept = np.nanmean(poly_coeff_for_spec_i, axis=0)[0]
+
+        # ---------------------------------------------------------------------
+        # 0th order polynomial fit
+        # ---------------------------------------------------------------------
+        # Here we do a second round of fitting, but this time we fix the
+        # gradient to the mean value when considering every phase. We also must
+        # initialise the intercept equivalent mean value since it will now
+        # likely be incredibly different to an initial value of 1.0 and in
+        # testing this proved unable to properly converge.
+
+        # Loop over all phases
+        for phase_i in range(n_phase):
             # Interpolate telluric vector
             trans_telluric = calc_telluric_trans(waves_sci[spec_i])
 
@@ -3072,12 +3153,14 @@ def continuum_normalise_all_spectra_with_telluric_model(
                     sigma_sci=sigmas_sci[phase_i, spec_i],
                     trans_telluric=trans_telluric,
                     spec_stellar=spec_stellar,
-                    do_mask_strong_stellar_lines=True,)
+                    do_mask_strong_stellar_lines=True,
+                    fixed_gradient=mean_grad,
+                    intercept_init_guess=mean_intercept,)
 
             fluxes_sci_norm[phase_i, spec_i] = flux_norm
             sigmas_sci_norm[phase_i, spec_i] = sigma_norm
             poly_coeff_all[phase_i, spec_i] = poly_coeff
-
+            
             # -----------------------------------------------------------------
             # Diagnostic plot
             # -----------------------------------------------------------------
@@ -3146,7 +3229,7 @@ def continuum_normalise_all_spectra_with_telluric_model(
 
     #plt.legend(loc="upper center",)
     plt.tight_layout()
-    plt.savefig("plots/sysrem_telluric_norm.pdf")
+    plt.savefig("plots/sysrem_telluric_norm_n_phase_{}.pdf".format(n_phase))
 
     return fluxes_sci_norm, sigmas_sci_norm, poly_coeff_all
 
@@ -3158,11 +3241,13 @@ def continuum_normalise_spectrum_with_telluric_model(
     sigma_sci,
     trans_telluric,
     spec_stellar,
-    edge_px_to_exclude=20,
+    edge_px_to_exclude=40,
     do_mask_uninformative_model_px=False,
     do_mask_strong_stellar_lines=False,
     px_absorption_threshold=0.985,
-    uncontaminated_threshold=0.999,):
+    uncontaminated_threshold=0.999,
+    fixed_gradient=None,
+    intercept_init_guess=1,):
     """Uses a telluric model spectrum from Molecfit to optimise the 
     polynomial coefficients used for continuum normalisation. This is 
     possible as different physical process contribute to the stellar and
@@ -3201,10 +3286,32 @@ def continuum_normalise_spectrum_with_telluric_model(
     uncontaminated_threshold: float, default: 0.999
         The threshold above which we consider the telluric transmission
         uncontaminated.
+
+    fixed_gradient: float or None, default: None
+        Fixed value of the gradient to adopt for the linear polynomial fit.
+
+    intercept_init_guess: float, default: 1.0
+        Initial guess for the intercept term when fitting the linear polynomial
+
+    Returns
+    -------
+    flux_sci_norm, sigma_sci_norm: 1D float array
+        Continuum normalised science flux and sigma of shape [n_px].
+
+    poly_coeff_all: 1D float array
+        Best fit polynomial coefficients of shape [n_order]
     """
-    # Start with the initial guess of the coefficients from our 
-    # previously fitted linear polynomial
-    params_init = (1,1)
+    # Starting guess for our polynomial coefficients
+    # If we've been given a value for fixed_gradient, then we will only fit a
+    # 0th order polynomial for the offset/intercept. Here we should also use
+    # a better guess for the intercept.
+    if fixed_gradient is not None:
+        params_init = (intercept_init_guess,)
+    
+    # If we've *not* been given a value for fixed_gradient, then we instead fit
+    # a first order polynomial for the gradient *and* the intercept/offset.
+    else:
+        params_init = (1,1)
 
     # Mask out nans and infs with default values
     flux = flux_sci.copy()
@@ -3244,7 +3351,8 @@ def continuum_normalise_spectrum_with_telluric_model(
         wave_sci,
         flux,
         sigma,
-        trans_telluric*spec_stellar,)
+        trans_telluric*spec_stellar,
+        fixed_gradient,)
 
     # Do fit
     ls_fit_dict = least_squares(
@@ -3256,8 +3364,20 @@ def continuum_normalise_spectrum_with_telluric_model(
     # TODO: Diagnostics
     pass
 
+    # Reconstruct coefficients
+    # Normal case: fit 1st order polynomial
+    if fixed_gradient is None and len(params_init) == 2:
+        poly_coeff = ls_fit_dict["x"]
+
+    # Special case: fit 1st order polynomial with fixed gradient
+    elif fixed_gradient is not None and len(params_init) == 1:
+        poly_coeff = (ls_fit_dict["x"][0], fixed_gradient)
+    
+    # Unimplemented
+    else:
+        raise ValueError("Unimplemented case!")
+
     # Normalise by the best-fit continuum
-    poly_coeff = ls_fit_dict["x"]
     continuum_poly = Polynomial(poly_coeff)
     continuum = continuum_poly(wave_sci)
 
