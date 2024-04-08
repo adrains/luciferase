@@ -13,35 +13,21 @@ import numpy as np
 import transit.utils as tu
 import transit.plotting as tplt
 import transit.tables as ttab
+import luciferase.spectra as ls
 
 # -----------------------------------------------------------------------------
 # Setup and Options
 # -----------------------------------------------------------------------------
-# Save path
-save_path = ""
-star_name = "wasp107"
-
-# Location of the 
-planet_properties_file = "scripts_transit/planet_data_wasp107.csv"
-
-# Data directories where each folder contains observations for a single transit
-planet_root_dirs = [
-    #"/home/arains/gto/220310_WASP107",
-    #"/home/arains/gto/230222_WASP107",
-    #"/Users/arains/data/220310_WASP107/",
-    #"/Users/arains/data/230222_WASP107/",
-    "/Users/arains/data/wasp107b_final/wasp107b_N1_20220310/",
-    "/Users/arains/data/wasp107b_final/wasp107b_N2_20230222/",
-]
-
-N_TRANSITS = len(planet_root_dirs)
+# Import our settings from a separate YAML file
+data_prep_settings_file = "scripts_transit/data_preparation_settings.yml"
+ds = tu.load_yaml_settings(data_prep_settings_file)
 
 # -----------------------------------------------------------------------------
 # Load in all sets of transits
 # -----------------------------------------------------------------------------
 # Load planetary properties file
 print("Loading properties file...")
-syst_info = tu.load_planet_properties(planet_properties_file)
+syst_info = tu.load_planet_properties(ds.planet_properties_file)
 
 # Initial arrays
 waves_all = []
@@ -61,7 +47,7 @@ cc_rv_shifts_all = []
 cc_ds_shifts_all = []
 
 # Extract data for each transit
-for transit_i, trans_dir in enumerate(planet_root_dirs):
+for transit_i, trans_dir in enumerate(ds.planet_root_dirs):
     # Extract sorted time series data
     print("Loading spectra for transit #{}...".format(transit_i))
     waves, fluxes, sigmas, detectors, orders, transit_info = \
@@ -91,7 +77,7 @@ for transit_i, trans_dir in enumerate(planet_root_dirs):
 # Interpolate all fluxes across phase and transit onto common wavelength scale
 # -----------------------------------------------------------------------------
 # Stack all transits along the phase dimension to regid on inter-night basis
-if N_TRANSITS > 1:
+if ds.n_transit > 1:
     wave_stacked = np.vstack(waves_all)
     fluxes_stacked = np.vstack(fluxes_all)
     sigmas_stacked = np.vstack(sigmas_all)
@@ -106,6 +92,9 @@ else:
     orders_stacked = orders_all[0]
     nod_positions_stacked = nod_positions_all[0]
 
+# [Optional] Import a Molecfit telluric model to use for cross-correlation
+pass
+
 # Using the stacked data, regrid onto a single common wavelength scale
 # Regrid the stacked data onto a single wavelength scale and correct offsets in
 # the wavelength scale between A/B nodding positions.rvs and ds are the radial
@@ -119,17 +108,17 @@ wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, cc_rvs, cc_all = \
         sigmas=sigmas_stacked,
         detectors=detectors_stacked,
         nod_positions=nod_positions_stacked,
-        reference_nod_pos="A",
-        cc_range_kms=(-20,20),
-        cc_step_kms=0.1,
-        do_sigma_clipping=True,
-        sigma_clip_level_upper=3,
-        sigma_clip_level_lower=3,
-        make_debug_plots=False,
-        interpolation_method="linear",
-        do_rigid_regrid_per_detector=False,
-        n_ref_div=5,
-        n_orders_to_group=1,)
+        reference_nod_pos=ds.reference_nod_pos,
+        cc_range_kms=ds.cc_range_kms,
+        cc_step_kms=ds.cc_step_kms,
+        do_sigma_clipping=ds.do_sigma_clipping,
+        sigma_clip_level_upper=ds.sigma_clip_level_upper,
+        sigma_clip_level_lower=ds.sigma_clip_level_lower,
+        make_debug_plots=ds.make_debug_plots,
+        interpolation_method=ds.interpolation_method,
+        do_rigid_regrid_per_detector=ds.do_rigid_regrid_per_detector,
+        n_ref_div=ds.n_ref_div,
+        n_orders_to_group=ds.n_orders_to_group,)
 
 # Determine bad pixel mask for edge pixels (imin, imax)
 #print("Determining pixel limits...")
@@ -143,7 +132,7 @@ wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, cc_rvs, cc_all = \
 phase_low = 0
 phase_high = fluxes_all[0].shape[0]
 
-for transit_i in range(N_TRANSITS):
+for transit_i in range(ds.n_transit):
     # Grab high extent
     phase_high = phase_low + fluxes_all[transit_i].shape[0]
 
@@ -206,15 +195,50 @@ tu.save_transit_info_to_fits(
     waves=wave_adopt,
     obs_spec_list=fluxes_cleaned_all,
     sigmas_list=sigmas_cleaned_all,
-    n_transits=N_TRANSITS,
+    n_transits=ds.n_transit,
     detectors=detectors,
     orders=orders,
     transit_info_list=transit_info_all,
     syst_info=syst_info,
-    fits_save_dir=save_path,
-    label=star_name,
+    fits_save_dir=ds.save_path,
+    label=ds.star_name,
     cc_rv_shifts_list=cc_rv_shifts_all,)
 
+# -----------------------------------------------------------------------------
+# Do final continuum normalisation on data
+# -----------------------------------------------------------------------------
+"""
+print("Continuum normalising spectra...")
+for transit_i in range(ds.n_transit):
+    fluxes_norm, sigmas_norm, poly_coeff = \
+        ls.continuum_normalise_all_spectra_with_telluric_model(
+            waves_sci=waves,
+            fluxes_sci=fluxes_cleaned_all[transit_i],
+            sigmas_sci=sigmas_cleaned_all[transit_i],
+            wave_telluric=telluric_wave,
+            trans_telluric=telluric_trans,
+            wave_stellar=wave_stellar,
+            spec_stellar=spec_stellar,
+            bcors=transit_info_all[transit_i]["bcor"].values,
+            rv_star=syst_info.loc["rv_star", "value"],)
+
+    # Construct bad px mask from tellurics
+    print("Constructing bad px mask from tellurics...")
+    bad_px_mask_1D = telluric_trans < ss.telluric_trans_bad_px_threshold
+    bad_px_mask_3D = np.tile(
+        bad_px_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)
+
+    # Save normalised spectra back to fits file
+    tu.save_normalised_spectra_to_fits(
+        fits_load_dir=ds.save_path,
+        label=ds.star_name,
+        n_transit=ds.n_transit,
+        waves_norm=waves,
+        fluxes_norm=fluxes_norm,
+        sigmas_norm=sigmas_norm,
+        bad_px_mask_norm=bad_px_mask_3D,
+        transit_i=transit_i,)
+"""
 # -----------------------------------------------------------------------------
 # LaTeX table
 # -----------------------------------------------------------------------------
