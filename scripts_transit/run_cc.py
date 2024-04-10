@@ -24,7 +24,7 @@ waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ss.save_path, ss.label, ss.n_transit)
 
 # Import normalised fluxes
-waves, fluxes_norm, sigmas_norm, bad_px = tu.load_normalised_spectra_from_fits(
+fluxes_norm, sigmas_norm, bad_px, poly_coeff = tu.load_normalised_spectra_from_fits(
     fits_load_dir=ss.save_path,
     label=ss.label,
     n_transit=ss.n_transit,
@@ -55,14 +55,12 @@ if ss.do_drop_segments:
 #------------------------------------------------------------------------------
 # Import telluric spectra
 #------------------------------------------------------------------------------
-telluric_wave, telluric_tau, _ = sim.load_telluric_spectrum(
-    molecfit_fits=ss.molecfit_fits[ss.transit_i],
-    tau_fill_value=ss.tau_fill_value,)
-
-# TODO: properly interpolate telluric vector
-
-telluric_wave /= 10
-telluric_trans = 10**-telluric_tau
+telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
+    molecfit_fits=ss.molecfit_fits[0],
+    tau_fill_value=ss.tau_fill_value,
+    convert_to_angstrom=False,
+    convert_to_nm=True,
+    output_transmission=True,)
 
 #------------------------------------------------------------------------------
 # Import planet spectra

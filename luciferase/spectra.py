@@ -2882,7 +2882,8 @@ def calc_continuum_optimisation_resid(
     else:
         raise ValueError("Unimplemented case!")
 
-    print(coeffs)
+    assert np.sum(np.isnan(sci_flux)) == 0
+    assert np.sum(np.isnan(sci_sigma)) == 0
 
     # Calculate the continuum
     continuum_poly = Polynomial(coeffs)

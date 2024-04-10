@@ -22,6 +22,10 @@ planet_root_dirs:
 # Number of transits
 n_transit: 2
 
+# Wildcard to use when loading in time series--this determines whether we load
+# blaze corrected spectra or not.
+nod_ab_wildcard: "cr2res_obs_nodding_extracted[AB]_blaze_corr.fits"
+
 #------------------------------------------------------------------------------
 # Regrid settings
 #------------------------------------------------------------------------------
@@ -39,8 +43,10 @@ sigma_clip_level_lower: 3
 # Whether to plot diagnostic plots of CC value as a function of RV shift
 make_debug_plots: False
 
-# What method to use for interpolating the template and data
-interpolation_method: "linear"
+# What method to use for interpolating the template and data. Can be one of: 
+# [‘linear’, ‘nearest’, ‘nearest-up’, ‘zero’, ‘slinear’, ‘quadratic’, ‘cubic’,
+#  ‘previous’, or ‘next’].
+interpolation_method: "cubic"
 
 # If True, then we only do a single cross-correlation per detector
 do_rigid_regrid_per_detector: True
@@ -55,12 +61,22 @@ n_orders_to_group: 1
 # centre of the transit.
 n_ref_div: 5
 
+# If True, we use a Molecfit telluric model for the cross-correlation template
+# rather than an observed spectrum
+use_telluric_model_as_ref: True
+
+# Fill value to use when interpolating tau for the telluric model
+tau_fill_value: 0
+
+# Value befow which we consider the pixel sufficiently affected by telluric
+# absorption to mask it when continuum normalising.
+telluric_trans_bad_px_threshold: 0.5
+
 #------------------------------------------------------------------------------
 # Templates for continuum normalisation
 #------------------------------------------------------------------------------
 # Model stellar spectrum
-#marcs_fits: "synth/marcs_wasp107_4420g4.61z+0.00m0.683t0.plt"
-marcs_fits: "synth/template_wasp107_230623.fits"
+stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 
 # Molecfit modelled telluric spectra--one per night to be simulated
 molecfit_fits:

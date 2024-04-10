@@ -19,6 +19,7 @@ from astropy.coordinates import SkyCoord, EarthLocation
 from astropy.stats import sigma_clip
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
+from numpy.polynomial.polynomial import Polynomial
 
 # -----------------------------------------------------------------------------
 # Kepler's laws
@@ -432,7 +433,11 @@ def regrid_all_phases(
     do_rigid_regrid_per_detector=False,
     n_orders_to_group=1,
     edge_px_to_ignore=40,
-    n_ref_div=2,):
+    n_ref_div=2,
+    use_telluric_model_as_ref=False,
+    telluric_wave=None,
+    telluric_trans=None,
+    continuum_poly_coeff=None,):
     """Function to regrid all phases (from either a single night, or multiple
     nights concatenated together in phase) onto a uniform wavelength scale and
     shift all spectra to the same wavelength frame. This is done by selecting
@@ -491,9 +496,18 @@ def regrid_all_phases(
         The number of pixels to ignore from the edge of each detector.
 
     n_ref_div: int, default: 2
-        Used to compute the reference phase as n_phase//2 in conjunction with
-        reference_nod_pos.
+        Used to compute the reference phase as n_phase//n_ref_div in
+         conjunction with reference_nod_pos.
     
+    use_telluric_model_as_ref: boolean, default: False
+
+    telluric_wave, telluric_trans: 1D float array, default: None
+        Molecfit telluric wavelength and transmission vectors, of length 
+        [n_spec x n_px].
+
+    continuum_poly_coeff: 2D float array, default: None
+        Pre-fitted continuum polynomial coefficients of shape [n_spec, n_coeff]
+
     Returns
     -------
     wave_out: 2D float array
@@ -551,43 +565,92 @@ def regrid_all_phases(
         # for all detectors)
         n_ord = fluxes_d.shape[1]
 
+        # ---------------------------------------------------------------------
+        # Option A: use observed phase as reference
+        # ---------------------------------------------------------------------
         # Our reference phase will be the middle (in time) phase for either A
         # or B frames (depending on the value of reference_nod_pos)
-        phases = np.arange(n_phase)
-        nod_positions_ref = nod_positions == reference_nod_pos
-        phases_ref_pos = phases[nod_positions_ref]
-        phase_ref_i = phases_ref_pos[len(phases_ref_pos)//n_ref_div]
+        if not use_telluric_model_as_ref:
+            phases = np.arange(n_phase)
+            nod_positions_ref = nod_positions == reference_nod_pos
+            phases_ref_pos = phases[nod_positions_ref]
+            phase_ref_i = phases_ref_pos[len(phases_ref_pos)//n_ref_div]
 
-        # Store reference wavelength vector
-        wave_out[det_mask] = waves_d[phase_ref_i]
+            print("\nDet {}: using phase #{} @ nod pos {} as reference".format(
+                det_i, phase_ref_i, reference_nod_pos))
 
-        wave_ref = waves_d[phase_ref_i]
-        spec_ref = fluxes_d[phase_ref_i]
+            # Store reference wavelength vector
+            wave_out[det_mask] = waves_d[phase_ref_i]
 
-        # [Optional] Sigma clip our reference spectrum to avoid the impact of
-        # bad px on the cross-correlation.
-        ref_bad_px_mask = ~np.isfinite(spec_ref)
+            wave_ref = waves_d[phase_ref_i]
+            spec_ref = fluxes_d[phase_ref_i]
 
-        if do_sigma_clipping:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                sc_mask = sigma_clip(
-                    data=spec_ref,
-                    sigma_upper=sigma_clip_level_upper,
-                    sigma_lower=sigma_clip_level_lower).mask
-                
-                ref_bad_px_mask = np.logical_or(ref_bad_px_mask, sc_mask)
+            # [Optional] Sigma clip our reference spectrum to avoid the impact of
+            # bad px on the cross-correlation.
+            ref_bad_px_mask = ~np.isfinite(spec_ref)
 
-        if edge_px_to_ignore > 0:
-            ref_bad_px_mask[:, :edge_px_to_ignore] = True
-            ref_bad_px_mask[:, -edge_px_to_ignore:] = True
+            if do_sigma_clipping:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    sc_mask = sigma_clip(
+                        data=spec_ref,
+                        sigma_upper=sigma_clip_level_upper,
+                        sigma_lower=sigma_clip_level_lower).mask
+                    
+                    ref_bad_px_mask = np.logical_or(ref_bad_px_mask, sc_mask)
 
-        # Create an interpolator for the reference spectrum (ignoring bad px)
-        interp_ref_flux = interp1d(
-            x=wave_ref.ravel()[~ref_bad_px_mask.ravel()],
-            y=spec_ref.ravel()[~ref_bad_px_mask.ravel()],
-            kind=interpolation_method,
-            bounds_error=False,)
+            if edge_px_to_ignore > 0:
+                ref_bad_px_mask[:, :edge_px_to_ignore] = True
+                ref_bad_px_mask[:, -edge_px_to_ignore:] = True
+
+            # Create an interpolator for the reference spectrum (ignoring bad px)
+            interp_ref_flux = interp1d(
+                x=wave_ref.ravel()[~ref_bad_px_mask.ravel()],
+                y=spec_ref.ravel()[~ref_bad_px_mask.ravel()],
+                kind=interpolation_method,
+                bounds_error=False,)
+        
+        # ---------------------------------------------------------------------
+        # Option B: use telluric model as reference
+        # ---------------------------------------------------------------------
+        elif use_telluric_model_as_ref:
+            print("\nDet {}: using Molecfit model as reference.".format(det_i))
+            # Reshape telluric vector
+            tw = telluric_wave.reshape(n_spec, n_px)
+            tt = telluric_trans.reshape(n_spec, n_px)
+
+            # Ensure telluric vector is ordered
+            tw_ii = np.argsort(np.median(tw, axis=1))
+            tw = tw[tw_ii]
+            tt = tt[tw_ii]
+
+            # Select subset for this particular detector
+            wave_ref = tw[det_mask].copy()
+            tell_trans = tt[det_mask].copy()
+            coeff = continuum_poly_coeff[det_mask]
+
+            # Update output wavelength vector
+            wave_out[det_mask] = wave_ref.copy()
+
+            # Apply polynomial to each telluric segment. Note that we assume
+            # the polynomial is sorted correctly since we've previously sorted
+            # things in wavelength order.
+            for spec_i in range(n_spec//3):
+                # Calculate continuum poly
+                calc_continuum_poly = Polynomial(coeff[spec_i])
+                tell_trans[spec_i] *= calc_continuum_poly(wave_ref[spec_i])
+
+            # Create interpolator for the telluric vector
+            interp_ref_flux = interp1d(
+                x=wave_ref.ravel(),
+                y=tell_trans.ravel(),
+                kind=interpolation_method,
+                bounds_error=False,)
+
+            # Make sure that we enforce a per-segment cross correlation when
+            # using a telluric template.
+            do_rigid_regrid_per_detector = False
+            n_orders_to_group = 1
 
         # ---------------------------------------------------------------------
         # Prepare groupings
@@ -1847,13 +1910,13 @@ def save_normalised_spectra_to_fits(
     fits_load_dir,
     label,
     n_transit,
-    waves_norm,
     fluxes_norm,
     sigmas_norm,
     bad_px_mask_norm,
+    poly_coeff,
     transit_i,):
-    """Function to save normalised wave, flux, sigma, and bad px arrays as a
-    set of fits HDUs.
+    """Function to save normalised flux, sigma, bad px, and fitted polynomial
+    coefficient arrays as a set of fits HDUs.
 
     Parameters
     ----------
@@ -1866,15 +1929,16 @@ def save_normalised_spectra_to_fits(
     n_transit: int
         Number of transits saved to this fits file.
 
-    waves_norm: 2D float array
-        Wavelength vector of shape [n_spec, n_px].
-
     fluxes_norm, sigmas_norm: 3D float array
         Normalised flux and sigma vectors of shape [n_phase, n_spec, n_px].
 
     bad_px_mask_norm: 3D bool array
         Bad pixel mask corresponding to flux and sigma vectors, of shape
         [n_phase, n_spec, n_px].
+
+    poly_coeff: 3D float array
+        Fitted polynomial continuum coefficients of shape 
+        [n_phase, n_spec, n_coeff]
 
     transit_i: int
         The transit night number.
@@ -1884,14 +1948,14 @@ def save_normalised_spectra_to_fits(
 
     # Pair the extensions with their data
     extensions = {
-        "WAVES_NORM_{}".format(ti):(
-            waves_norm, "Wavelength vector for normalised fluxes."),
         "FLUXES_NORM_{}".format(ti):(
             fluxes_norm, "Continuum normalised fluxes."),
         "SIGMAS_NORM_{}".format(ti):(
             sigmas_norm, "Continuum normalised sigmas."),
         "BAD_PX_NORM_{}".format(ti):(
             bad_px_mask_norm.astype(int), "Bad px mask for norm. fluxes."),
+        "CONTINUUM_POLY_COEFF_{}".format(ti):(
+            poly_coeff, "Fitted continuum normalisation polynomial coeffs."),
     }
 
     # Load in the fits file
@@ -1947,6 +2011,10 @@ def load_normalised_spectra_from_fits(
     bad_px_mask_norm: 3D bool array
         Bad pixel mask corresponding to flux and sigma vectors, of shape
         [n_phase, n_spec, n_px].
+    
+    poly_coeff: 3D float array
+        Fitted polynomial continuum coefficients of shape 
+        [n_phase, n_spec, n_coeff]
     """
     # Input checking
     ti = int(transit_i)
@@ -1957,14 +2025,15 @@ def load_normalised_spectra_from_fits(
 
     with fits.open(fits_file, mode="readonly") as fits_file:
         # Load data constant across transits
-        waves_norm = fits_file["WAVES_NORM_{}".format(ti)].data.astype(float)
         fluxes_norm = fits_file["FLUXES_NORM_{}".format(ti)].data.astype(float)
         sigmas_norm = fits_file["SIGMAS_NORM_{}".format(ti)].data.astype(float)
         bad_px_mask_norm = \
             fits_file["BAD_PX_NORM_{}".format(ti)].data.astype(bool)
+        poly_coeff = \
+            fits_file["CONTINUUM_POLY_COEFF_{}".format(ti)].data.astype(float)
 
     # All done, return
-    return waves_norm, fluxes_norm, sigmas_norm, bad_px_mask_norm
+    return fluxes_norm, sigmas_norm, bad_px_mask_norm, poly_coeff
 
 
 # -----------------------------------------------------------------------------
@@ -2828,3 +2897,92 @@ def load_transmission_templates_from_fits(
 
     # All done, return
     return wave, spec, template_info
+
+
+def load_telluric_spectrum(
+    molecfit_fits,
+    tau_fill_value=0,
+    convert_to_angstrom=True,
+    convert_to_nm=False,
+    output_transmission=False,):
+    """Load in the atmospheric *transmittance* from a MOLECFIT best fit file,
+    and convert to optical depth as Tau = -ln (T). 
+
+    The format of the molecfit BEST_FIT_MODEL.fits fike is one table HDU with
+    the following columns:
+     - chip:    science spectral segment #
+     - lambda:  science wavelength scale
+     - flux:    science fluxes
+     - weight:  science flux weights. Per src/mf_readspec.c (in the molecfit
+                source code), the weights are simply the inverse variance 
+                (i.e. 1/sigma).
+     - mrange:  model spectral segment #
+     - mlambda: model wavelength scale
+     - mscal:   model continuum scaling factor
+     - mflux:   best fit model telluric correction
+     - mweight: model flux weights (i.e. the inverse variance)
+     - dev:     weighted difference between model and observed spectrum (per
+                the description in the header of mf_molecfit_writefile in
+                src/mf_molecfit.c)
+     - mtrans:  model transmission curve (for telluric features in absorption).
+                note that this *should* be equal to mflux in the absence of
+                molecfit performing its own continuum fit
+
+    Of these, we take mlambda and mtrans.
+
+    TODO: merge convert_to_angstrom and convert_to_nm into a single variable,
+    neaten output of transmission 
+
+    Parameters
+    ----------
+    molecfit_file: string
+        Filepath to molecfit fitted telluric spectrum.
+
+    tau_fill_value: float, default: 0
+        Default value for missing values in the molecfit fitted spectrum.
+
+    convert_um_to_angstrom: boolean, default: True
+        Whether to convert the wavelength scale in um to Angstrom.
+
+    TODO
+
+    Returns
+    -------
+    telluric_wave, telluric_tau: float array
+        Loaded wavelength and tau (optical depth) arrays.
+    
+    calc_telluric_tau: scipy interp1d object
+        Interpolator for tau.
+    """
+    with fits.open(molecfit_fits) as telluric_fits:
+        # Extract data
+        data = telluric_fits[1].data
+
+        telluric_wave = data["mlambda"]
+        telluric_trans = data["mtrans"]
+
+        # Ensure these are sorted
+        sorted_i = np.argsort(telluric_wave)
+        telluric_wave = telluric_wave[sorted_i]
+        telluric_trans = telluric_trans[sorted_i]
+
+        # Calculate optical depth
+        telluric_tau = -np.log(telluric_trans)
+
+        # Construct an interpolator for the optical depth
+        calc_telluric_tau = interp1d(
+            x=telluric_wave,
+            y=telluric_tau,
+            fill_value=tau_fill_value,
+            assume_sorted=True,)
+
+    if convert_to_angstrom:
+        telluric_wave *= 1E4
+    elif convert_to_nm:
+        telluric_wave *= 1E3
+
+    if output_transmission:
+        telluric_trans = 10**-telluric_tau
+        return telluric_wave, telluric_tau, calc_telluric_tau, telluric_trans
+    else:
+        return telluric_wave, telluric_tau, calc_telluric_tau

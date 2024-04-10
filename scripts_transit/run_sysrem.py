@@ -5,8 +5,6 @@ same fits file as extra extensions.
 """
 import numpy as np
 import transit.utils as tu
-import transit.simulator as sim
-import luciferase.spectra as ls
 import transit.sysrem as sr
 import transit.plotting as tplt
 import luciferase.utils as lu
@@ -34,64 +32,13 @@ for transit_i in range(ss.n_transit):
     # Grab dimensions of flux datacube
     (n_phase, n_spec, n_px) = fluxes_list[transit_i].shape
 
-    # Sort to be in proper wavelength order so nothing unexpected happens
-    wave_ii = np.argsort(np.median(waves, axis=1))
-    waves = waves[wave_ii]
-    waves_1d = np.reshape(waves, n_spec*n_px)
-
-    for night_i in range(len(fluxes_list)):
-        fluxes_list[night_i] = fluxes_list[night_i][:, wave_ii, :]
-        sigmas_list[night_i] = sigmas_list[night_i][:, wave_ii, :]
-
-        # HACK: clean sigma=0 values
-        is_zero = sigmas_list[night_i] == 0
-        sigmas_list[night_i][is_zero] = 1E5
-
-    #--------------------------------------------------------------------------
-    # Import telluric vector for this night
-    #--------------------------------------------------------------------------
-    # Import telluric vector
-    telluric_wave, telluric_tau, _ = sim.load_telluric_spectrum(
-        molecfit_fits=ss.molecfit_fits[transit_i],
-        tau_fill_value=ss.tau_fill_value,)
-
-    # TODO: properly interpolate telluric vector
-
-    telluric_wave /= 10
-    telluric_trans = 10**-telluric_tau
-
-    #--------------------------------------------------------------------------
-    # Continuum normalise spectra
-    #--------------------------------------------------------------------------
-    print("Continuum normalising spectra...")
-    fluxes_norm, sigmas_norm, poly_coeff = \
-        ls.continuum_normalise_all_spectra_with_telluric_model(
-            waves_sci=waves,
-            fluxes_sci=fluxes_list[transit_i],
-            sigmas_sci=sigmas_list[transit_i],
-            wave_telluric=telluric_wave,
-            trans_telluric=telluric_trans,
-            wave_stellar=wave_stellar,
-            spec_stellar=spec_stellar,
-            bcors=transit_info_list[transit_i]["bcor"].values,
-            rv_star=syst_info.loc["rv_star", "value"],)
-
-    # Construct bad px mask from tellurics
-    print("Constructing bad px mask from tellurics...")
-    bad_px_mask_1D = telluric_trans < ss.telluric_trans_bad_px_threshold
-    bad_px_mask_3D = np.tile(
-        bad_px_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)
-
-    # Save normalised spectra back to fits file
-    tu.save_normalised_spectra_to_fits(
-        fits_load_dir=ss.save_path,
-        label=ss.label,
-        n_transit=ss.n_transit,
-        waves_norm=waves,
-        fluxes_norm=fluxes_norm,
-        sigmas_norm=sigmas_norm,
-        bad_px_mask_norm=bad_px_mask_3D,
-        transit_i=transit_i,)
+    # Load continuum normalised data
+    fluxes_norm, sigmas_norm, bad_px_mask_norm, poly_coeff = \
+        tu.load_normalised_spectra_from_fits(
+            fits_load_dir=ss.save_path,
+            label=ss.label,
+            n_transit=ss.n_transit,
+            transit_i=transit_i,)
 
     #--------------------------------------------------------------------------
     # Run SYSREM for this night
@@ -108,7 +55,7 @@ for transit_i in range(ss.n_transit):
         resid = sr.run_sysrem(
             spectra=fluxes_norm[:,spec_i,:],
             e_spectra=sigmas_norm[:,spec_i,:],
-            bad_px_mask=bad_px_mask_3D[:,spec_i,:],
+            bad_px_mask=bad_px_mask_norm[:,spec_i,:],
             n_iter=ss.n_sysrem_iter,
             mjds=transit_info_list[transit_i]["mjd_mid"].values,
             tolerance=ss.sysrem_convergence_tol,

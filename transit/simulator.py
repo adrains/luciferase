@@ -473,82 +473,6 @@ def save_planet_spectrum(wave_file, spec_file, wave, spec):
     hdu_flux.writeto(spec_file, overwrite=True)
 
 
-def load_telluric_spectrum(
-    molecfit_fits,
-    tau_fill_value=0,
-    convert_to_angstrom=True,):
-    """Load in the atmospheric *transmittance* from a MOLECFIT best fit file,
-    and convert to optical depth as Tau = -ln (T). 
-
-    The format of the molecfit BEST_FIT_MODEL.fits fike is one table HDU with
-    the following columns:
-     - chip:    science spectral segment #
-     - lambda:  science wavelength scale
-     - flux:    science fluxes
-     - weight:  science flux weights. Per src/mf_readspec.c (in the molecfit
-                source code), the weights are simply the inverse variance 
-                (i.e. 1/sigma).
-     - mrange:  model spectral segment #
-     - mlambda: model wavelength scale
-     - mscal:   model continuum scaling factor
-     - mflux:   best fit model telluric correction
-     - mweight: model flux weights (i.e. the inverse variance)
-     - dev:     weighted difference between model and observed spectrum (per
-                the description in the header of mf_molecfit_writefile in
-                src/mf_molecfit.c)
-     - mtrans:  model transmission curve (for telluric features in absorption).
-                note that this *should* be equal to mflux in the absence of
-                molecfit performing its own continuum fit
-
-    Of these, we take mlambda and mtrans.
-
-    Parameters
-    ----------
-    molecfit_file: string
-        Filepath to molecfit fitted telluric spectrum.
-
-    tau_fill_value: float, default: 0
-        Default value for missing values in the molecfit fitted spectrum.
-
-    convert_um_to_angstrom: boolean, default: True
-        Whether to convert the wavelength scale in um to Angstrom.
-
-    Returns
-    -------
-    telluric_wave, telluric_tau: float array
-        Loaded wavelength and tau (optical depth) arrays.
-    
-    calc_telluric_tau: scipy interp1d object
-        Interpolator for tau.
-    """
-    with fits.open(molecfit_fits) as telluric_fits:
-        # Extract data
-        data = telluric_fits[1].data
-
-        telluric_wave = data["mlambda"]
-        telluric_trans = data["mtrans"]
-
-        # Ensure these are sorted
-        sorted_i = np.argsort(telluric_wave)
-        telluric_wave = telluric_wave[sorted_i]
-        telluric_trans = telluric_trans[sorted_i]
-
-        # Calculate optical depth
-        telluric_tau = -np.log(telluric_trans)
-
-        # Construct an interpolator for the optical depth
-        calc_telluric_tau = interp1d(
-            x=telluric_wave,
-            y=telluric_tau,
-            fill_value=tau_fill_value,
-            assume_sorted=True,)
-
-    if convert_to_angstrom:
-        telluric_wave *= 1E4
-
-    return telluric_wave, telluric_tau, calc_telluric_tau
-
-
 # -----------------------------------------------------------------------------
 # General Functions
 # -----------------------------------------------------------------------------
@@ -1720,7 +1644,7 @@ def simulate_transit_multiple_epochs(
             trans_planet, syst_info.loc["r_planet_rearth", "value"])
     
     # Load telluric spectrum
-    telluric_wave, telluric_tau, _ = load_telluric_spectrum(
+    telluric_wave, telluric_tau, _ = tu.load_telluric_spectrum(
         molecfit_fits=molecfit_fits,
         tau_fill_value=tau_fill_value,)
     

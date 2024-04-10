@@ -14,6 +14,7 @@ import transit.utils as tu
 import transit.plotting as tplt
 import transit.tables as ttab
 import luciferase.spectra as ls
+import luciferase.utils as lu
 
 # -----------------------------------------------------------------------------
 # Setup and Options
@@ -51,7 +52,9 @@ for transit_i, trans_dir in enumerate(ds.planet_root_dirs):
     # Extract sorted time series data
     print("Loading spectra for transit #{}...".format(transit_i))
     waves, fluxes, sigmas, detectors, orders, transit_info = \
-        tu.extract_nodding_time_series(root_dir=trans_dir)
+        tu.extract_nodding_time_series(
+            root_dir=trans_dir,
+            nod_ab_wildcard=ds.nod_ab_wildcard)
     
     # Grab dimensions for convenience
     (n_phase, n_spec, n_px) = fluxes.shape
@@ -74,6 +77,22 @@ for transit_i, trans_dir in enumerate(ds.planet_root_dirs):
     nod_positions_all.append(transit_info["nod_pos"].values)
 
 # -----------------------------------------------------------------------------
+# Template spectra
+# -----------------------------------------------------------------------------
+# Molecfit telluric model (continuum normalisation + cross-correlation)
+telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
+    molecfit_fits=ds.molecfit_fits[0],
+    tau_fill_value=ds.tau_fill_value,
+    convert_to_angstrom=False,
+    convert_to_nm=True,
+    output_transmission=True,)
+
+# Stellar spectrum (continuum normalisation)
+wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
+    template_fits=ds.stellar_template_fits,
+    do_convert_air_to_vacuum_wl=False,)
+
+# -----------------------------------------------------------------------------
 # Interpolate all fluxes across phase and transit onto common wavelength scale
 # -----------------------------------------------------------------------------
 # Stack all transits along the phase dimension to regid on inter-night basis
@@ -92,15 +111,45 @@ else:
     orders_stacked = orders_all[0]
     nod_positions_stacked = nod_positions_all[0]
 
-# [Optional] Import a Molecfit telluric model to use for cross-correlation
-pass
+# Sort in wavelength order
+wave_ii = np.argsort(np.median(wave_stacked[0], axis=1))
+wave_stacked = wave_stacked[:,wave_ii,:]
+fluxes_stacked = fluxes_stacked[:,wave_ii,:]
+sigmas_stacked = sigmas_stacked[:,wave_ii,:]
+detectors_stacked = detectors_stacked[:,wave_ii]
+orders_stacked = orders_stacked[:,wave_ii]
+
+# [Optional] Load in continuum polynomial coefficients, which we need to scale
+# the molecfit transmission spectrum to match the observations. Note this is
+# currently circular/iterative in that this script needs to be run twice now:
+# once with the use_telluric_model_as_ref set to False, at which point we save
+# the polynomial coefficients to the fits file, then again with it set to true
+# so that we can use the polynomial coefficients when doing the 
+# cross-correlation using the telluric spectrum as a template. TODO: fix.
+if ds.use_telluric_model_as_ref:
+    _, _, _, poly_coeff = tu.load_normalised_spectra_from_fits(
+        fits_load_dir=ds.save_path,
+        label=ds.star_name,
+        n_transit=ds.n_transit,
+        transit_i=0,)
+    
+    poly_coeff = np.nanmean(poly_coeff, axis=0) # Shape: [n_phase, n_coeff]
+
+else:
+    poly_coeff = None
 
 # Using the stacked data, regrid onto a single common wavelength scale
 # Regrid the stacked data onto a single wavelength scale and correct offsets in
-# the wavelength scale between A/B nodding positions.rvs and ds are the radial
-# velocities and doppler shifts respectively found for each spectral segment, 
-# but if do_rigid_regrid_per_detector is True then we simply use the median of
-# this on a per-detector basis for the regridding.
+# the wavelength scale between A/B nodding positions. This function has a few
+# options:
+#   1) Regrid using a Molecfit telluric model (use_telluric_model_as_ref = True
+#      poly_coeff != None)
+#   2) Regrid using the spectrum from a specific phase + A/B position
+#   2.1) If do_rigid_regrid_per_detector = True, then three cross-correlations
+#        are done: one for each detector.
+#   2.2) If do_rigid_regrid_per_detector = False, then n_orders_to_group is
+#        used to determine how many adjacent orders on the same detector are
+#        used for each cross-correlation.
 wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, cc_rvs, cc_all = \
     tu.regrid_all_phases(
         waves=wave_stacked,
@@ -118,14 +167,14 @@ wave_adopt, fluxes_interp_all, sigmas_interp_all, rvs_all, cc_rvs, cc_all = \
         interpolation_method=ds.interpolation_method,
         do_rigid_regrid_per_detector=ds.do_rigid_regrid_per_detector,
         n_ref_div=ds.n_ref_div,
-        n_orders_to_group=ds.n_orders_to_group,)
-
-# Determine bad pixel mask for edge pixels (imin, imax)
-#print("Determining pixel limits...")
-#px_min, px_max = tu.compute_detector_limits(fluxes_stacked)
+        n_orders_to_group=ds.n_orders_to_group,
+        use_telluric_model_as_ref=ds.use_telluric_model_as_ref,
+        telluric_wave=telluric_wave,
+        telluric_trans=telluric_trans,
+        continuum_poly_coeff=poly_coeff,)
 
 # -----------------------------------------------------------------------------
-# Main operation
+# Clean spectra + calculate timestep info
 # -----------------------------------------------------------------------------
 # Split our stacked arrays back into individual transits, clean/clip the data,
 # and calculate information for each time step.
@@ -188,7 +237,7 @@ tplt.plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors)
 tplt.plot_regrid_diagnostics_img(fluxes_cleaned_stacked, detectors, wave_adopt)
 
 # -----------------------------------------------------------------------------
-# Saving fits
+# Save data cube + timestep info
 # -----------------------------------------------------------------------------
 # Save all arrays and dataframes
 tu.save_transit_info_to_fits(
@@ -205,14 +254,21 @@ tu.save_transit_info_to_fits(
     cc_rv_shifts_list=cc_rv_shifts_all,)
 
 # -----------------------------------------------------------------------------
-# Do final continuum normalisation on data
+# Continuum normalise data + save
 # -----------------------------------------------------------------------------
-"""
 print("Continuum normalising spectra...")
 for transit_i in range(ds.n_transit):
+    # Grab shape for this night
+    (n_phase, n_spec, n_px) = fluxes_all[transit_i].shape
+
+    for night_i in range(len(fluxes_cleaned_all)):
+        # HACK: clean sigma=0 values. TODO: move this earlier.
+        is_zero = sigmas_cleaned_all[night_i] == 0
+        sigmas_cleaned_all[night_i][is_zero] = 1E5
+
     fluxes_norm, sigmas_norm, poly_coeff = \
         ls.continuum_normalise_all_spectra_with_telluric_model(
-            waves_sci=waves,
+            waves_sci=wave_adopt,
             fluxes_sci=fluxes_cleaned_all[transit_i],
             sigmas_sci=sigmas_cleaned_all[transit_i],
             wave_telluric=telluric_wave,
@@ -224,7 +280,7 @@ for transit_i in range(ds.n_transit):
 
     # Construct bad px mask from tellurics
     print("Constructing bad px mask from tellurics...")
-    bad_px_mask_1D = telluric_trans < ss.telluric_trans_bad_px_threshold
+    bad_px_mask_1D = telluric_trans < ds.telluric_trans_bad_px_threshold
     bad_px_mask_3D = np.tile(
         bad_px_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)
 
@@ -233,12 +289,12 @@ for transit_i in range(ds.n_transit):
         fits_load_dir=ds.save_path,
         label=ds.star_name,
         n_transit=ds.n_transit,
-        waves_norm=waves,
         fluxes_norm=fluxes_norm,
         sigmas_norm=sigmas_norm,
         bad_px_mask_norm=bad_px_mask_3D,
+        poly_coeff=poly_coeff,
         transit_i=transit_i,)
-"""
+
 # -----------------------------------------------------------------------------
 # LaTeX table
 # -----------------------------------------------------------------------------
