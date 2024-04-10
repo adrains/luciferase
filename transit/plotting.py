@@ -1,6 +1,7 @@
 """
 Plotting functions associated with our transit modelling.
 """
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -9,6 +10,13 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.ticker as plticker
 from tqdm import tqdm
 from astropy.stats import sigma_clip
+
+# Ensure the plotting folder exists to save to
+here_path = os.path.dirname(__file__)
+plot_dir = os.path.abspath(os.path.join(here_path, "..", "plots"))
+
+if not os.path.isdir(plot_dir):
+    os.mkdir(plot_dir)
 
 def plot_iteration():
     """

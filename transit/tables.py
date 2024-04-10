@@ -1,9 +1,16 @@
 """Functions related to saving LaTeX tables for papers.
 """
+import os
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from collections import OrderedDict
+
+# Ensure the plotting folder exists to save to
+here_path = os.path.dirname(__file__)
+plot_dir = os.path.abspath(os.path.join(here_path, "..", "paper"))
+
+if not os.path.isdir(plot_dir):
+    os.mkdir(plot_dir)
 
 def make_observations_table(
     transit_info_list,
