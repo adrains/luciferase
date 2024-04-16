@@ -3035,7 +3035,8 @@ def continuum_normalise_all_spectra_with_telluric_model(
         Wavelength and transmission vectors for telluric template.
 
     wave_stellar, spec_stellar: 1D float array
-        Wavelength and spectrum vectors for stellar template.
+        Wavelength and spectrum vectors for stellar template. We expect this
+        stellar spectrum to be *continuum normalised*.
 
     bcors: 1D float array
         Barycentric correction for each phase in km/s of shape [n_phase].
@@ -3052,6 +3053,14 @@ def continuum_normalise_all_spectra_with_telluric_model(
     poly_coeff_all: 3D float array
         Best fit polynomial coefficients of shape [n_phase, n_spec, n_order]
     """
+    # A little error checking for sanity purposes. We expect continuum
+    # normalised spectra, so we shouldn't have median values > 1.
+    if np.nanmedian(trans_telluric) > 1 or np.nanmedian(spec_stellar) > 1:
+        raise ValueError(("This function expects telluric transmission and "
+                         "continuum normalised stellar spectra as templates. "
+                         "One or both of these templates currently has a "
+                         "median value > 1."))
+    
     (n_phase, n_spec, n_px) = fluxes_sci.shape
 
     fluxes_sci_norm = np.zeros_like(fluxes_sci)
@@ -3266,7 +3275,8 @@ def continuum_normalise_spectrum_with_telluric_model(
         Transmission vector for telluric template of shape [n_px].
 
     spec_stellar: 1D float array
-        Stellar spectrum vector for stellar template of shape [n_px].
+        Stellar spectrum vector for stellar template of shape [n_px]. This
+        spectrum should be *continuum normalised*.
 
     edge_px_to_exclude: int, default: 20
         Pixels to exclude from each edge of the detector.

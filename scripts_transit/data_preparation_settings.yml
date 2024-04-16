@@ -73,9 +73,16 @@ tau_fill_value: 0
 telluric_trans_bad_px_threshold: 0.5
 
 #------------------------------------------------------------------------------
+# Timestep settings
+#------------------------------------------------------------------------------
+# Whether to take stellar rotation into account when computing the Doppler
+# shift beta, otherwise gamma = beta.
+do_consider_vsini: False
+
+#------------------------------------------------------------------------------
 # Templates for continuum normalisation
 #------------------------------------------------------------------------------
-# Model stellar spectrum
+# Model *continuum normalised* stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 
 # Molecfit modelled telluric spectra--one per night to be simulated

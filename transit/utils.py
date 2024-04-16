@@ -2136,7 +2136,10 @@ def load_sysrem_residuals_from_fits(
 # -----------------------------------------------------------------------------
 # 
 # -----------------------------------------------------------------------------
-def calculate_transit_timestep_info(transit_info, syst_info,):
+def calculate_transit_timestep_info(
+    transit_info,
+    syst_info,
+    do_consider_vsini=False,):
     """Iterate over each time step and compute planet phase, planet XYZ
     position, planet XYZ velocities, and associated mu value at the start, mid-
     point, and end of each exposure. These values are then added to each row in
@@ -2448,10 +2451,16 @@ def calculate_transit_timestep_info(transit_info, syst_info,):
     # - The doppler shift should be *negative* (1 - doppler_shift) * λ_old when
     #   *shifting* out of the (adopted) rest/reference-frame.
     star_rv_bcor = -1* transit_info["bcor"] + syst_info.loc["rv_star", "value"]
-    vsini_planet_epoch = syst_info.loc["vsini", "value"] * r_x
-
+    
     gamma = star_rv_bcor / const.c.cgs.to(u.km/u.s)
-    beta = (star_rv_bcor + vsini_planet_epoch) / const.c.cgs.to(u.km/u.s)
+
+    if do_consider_vsini:
+        raise NotImplementedError("Currently beta = gamma, vsini assumed = 0")
+        vsini_planet_epoch = syst_info.loc["vsini", "value"] * np.nan # TODO
+        beta = (star_rv_bcor + vsini_planet_epoch) / const.c.cgs.to(u.km/u.s)
+    else:
+        beta = gamma.copy()
+
     delta = (star_rv_bcor + v_y) / const.c.cgs.to(u.km/u.s)
 
     transit_info["gamma"] = gamma

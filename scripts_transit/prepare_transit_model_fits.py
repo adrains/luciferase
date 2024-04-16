@@ -192,7 +192,10 @@ for transit_i in range(ds.n_transit):
 
     # Calculate mus and rvs and add them to our existing dataframes
     print("Calculating time step info...")
-    tu.calculate_transit_timestep_info(transit_info, syst_info)
+    tu.calculate_transit_timestep_info(
+        transit_info,
+        syst_info,
+        do_consider_vsini=ds.do_consider_vsini,)
 
     # Sigma clip observations
     print("Sigma clipping and cleaning data...")

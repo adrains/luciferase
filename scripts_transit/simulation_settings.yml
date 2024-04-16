@@ -70,6 +70,17 @@ savgol_window_frac_size: 0.5
 savgol_poly_order: 3
 
 # -----------------------------------------------------------------------------
+# Continuum normalisation
+# -----------------------------------------------------------------------------
+# Value befow which we consider the pixel sufficiently affected by telluric
+# absorption to mask it when continuum normalising.
+telluric_trans_bad_px_threshold: 0.5
+
+# Note that this stellar template is *different* than the one above since this
+# one is already continuum normalised and used for masking.
+stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
+
+# -----------------------------------------------------------------------------
 # Test/troubleshooting settings
 # -----------------------------------------------------------------------------
 # Set these to true to disable the respective component in the modelling
