@@ -224,7 +224,7 @@ for transit_i in range(ss.n_transit):
     # Save normalised spectra back to fits file
     tu.save_normalised_spectra_to_fits(
         fits_load_dir=ss.save_path,
-        label=ss.label,
+        label=fn_label,
         n_transit=ss.n_transit,
         fluxes_norm=fluxes_norm,
         sigmas_norm=sigmas_norm,
