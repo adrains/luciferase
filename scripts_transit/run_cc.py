@@ -65,7 +65,8 @@ telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
 #------------------------------------------------------------------------------
 # Import planet spectra
 #------------------------------------------------------------------------------
-# Load in petitRADRTRANS datacube of templates
+# Load in petitRADRTRANS datacube of templates. These templates will be in
+# units of R_earth as a function of wavelength.
 templ_wave, templ_spec_all, templ_info = \
     tu.load_transmission_templates_from_fits(fits_file=ss.template_fits)
 
@@ -76,14 +77,23 @@ templ_wave = templ_wave[10:-10] / 10
 molecules = templ_info.columns.values
 
 # Pick a template
-templ_i = 1     # H2O model
+templ_i = 0     # CO model
 
 # The datacube spectra are at R~200,000, so we need to further downsample
-trans_planet_instr = instrBroadGaussFast(
+templ_spec_instr = instrBroadGaussFast(
         wvl=templ_wave,
         flux=templ_spec_all[templ_i],
         resolution=100000,
         equid=True,)
+
+# Convert to a transmission spectrum
+r_e = const.R_earth.si.value
+r_odot = const.R_sun.si.value
+
+rp = syst_info.loc["r_planet_rearth", "value"] 
+rs = syst_info.loc["r_star_rsun", "value"] * r_odot / r_e
+
+trans_planet_instr = 1 - ((templ_spec_instr + rp)**2  / rs**2)
 
 # [Optional] For testing, we can use the telluric vector for cross correlation
 if ss.cc_with_telluric:
@@ -105,8 +115,8 @@ cc_rvs, cc_values = sr.cross_correlate_sysrem_resid(
     template_wave=wave_template,
     template_spec=spectrum_template,
     cc_rv_step=ss.cc_rv_step,
-    cc_rv_lims=ss.cc_rv_lims,)
-
+    cc_rv_lims=ss.cc_rv_lims,
+    interpolation_method="cubic",)
 
 # ------
 # Correct the per-segment cc
@@ -144,7 +154,7 @@ planet_rvs = \
 # First plot the cross-correlation one order at a time
 tplt.plot_sysrem_cc_2D(
     cc_rvs=cc_rvs,
-    cc_values=cc_vals_subbed,
+    cc_values=cc_values,
     mean_spec_lambdas=np.mean(waves,axis=1),
     planet_rvs=planet_rvs,
     plot_label=ss.label,)
@@ -157,6 +167,8 @@ tplt.plot_sysrem_cc_2D(
     planet_rvs=planet_rvs,
     fig_size=(6,6),
     plot_label="comb_{}".format(ss.label),)
+
+assert False
 
 # Plot the Kp vs Vsys map
 Kp_steps, Kp_vsys_map = sr.compute_Kp_vsys_map(

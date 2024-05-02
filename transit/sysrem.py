@@ -307,7 +307,8 @@ def cross_correlate_sysrem_resid(
     template_wave,
     template_spec,
     cc_rv_step=1,
-    cc_rv_lims=(-200,200),):
+    cc_rv_lims=(-200,200),
+    interpolation_method="cubic",):
     """Function to cross correlate a template spectrum against all spectral
     segments, for all phases, and for all SYSREM iterations.
 
@@ -334,6 +335,11 @@ def cross_correlate_sysrem_resid(
     cc_rv_lims: float tuple, default: (-200,200)
         Lower and upper bounds for cross correlation in km/s.
 
+    interpolation_method: str, default: "linear"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+
     Returns
     -------
     cc_rvs: 1D float array
@@ -353,11 +359,16 @@ def cross_correlate_sysrem_resid(
     # Intiialise output array
     cc_values = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
 
-    # Initialise template spectrum interpolator. Make sure to subtract 1 from
-    # the template spectrum so both it and the residuals fluctuate about zero.
+    # Prepare template
+    # TODO: we currently divide by the median, not sure if this is appropriate?
+    tw = template_wave.copy()
+    ts = template_spec.copy() / np.nanmedian(template_spec)
+
+    # Initialise template spectrum interpolator.
     temp_interp = interp1d(
-        x=template_wave,
-        y=template_spec-1,
+        x=tw,
+        y=ts,
+        kind=interpolation_method,
         bounds_error=False,
         fill_value=np.nan,)
 
@@ -392,8 +403,12 @@ def cross_correlate_sysrem_resid(
                 assert len(ss) == 1
 
                 # Calculate the cross correlation weighted by the uncertainties
-                resid = sysrem_resid[sysrem_iter_i, :, spec_i]
+                # TODO: we add +1 to the residuals so they flucuate about 1.
+                # This should be doublechecked.
+                resid = sysrem_resid[sysrem_iter_i, :, spec_i].copy() +1
+                #resid /= np.nanmedian(resid)
                 sigma = sigma_spec[:, spec_i, :]
+                den = np.sqrt(np.nansum(resid**2) * np.nansum(spec_3D**2))
                 cc_val = np.nansum(resid * spec_3D / sigma**2, axis=1)
                 
                 #cc_num = np.nansum(resid * spec_3D, axis=1)
