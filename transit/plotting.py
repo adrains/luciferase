@@ -101,6 +101,7 @@ def plot_all_input_spectra(
 
     axes[-1].set_xlabel("Wavelength")
     plt.tight_layout()
+    plt.savefig("plots/input_spectra.pdf")
 
 
 def plot_component_spectra(

@@ -3014,7 +3014,8 @@ def continuum_normalise_all_spectra_with_telluric_model(
     wave_stellar,
     spec_stellar,
     bcors,
-    rv_star,):
+    rv_star,
+    airmasses,):
     """Function to continuum normalise spectra via 1D polynomial to each
     spectral segment optimised to a telluric spectrum and stellar mask.
 
@@ -3043,6 +3044,10 @@ def continuum_normalise_all_spectra_with_telluric_model(
 
     rv_star: float
         Radial velocity of the star in km/s.
+
+    airmasses: float array
+        Array of airmasses of shape [n_phase]. These are applied to the
+        telluric transmission vector.
 
     Returns
     -------
@@ -3116,6 +3121,10 @@ def continuum_normalise_all_spectra_with_telluric_model(
         for phase_i in range(n_phase):
             # Interpolate telluric vector
             trans_telluric = calc_telluric_trans(waves_sci[spec_i])
+
+            # Apply the effect of airmass to the telluric transmission
+            tau = -np.log(trans_telluric)
+            trans_telluric = np.exp(-tau * airmasses[phase_i])
 
             # Interpolate stellar vector
             spec_stellar = calc_stellar_spec(

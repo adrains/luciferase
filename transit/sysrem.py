@@ -10,6 +10,7 @@ from astropy.stats import sigma_clip
 from tqdm import tqdm
 from scipy.interpolate import interp1d
 import astropy.constants as const
+from numpy.polynomial.polynomial import Polynomial, polyfit
 
 def clean_and_compute_initial_resid(
     spectra,
@@ -143,8 +144,15 @@ def clean_and_compute_initial_resid(
     flux[bad_px_mask] = np.nan
     e_flux[bad_px_mask] = 1E20
 
-    # Median subtract to get initial set of residuals
-    residuals = (flux.T - np.nanmedian(flux, axis=1)).T
+    # Finally we pre-normalise the spectra. Per Birkby+2013, this involves:
+    #   1) Dividing each individual *spectrum* by its mean value
+    #   2) Subtracting unity
+    mean_1D = np.nanmean(flux, axis=1)                      # [n_phase]
+    mean_2D = np.broadcast_to(mean_1D[:,None], flux.shape)  # [n_phase, n_px]
+    residuals = flux / mean_2D - 1
+    
+    # Also rescale uncertainties
+    e_flux /= mean_2D
 
     return residuals, flux, e_flux
 
@@ -183,6 +191,12 @@ def run_sysrem(
      4: Fit for gradient that best minimises residuals when combined with trend
         magnitudes.
      5: Subtract linear trend, repeat 3-5 for as many iterations as required.
+
+    Adapted from:
+    www.github.com/AWehrhahn/ChEATS/blob/master/exoplanet_transit_snr/sysrem.py
+    
+    Itself originally adapted from:
+    www.github.com/stephtdouglas/PySysRem/blob/master/sysrem.py
 
     Parameters
     ----------
@@ -228,7 +242,7 @@ def run_sysrem(
 
     n_phase, n_px = spectra.shape
 
-    # TODO Check to make sure we have proper ucnertainties
+    # TODO Check to make sure we have proper uncertainties
     pass
 
     # Intialise resid array for all iterations, shape [n_iter+1, n_phase, n_px]
@@ -245,7 +259,7 @@ def run_sysrem(
 
     # Store median subtracted residuals
     resid_all[0] = resid_init
-    e_flux = e_flux.T
+    e_flux_sq = e_flux.copy().T**2
 
     # Run SYSREM
     for sr_iter_i in range(n_iter):
@@ -265,26 +279,27 @@ def run_sysrem(
 
         while converge_step_i < max_converge_iter and not has_converged:
             # Comnpute an estimate for c for converge_step_i
-            c_num = np.nansum(aa * (resid / e_flux**2), axis=1,)
-            c_den = np.nansum(aa ** 2 / e_flux**2, axis=1,)
+            c_num = np.nansum(aa * resid / e_flux_sq, axis=1,)
+            c_den = np.nansum(aa**2 / e_flux_sq, axis=1,)
             cc_est = np.divide(c_num, c_den,)
 
             # Compute an estimate for a at converge_step_i
-            a_num = np.nansum(cc_est[:, None] * (resid / e_flux**2), axis=0,)
-            a_den = np.nansum(cc_est[:, None] ** 2 / e_flux**2, axis=0,)
+            a_num = np.nansum(cc_est[:, None] * resid / e_flux_sq, axis=0,)
+            a_den = np.nansum(cc_est[:, None]**2 / e_flux_sq, axis=0,)
             aa_est = np.divide(a_num, a_den,)
 
             # Calculate diff
             c_diff = diff_func((cc_est - cc)**2)
             a_diff = diff_func((aa_est - aa)**2)
+            diff = c_diff + a_diff
             
             # Update our values
-            cc = cc_est
-            aa = aa_est
+            cc = cc_est.copy()
+            aa = aa_est.copy()
 
             # Update
             converge_step_i += 1
-            if c_diff < tolerance and a_diff < tolerance:
+            if diff < tolerance:
                 has_converged = True
 
             print(
@@ -300,17 +315,97 @@ def run_sysrem(
     return resid_all
 
 
+def sysrem_piskunov(spectra, sigma_threshold=3.0,):
+    """Nikolai Piskunov's implementation of 'SYSREM'. This algorithm fits each
+    spectral pixel with a parabola (i.e. a fit to flux in the phase dimension),
+    sigma clips those pixels sigma_threshold aberrant this fit, repeats the
+    fit, then divides by the resulting curve. At present this algorithm only
+    performs a single 'SYSREM' iteration.
+
+    Note: strictly speaking, this algorithm has some key differences to SYSREM:
+     - SYSREM takes into account uncertainties
+     - SYSREM fits an arbitrary 'airmass' function to *all* spectral pixels,
+       which is then modulated by a per-spectral-px 'extinction' coefficient.
+       However, this algorithm simply uses n_px independent parabola fits.
+
+    TODO: extend this to multiple iterations.
+    
+    Parameters
+    ----------
+    spectra: 3D float array
+        Observed spectra of shape [n_phase, n_spec, n_px]
+
+    sigma_threshold: float, default: 3.0
+        Sigma threshold above which to exclude pixels from the parabola fit.
+
+    Returns
+    -------
+    resid_all: 3D float array
+        Residuals of shape [n_phase, n_spec, n_px]
+    """
+    # Grab dimensions for convenience
+    (n_phase, n_spec, n_px) = spectra.shape
+
+    # Initialise our residual vector
+    resid_all = np.full((n_phase, n_spec, n_px), np.nan)
+
+    # Loop over all spectral segments
+    for spec_i in range(n_spec):
+        # Grab the flux for this spectral segment [n_phase, n_px]
+        o = spectra[:,spec_i,:]
+
+        # Normalise spectrum by dividing by the average flux in each segment
+        oo = np.sum(o,axis=1)/n_px
+        o /= np.broadcast_to(oo[:,None], (n_phase, n_px)) + 1
+        x = np.arange(n_phase)
+        
+        desc = "Running SYSREM for spec {}/{}".format(spec_i+1, n_spec)
+
+        # Loop over all pixels
+        for px_i in tqdm(range(n_px), desc=desc, leave=False):
+            # Sigma clip along phase dimension, clipping > 3 sigma
+            y = o[:,px_i]
+
+            # Fit second order polynomial to the data
+            coef = polyfit(x=x, y=y, deg=2,)
+            calc_poly = Polynomial(coef)
+            yy = calc_poly(x)
+            
+            # Compute standard deviation of residuals
+            diff = y-yy
+            dev = np.nanstd(diff)
+            
+            # Compute a bad px mask
+            bad_phase_mask = np.abs(diff) > sigma_threshold*dev
+            n_bad_phase = np.sum(bad_phase_mask)
+
+            # If there are bad px, refit
+            if n_bad_phase > 0:
+                coef = polyfit(
+                    x=x[~bad_phase_mask],
+                    y=y[~bad_phase_mask],
+                    deg=2,)
+                calc_poly = Polynomial(coef)
+                yy = calc_poly(x)
+            
+            # Divide by best fit parabola and store the result for this pixel
+            resid_all[:,spec_i,px_i] = y/yy-1.0
+
+    return resid_all
+
+
 def cross_correlate_sysrem_resid(
     waves,
     sysrem_resid,
-    sigma_spec,
     template_wave,
     template_spec,
     cc_rv_step=1,
     cc_rv_lims=(-200,200),
     interpolation_method="cubic",):
     """Function to cross correlate a template spectrum against all spectral
-    segments, for all phases, and for all SYSREM iterations.
+    segments, for all phases, and for all SYSREM iterations. This cross
+    correlation implementation does not use weight by uncertainties, but rather
+    normalises by the two arrays being cross correlated.
 
     Parameters
     ----------
@@ -320,10 +415,6 @@ def cross_correlate_sysrem_resid(
     sysrem_resid: 4D float array
         Combined (i.e. for multiple spectral segments) set of SYSREM residuals
         of shape [n_sysrem_iter, n_phase, n_spec, n_px].
-
-    sigma_spec: 3D float array
-        Normalised uncertainties for the spectral datacube of shape
-        [n_phase, n_spec, n_px].
 
     template_wave, template_spec: 1D float array
         Wavelength scale and spectrum of template spectrum to be interpolated 
@@ -358,16 +449,11 @@ def cross_correlate_sysrem_resid(
 
     # Intiialise output array
     cc_values = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
-
-    # Prepare template
-    # TODO: we currently divide by the median, not sure if this is appropriate?
-    tw = template_wave.copy()
-    ts = template_spec.copy() / np.nanmedian(template_spec)
-
+    
     # Initialise template spectrum interpolator.
     temp_interp = interp1d(
-        x=tw,
-        y=ts,
+        x=template_wave,
+        y=template_spec,
         kind=interpolation_method,
         bounds_error=False,
         fill_value=np.nan,)
@@ -377,44 +463,44 @@ def cross_correlate_sysrem_resid(
     # Loop over each set of residuals for each SYSREM iteration
     for sysrem_iter_i in range(n_sysrem_iter):
 
-        desc = "Cross Correlating for SYSREM iter #{}".format(sysrem_iter_i)
+        desc = "CCing for SYSREM iter {}/{}".format(
+            sysrem_iter_i+1, n_sysrem_iter)
 
         # Loop over all spectral segments
         for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
             # Loop over all RVs and cross correlate against each phase
             # Note: all phases need the same cross correlation to occur, so we
             # can save on interpolation/loops by just interpolating once per RV
+            # via broadcasting our interpolated spectrum to 2D along the phase
+            # dimension.
             for rv_i, rv in enumerate(cc_rvs):
                 # Doppler shift for new wavelength scale
                 wave_rv_shift = waves[spec_i] * (1- rv/(const.c.si.value/1000))
 
                 # Interpolate to wavelength scale
-                tspec_rv_shift = temp_interp(wave_rv_shift)
+                spec_1D = temp_interp(wave_rv_shift)
 
-                if np.nansum(tspec_rv_shift) == 0:
+                if np.nansum(spec_1D) == 0:
                     raise ValueError("All nan interpolated array")
 
                 # Tile this to all phases
-                spec_3D = np.broadcast_to(
-                    tspec_rv_shift[None,:], (n_phase, n_px))
+                spec_2D = np.broadcast_to(spec_1D[None,:], (n_phase, n_px))
                 
-                # Enforce the the phase direction is the same
-                ss = set(spec_3D[:,1024])
+                # HACK Enforce the the phase direction is the same
+                ss = set(spec_2D[:,1024])
                 assert len(ss) == 1
-
+                
                 # Calculate the cross correlation weighted by the uncertainties
                 # TODO: we add +1 to the residuals so they flucuate about 1.
                 # This should be doublechecked.
                 resid = sysrem_resid[sysrem_iter_i, :, spec_i].copy() +1
-                #resid /= np.nanmedian(resid)
-                sigma = sigma_spec[:, spec_i, :]
-                den = np.sqrt(np.nansum(resid**2) * np.nansum(spec_3D**2))
-                cc_val = np.nansum(resid * spec_3D / sigma**2, axis=1)
                 
-                #cc_num = np.nansum(resid * spec_3D, axis=1)
-                #cc_den = np.sqrt(
-                #    np.nansum(resid**2, axis=1) * np.nansum(spec_3D**2, axis=1))
-                #cc_val = cc_num / cc_den
+                # Calculate cross-correlation, sum along pixel dimension
+                cc_num = np.nansum(resid * spec_2D, axis=1)
+                cc_den = np.sqrt(
+                    np.nansum(resid**2, axis=1)
+                    * np.nansum(spec_2D**2, axis=1))
+                cc_val = cc_num / cc_den
 
                 # Store
                 cc_values[sysrem_iter_i, :, spec_i, rv_i] = cc_val
