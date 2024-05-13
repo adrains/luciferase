@@ -183,9 +183,79 @@ def clean_and_compute_initial_resid(
     return resid_init, flux, e_flux
 
 
-def run_sysrem(
+def detrend_spectra(
     resid_init,
-    e_flux,
+    e_resid,
+    n_iter,
+    detrending_algorithm="SYSREM",
+    tolerance=1E-6,
+    max_converge_iter=100,
+    diff_method="max",
+    sigma_threshold=3.0,):
+    """Function for detrending time-series transmission spectroscopy datasets.
+    This function is the master function that hands off to implementations of
+    each different algorithm.
+
+    Parameters
+    ----------
+    resid_init, e_resid: 2D float array
+        Initial residual and uncertainty arrays of shape:
+        [n_phase, n_spec, n_px].
+
+    sysrem_algorithm: str
+        Which SYSREM algorithm to use. Currently either 'SYSREM' or 'PISKUNOV'.
+
+    n_iter: int
+        The number of SYSREM iterations to run.
+
+    tolerance: float, default: 1E-6
+        The convergence threshold for a given SYSREM iteration.
+
+    max_converge_iter: int, default: 100
+        The maximum number of iterations to run each SYSREM iteration for while
+        converging.
+
+    diff_method: str, default: 'max'
+        Function used to assess convergence: ['mean', 'median', 'min', 'max']
+
+    sigma_threshold: float, default: 3.0
+        Sigma threshold used for exluding outliers when using the 'PISKUNOV'
+        algorithm.
+
+    Returns
+    -------
+    resid_all: 3D float array
+       Residual array of shape [n_iter+1, n_phase, n_px] where the +1 is so we
+       store the starting array of residuals.
+    """
+    VALID_METHODS = ["SYSREM", "PISKUNOV"]
+
+    if detrending_algorithm.upper() not in VALID_METHODS:
+        raise ValueError("Method must be in {}".format(VALID_METHODS))
+
+    if detrending_algorithm.upper() == "SYSREM":
+        print("Using SYSREM for detrending.")
+        resid = _sysrem_default(
+            resid_init=resid_init,
+            e_resid=e_resid,
+            n_iter=n_iter,
+            tolerance=tolerance,
+            max_converge_iter=max_converge_iter,
+            diff_method=diff_method,)
+
+    elif detrending_algorithm.upper() == "PISKUNOV":
+        print("Using Piskunov quadratic detrending method.")
+        resid = _sysrem_piskunov(
+            spectra=resid_init,
+            n_iter=n_iter,
+            sigma_threshold=sigma_threshold,)
+
+    return resid
+
+
+def _sysrem_default(
+    resid_init,
+    e_resid,
     n_iter,
     tolerance=1E-6,
     max_converge_iter=100,
@@ -267,7 +337,7 @@ def run_sysrem(
 
     # Store median subtracted residuals
     resid_all[0] = resid_init
-    e_flux_sq = e_flux.copy().T**2
+    e_resid_sq = e_resid.copy().T**2
 
     # Run SYSREM
     for sr_iter_i in range(n_iter):
@@ -287,13 +357,13 @@ def run_sysrem(
 
         while converge_step_i < max_converge_iter and not has_converged:
             # Comnpute an estimate for c for converge_step_i
-            c_num = np.nansum(aa * resid / e_flux_sq, axis=1,)
-            c_den = np.nansum(aa**2 / e_flux_sq, axis=1,)
+            c_num = np.nansum(aa * resid / e_resid_sq, axis=1,)
+            c_den = np.nansum(aa**2 / e_resid_sq, axis=1,)
             cc_est = np.divide(c_num, c_den,)
 
             # Compute an estimate for a at converge_step_i
-            a_num = np.nansum(cc_est[:, None] * resid / e_flux_sq, axis=0,)
-            a_den = np.nansum(cc_est[:, None]**2 / e_flux_sq, axis=0,)
+            a_num = np.nansum(cc_est[:, None] * resid / e_resid_sq, axis=0,)
+            a_den = np.nansum(cc_est[:, None]**2 / e_resid_sq, axis=0,)
             aa_est = np.divide(a_num, a_den,)
 
             # Calculate diff
@@ -319,11 +389,10 @@ def run_sysrem(
         systematic = cc[:, None] * aa[None, :]
         resid_all[sr_iter_i+1] = (resid - systematic).T
 
-    # We've completed all iterations, return
     return resid_all
 
 
-def sysrem_piskunov(
+def _sysrem_piskunov(
     spectra,
     n_iter,
     sigma_threshold=3.0,):
@@ -342,7 +411,10 @@ def sysrem_piskunov(
     Parameters
     ----------
     spectra: 3D float array
-        Observed spectra of shape [n_phase, n_spec, n_px]
+        Observed spectra of shape [n_phase, n_spec, n_px].
+
+    n_iter: int
+        Number of iterations to run on the spectra.
 
     sigma_threshold: float, default: 3.0
         Sigma threshold above which to exclude pixels from the parabola fit.

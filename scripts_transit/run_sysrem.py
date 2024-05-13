@@ -61,8 +61,8 @@ for transit_i in range(ss.n_transit):
     #--------------------------------------------------------------------------
     # Run SYSREM for this night
     #--------------------------------------------------------------------------
-    if ss.run_sysrem_order_by_order:
-        print("Running SYSREM order-by-order:")
+    if ss.run_sysrem_order_by_order and ss.detrending_algorithm != "PISKUNOV":
+        print("Running detrending order-by-order:")
         resid_all = np.full(
             (ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
 
@@ -72,28 +72,32 @@ for transit_i in range(ss.n_transit):
                     spec_i, np.mean(waves[spec_i]))
             print("-"*80, fmt_txt, "-"*80,sep="")
 
-            resid = sr.run_sysrem(
+            resid = sr.detrend_spectra(
                 resid_init=resid_init[:,spec_i,:],
-                e_flux=e_flux_init[:,spec_i,:],
+                e_resid=e_flux_init[:,spec_i,:],
+                detrending_algorithm=ss.detrending_algorithm,
                 n_iter=ss.n_sysrem_iter,
                 tolerance=ss.sysrem_convergence_tol,
                 max_converge_iter=ss.sysrem_max_convergence_iter,
-                diff_method=ss.sysrem_diff_method,)
+                diff_method=ss.sysrem_diff_method,
+                sigma_threshold=ss.sigma_threshold_sysrem_piskunov,)
             
             resid_all[:,:,spec_i,:] = resid
     
     else:
-        print("Running SYSREM all orders:")
+        print("Running detrending on all orders:")
         resid_init_reshaped = resid_init.reshape((n_phase, n_spec*n_px))
         sigmas_init_reshaped = e_flux_init.reshape((n_phase, n_spec*n_px))
 
-        resid = sr.run_sysrem(
-            resid_init=resid_init_reshaped,
-            e_flux=sigmas_init_reshaped,
+        resid = sr.detrend_spectra(
+            resid_init=resid_init,
+            e_resid=e_flux_init,
+            detrending_algorithm=ss.detrending_algorithm,
             n_iter=ss.n_sysrem_iter,
             tolerance=ss.sysrem_convergence_tol,
             max_converge_iter=ss.sysrem_max_convergence_iter,
-            diff_method=ss.sysrem_diff_method,)
+            diff_method=ss.sysrem_diff_method,
+            sigma_threshold=ss.sigma_threshold_sysrem_piskunov,)
 
         resid_all = resid.reshape((ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
 

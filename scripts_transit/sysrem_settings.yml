@@ -45,7 +45,7 @@ sigma_threshold_spectral: 5.0
 transit_i: 0
 
 # Number of iterations to run SYSREM for
-n_sysrem_iter: 5
+n_sysrem_iter: 2
 
 # These segments will be masked out completely. For K2148 this is 2.0-2.07um
 segments_to_mask_completely: [2, 3, 4]
@@ -75,6 +75,12 @@ sysrem_diff_method: "max"
 # Whether to run SYSREM on all spectral segments at once, or segment-by-segment
 run_sysrem_order_by_order: True
 
+# Which detrending algorithm to use, currently either [SYSREM, PISKUNOV]
+detrending_algorithm: "SYSREM"
+
+# Sigma clipping threshold for 'PISKUNOV' detrending method
+sigma_threshold_sysrem_piskunov: 3.0
+
 #------------------------------------------------------------------------------
 # Cross Correlation Settings
 #------------------------------------------------------------------------------
@@ -88,7 +94,7 @@ cc_rv_lims: [-50,50]
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
 # Step size for the Kp-Vsys map in km/s
-Kp_step: 1.0
+Kp_step: 0.5
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
-Kp_lims: [0,400]
+Kp_lims: [0,200]
