@@ -323,7 +323,10 @@ def run_sysrem(
     return resid_all
 
 
-def sysrem_piskunov(spectra, sigma_threshold=3.0,):
+def sysrem_piskunov(
+    spectra,
+    n_iter,
+    sigma_threshold=3.0,):
     """Nikolai Piskunov's implementation of 'SYSREM'. This algorithm fits each
     spectral pixel with a parabola (i.e. a fit to flux in the phase dimension),
     sigma clips those pixels sigma_threshold aberrant this fit, repeats the
@@ -335,8 +338,6 @@ def sysrem_piskunov(spectra, sigma_threshold=3.0,):
      - SYSREM fits an arbitrary 'airmass' function to *all* spectral pixels,
        which is then modulated by a per-spectral-px 'extinction' coefficient.
        However, this algorithm simply uses n_px independent parabola fits.
-
-    TODO: extend this to multiple iterations.
     
     Parameters
     ----------
@@ -348,56 +349,62 @@ def sysrem_piskunov(spectra, sigma_threshold=3.0,):
 
     Returns
     -------
-    resid_all: 3D float array
-        Residuals of shape [n_phase, n_spec, n_px]
+    resid_all: 4D float array
+        Residuals of shape [n_iter+1, n_phase, n_spec, n_px]
     """
     # Grab dimensions for convenience
     (n_phase, n_spec, n_px) = spectra.shape
 
     # Initialise our residual vector
-    resid_all = np.full((n_phase, n_spec, n_px), np.nan)
+    resid_all = np.full((n_iter+1, n_phase, n_spec, n_px), np.nan)
 
-    # Loop over all spectral segments
-    for spec_i in range(n_spec):
-        # Grab the flux for this spectral segment [n_phase, n_px]
-        o = spectra[:,spec_i,:]
+    # Add in our starting spectra
+    resid_all[0] = spectra.copy()
 
-        # Normalise spectrum by dividing by the average flux in each segment
-        oo = np.sum(o,axis=1)/n_px
-        o /= np.broadcast_to(oo[:,None], (n_phase, n_px)) + 1
-        x = np.arange(n_phase)
-        
-        desc = "Running SYSREM for spec {}/{}".format(spec_i+1, n_spec)
+    # Run for a number of iterations
+    for sr_iter_i in range(n_iter):
+        # Loop over all spectral segments
+        for spec_i in range(n_spec):
+            # Grab the flux for this spectral segment [n_phase, n_px]
+            o = resid_all[sr_iter_i,:,spec_i,:]
 
-        # Loop over all pixels
-        for px_i in tqdm(range(n_px), desc=desc, leave=False):
-            # Sigma clip along phase dimension, clipping > 3 sigma
-            y = o[:,px_i]
-
-            # Fit second order polynomial to the data
-            coef = polyfit(x=x, y=y, deg=2,)
-            calc_poly = Polynomial(coef)
-            yy = calc_poly(x)
+            # Normalise spectrum: dividing by the average flux in each segment
+            oo = np.sum(o,axis=1)/n_px
+            o /= np.broadcast_to(oo[:,None], (n_phase, n_px)) + 1
+            x = np.arange(n_phase)
             
-            # Compute standard deviation of residuals
-            diff = y-yy
-            dev = np.nanstd(diff)
-            
-            # Compute a bad px mask
-            bad_phase_mask = np.abs(diff) > sigma_threshold*dev
-            n_bad_phase = np.sum(bad_phase_mask)
+            desc = "Running SYSREM {}/{} for spec {}/{}".format(
+                sr_iter_i+1, n_iter, spec_i+1, n_spec)
 
-            # If there are bad px, refit
-            if n_bad_phase > 0:
-                coef = polyfit(
-                    x=x[~bad_phase_mask],
-                    y=y[~bad_phase_mask],
-                    deg=2,)
+            # Loop over all pixels
+            for px_i in tqdm(range(n_px), desc=desc, leave=False):
+                # Sigma clip along phase dimension, clipping > 3 sigma
+                y = o[:,px_i]
+
+                # Fit second order polynomial to the data
+                coef = polyfit(x=x, y=y, deg=2,)
                 calc_poly = Polynomial(coef)
                 yy = calc_poly(x)
-            
-            # Divide by best fit parabola and store the result for this pixel
-            resid_all[:,spec_i,px_i] = y/yy-1.0
+                
+                # Compute standard deviation of residuals
+                diff = y-yy
+                dev = np.nanstd(diff)
+                
+                # Compute a bad px mask
+                bad_phase_mask = np.abs(diff) > sigma_threshold*dev
+                n_bad_phase = np.sum(bad_phase_mask)
+
+                # If there are bad px, refit
+                if n_bad_phase > 0:
+                    coef = polyfit(
+                        x=x[~bad_phase_mask],
+                        y=y[~bad_phase_mask],
+                        deg=2,)
+                    calc_poly = Polynomial(coef)
+                    yy = calc_poly(x)
+                
+                # Divide by best fit parabola + store the result for this pixel
+                resid_all[sr_iter_i+1,:,spec_i,px_i] = y/yy-1.0
 
     return resid_all
 
@@ -526,21 +533,22 @@ def cross_correlate_sysrem_resid(
             sysrem_iter_i+1, n_sysrem_iter))
 
         # Compute the *global* cross correlation for this SYSREM iteration
-        resid_3D = sysrem_resid[sysrem_iter_i].copy() +1
-        resid_4D = np.broadcast_to(
-            array=resid_3D[None,:,:,:],
-            shape=(n_rv_steps, n_phase, n_spec, n_px,),)
-        
-        # Sum over the px and spectral segment dimensions
-        # spec_4D has shape (n_rv_steps, n_phase, n_spec, n_px,)
-        cc_num = np.nansum(np.nansum(resid_4D * spec_4D, axis=3), axis=2)
-        cc_den = np.sqrt(
-            np.nansum(np.nansum(resid_4D**2, axis=3), axis=2)
-            * np.nansum(np.nansum(spec_4D**2, axis=3), axis=2))
-        cc_val = cc_num / cc_den
+        if False:
+            resid_3D = sysrem_resid[sysrem_iter_i].copy() +1
+            resid_4D = np.broadcast_to(
+                array=resid_3D[None,:,:,:],
+                shape=(n_rv_steps, n_phase, n_spec, n_px,),)
+            
+            # Sum over the px and spectral segment dimensions
+            # spec_4D has shape (n_rv_steps, n_phase, n_spec, n_px,)
+            cc_num = np.nansum(np.nansum(resid_4D * spec_4D, axis=3), axis=2)
+            cc_den = np.sqrt(
+                np.nansum(np.nansum(resid_4D**2, axis=3), axis=2)
+                * np.nansum(np.nansum(spec_4D**2, axis=3), axis=2))
+            cc_val = cc_num / cc_den
 
-        # Store
-        ccv_global[sysrem_iter_i, :, :] = cc_val.T
+            # Store
+            ccv_global[sysrem_iter_i, :, :] = cc_val.T
 
     # All done, return our array of cross correlation results
     return cc_rvs, ccv_per_spec, ccv_global
@@ -552,7 +560,8 @@ def compute_Kp_vsys_map(
     transit_info,
     syst_info,
     Kp_lims=(0,400),
-    Kp_step=0.5,):
+    Kp_step=0.5,
+    interpolation_method="cubic",):
     """Function to compute the Kp-Vsys map given a set of cross correlation
     values from cross_correlate_sysrem_resid.
 
@@ -563,9 +572,9 @@ def compute_Kp_vsys_map(
     cc_rvs: 1D float array
         Vector of RV steps of length [n_rv_step]
     
-    cc_values: 3D float array
+    cc_values: 4D float array
         3D float array of cross correlation results with shape:
-        [n_sysrem_iter, n_phase, n_rv_step]
+        [n_sysrem_iter, n_phase, n_spec, n_rv_step]
     
     transit_info: pandas DataFrame
         Pandas DataFrame with header/computed information about each timestep.
@@ -578,9 +587,23 @@ def compute_Kp_vsys_map(
 
     Kp_step: float, default: 0.5
         Kp step size to use when sampling in km/s.
+
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+
+    Returns
+    -------
+    Kp_steps: 1D float array
+        Array of Kp steps from Kp_lims[0] to Kp_lims[1] in steps of Kp_step.
+    
+    Kp_vsys_map: 4D array
+        Grid of Kp_vsys maps of shape: 
+        [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
     """
     # Grab dimensions for convenience
-    (n_sysrem_iter, n_phase, n_rv_step) = cc_values.shape
+    (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
 
     # Initialise Kp sampling
     Kp_steps = np.arange(Kp_lims[0], Kp_lims[1], Kp_step)
@@ -588,40 +611,45 @@ def compute_Kp_vsys_map(
     n_Kp_steps = len(Kp_steps)
 
     # Initialise output array
-    Kp_vsys_map = np.zeros((n_sysrem_iter, n_Kp_steps, n_rv_step,))
+    Kp_vsys_map = np.zeros((n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step,))
 
     # Loop over all sets of sysrem residuals
     for sr_iter_i in range(n_sysrem_iter):
-        desc = "Creating Kp-Vsys map for SYSREM iter #{}".format(sr_iter_i)
+        # Loop over all spectral segments
+        for spec_i in range(n_spec):
+            desc = \
+                "Creating Kp-Vsys map for SYSREM {}/{}, spec {}/{}...".format(
+                    sr_iter_i+1, n_sysrem_iter, spec_i+1, n_spec)
+            
+            # Loop over all Kp values
+            for Kp_i, Kp in enumerate(tqdm(Kp_steps, leave=False, desc=desc)):
+                # Initialise grid of shifted phases
+                cc_values_shifted = np.zeros((n_phase, n_rv_step))
 
-        # Loop over all Kp values
-        for Kp_i, Kp in enumerate(tqdm(Kp_steps, leave=False, desc=desc)):
-            # Initialise grid of shifted phases
-            cc_values_shifted = np.zeros_like(cc_values[sr_iter_i])
+                # Loop over all phases
+                for phase_i in range(n_phase):
+                    # Grab relevant parameters from transit_info
+                    phase = transit_info.iloc[phase_i]["phase_mid"]
+                    v_bcor = transit_info.iloc[phase_i]["bcor"]
+                    v_star = syst_info.loc["rv_star", "value"]
 
-            # Loop over all phases
-            for phase_i in range(n_phase):
-                # Grab relevant parameters from transit_info
-                phase = transit_info.iloc[phase_i]["phase_mid"]
-                v_bcor = transit_info.iloc[phase_i]["bcor"]
-                v_star = syst_info.loc["rv_star", "value"]
+                    # Compute the velocity shift between this phase and the
+                    # planet rest frame velocity.
+                    vp = Kp * np.sin(2*np.pi*phase) + v_star - v_bcor
 
-                # Compute the velocity shift between this phase and the planet
-                # rest frame velocity.
-                vp = Kp * np.sin(2*np.pi*phase) + v_star - v_bcor
+                    # Create interpolator for the CC values of this phase
+                    interp_cc_vals = interp1d(
+                        x=cc_rvs,
+                        y=cc_values[sr_iter_i, phase_i, spec_i, :],
+                        bounds_error=False,
+                        fill_value=np.nan,
+                        kind=interpolation_method,)
 
-                # Create interpolator for the CC values of this phase
-                interp_cc_vals = interp1d(
-                    x=cc_rvs,
-                    y=cc_values[sr_iter_i, phase_i],
-                    bounds_error=False,
-                    fill_value=np.nan,)
+                    # Shift CC value to rest frame using calculated vp value
+                    cc_values_shifted[phase_i] = interp_cc_vals(cc_rvs - vp)
 
-                # Shift CC value to the rest frame using calculated vp value
-                cc_values_shifted[phase_i] = interp_cc_vals(cc_rvs - vp)
-
-            # Sum all shifted CC values along the phase axis
-            Kp_vsys_map[sr_iter_i, Kp_i] = \
-                np.nanmean(cc_values_shifted, axis=0)
+                # Sum all shifted CC values along the phase axis
+                Kp_vsys_map[sr_iter_i, spec_i, Kp_i] = \
+                    np.nanmean(cc_values_shifted, axis=0)
 
     return Kp_steps, Kp_vsys_map

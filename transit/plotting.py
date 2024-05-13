@@ -798,10 +798,106 @@ def plot_sysrem_cc_2D(
         plt.savefig("plots/crosscorr_2D_{}.png".format(plot_label), dpi=300)
 
 
-def plot_kp_vsys_map():
+def plot_kp_vsys_map(
+    cc_rvs,
+    Kp_steps,
+    Kp_vsys_map,
+    mean_spec_lambdas=None,
+    fig_size=(18, 6),
+    plot_label="",):
+    """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
+    correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
+    and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
+    the cross correlation, and the y axis is the Kp value, with the SNR value
+    being represented by a colour bar.
+
+    Parameters
+    ----------
+    cc_rvs: 1D float array
+        Vector of RV steps of length [n_rv_step]
+    
+    Kp_steps: 1D float array
+        Vector of Kp steps of length [n_Kp_steps]
+
+    Kp_vsys_map: 4D float array
+        4D float array of Kp-Vsys maps with shape:
+        [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
+
+    mean_spec_lambdas: float array or None, default: None
+        Mean values of each spectral segment  shape [n_spec].
+    
+    fig_size: float tuple, default: (18, 6)
+        Size of the figure.
+
+    plot_label: str, default: ""
+        Unique identifier label to add to plot filename.
     """
-    """
-    pass
+    # Grab dimensions for convenience
+    (n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step) = Kp_vsys_map.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        ncols=n_spec,
+        sharex=True,
+        figsize=fig_size,)
+    
+    # For consistency, ensure we have a 2D array of axes (even if we don't)
+    if n_spec == 1:
+        axes = axes[:,None]
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
+
+    # [x_min, x_max, y_min, y_max]
+    extent = [
+        np.min(cc_rvs), np.max(cc_rvs), np.min(Kp_steps), np.max(Kp_steps)]
+
+    # Loop over all SYSREM iterations
+    for sr_iter_i in range(n_sysrem_iter):
+        desc = "Plotting Kp-Vsys map for SYSREM iter #{}".format(sr_iter_i)
+        
+        # Loop over all spectral segments
+        for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
+            # Grab axis for convenience
+            axis = axes[sr_iter_i, spec_i]
+
+            cmap = axis.imshow(
+                X=Kp_vsys_map[sr_iter_i, spec_i],
+                aspect="auto",
+                interpolation="none",
+                extent=extent,
+                origin="lower",)
+
+            axis.tick_params(axis='both', which='major', labelsize="x-small")
+            axis.xaxis.set_major_locator(plticker.MultipleLocator(base=20))
+            axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=10))
+            axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
+
+            # Only show titles on the top (and if we've been given them)
+            if sr_iter_i == 0 and mean_spec_lambdas is not None:
+                axis.set_title(
+                    label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
+                    fontsize="x-small")
+
+            # Only show xticks on the bottom
+            if sr_iter_i != n_sysrem_iter-1:
+                axis.set_xticks([])
+            else:
+                axis.set_xlabel("RV Shift (km/s)", fontsize="x-small")
+
+            # Only show yticks on the left
+            if spec_i != 0:
+                    axes[sr_iter_i, spec_i].set_yticks([])
+            else:
+                axis.set_ylabel(r"$K_P$ (km/s)", fontsize="x-small")
+
+    if plot_label == "":
+        plt.savefig("plots/kp_vsys_2D.pdf")
+        plt.savefig("plots/kp_vsys_2D.png", dpi=300)
+    else:
+        plt.savefig("plots/kp_vsys_2D_{}.pdf".format(plot_label))
+        plt.savefig("plots/kp_vsys_2D_{}.png".format(plot_label), dpi=300)
 
 
 def plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors,):
