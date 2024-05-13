@@ -15,34 +15,35 @@ from numpy.polynomial.polynomial import Polynomial, polyfit
 def clean_and_compute_initial_resid(
     spectra,
     e_spectra,
-    bad_px_mask_init,
+    strong_telluic_mask,
     mjds,
     sigma_threshold_phase=6.0,
     sigma_threshold_spectral=6.0,
     n_max_phase_bad_px=5,
-    do_clip_spectral_dimension=False,):
+    do_clip_spectral_dimension=False,
+    interpolation_method="cubic",):
     """Function to clean a spectral data cube prior to running SYSREM. We sigma
     clip along the phase dimension (i.e. the time series of each pixel) as well
     as along the spectral dimension. 
 
     Note that this function expects only spectra from a single spectral
     segment (or a flattened set of many segments.
-
-    TODO: Interpolate linearly along the phase dimension, no point doing both
-    nan and 1E20.
     
     Parameters
     ----------
-    spectra, e_spectra: 2D float array
+    spectra, e_spectra: 3D float array
         Unnormalised spectra and spectroscopic uncertainties of shape 
-        [n_phase, n_px].
+        [n_phase, n_spec, n_px].
     
-    bad_px_mask_init: 2D float array
-        Bad px mask of shape [n_phase, n_px].
+    strong_telluic_mask: 3D float array
+        Mask for spectral regions with strong telluric absorption with shape 
+        [n_phase, n_spec, n_px].
 
-    mjds: TODO
+    mjds: 1D float array
+        MJDs associated with each phase, of shape [n_phase]. We use this for
+        interpolating along the phase axis.
     
-    sigma_threshold_phase: float, default: 5.0
+    sigma_threshold_phase: float, default: 6.0
         The sigma clipping threshold for when sigma clipping along the *phase*
         dimension. Note that this used for both lower and upper bound clipping.
 
@@ -51,123 +52,144 @@ def clean_and_compute_initial_resid(
         *spectral* dimension. Note that we only sigma clip on the upper bound
         so as to not remove deep spectral features.
 
-    n_max_phase_bad_px: TODO
+    n_max_phase_bad_px: int, default: 5.0
+        Threshold for the number of bad/clipped phases per spectral pixel, 
+        above which we mask out the entire spectral pixel.
+
+    do_clip_spectral_dimension: boolean, default: False
+        Whether to do *upper* sigma clip along the spectral dimension.
+
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
 
     Returns
     -------
-    residuals: 2D float array
-        Initial set of residuals to use for SYSREM composed of the median 
-        subtracted fluxes.
+    resid_init: 3D float array
+        Initial set of residuals to use for SYSREM composed of the cleaned,
+        interpolated, and normalised fluxes, of shape [n_phase, n_spec, n_px].
     
     flux, e_flux: 2D float array
-        Nnormalised spectra and spectroscopic uncertainties with bad pixel
-        fluxes and uncertainties set to nan and 1E20 respectively of shape 
-        [n_phase, n_px].
+        Cleaned and interpolated fluxes + uncertainties of shape 
+        [n_phase, n_spec, n_px].
     """
     # Grab shape
-    (n_phase, n_px) = spectra.shape
+    (n_phase, n_spec, n_px) = spectra.shape
 
     # Duplicate arrays
     flux = spectra.copy()
     e_flux = e_spectra.copy()
 
-    # Sigma clip along phase dimension. Note that here we're doing both upper
-    # *and* lower bound clipping.
+    #--------------------------------------------------------------------------
+    # Clean + interpolate along phase dimension
+    #--------------------------------------------------------------------------
+    # Initialise mask for sigma clipping along phase dimension. Note that here
+    # we're doing both upper *and* lower bound clipping.
+    sc_mask_phase = np.full_like(spectra, False)
 
-    sc_mask_phase = np.full_like(bad_px_mask_init, False)
-
-    for px_i in range(n_px):
-        # Sigma clip along the phase dimension to compute the bad pixel mask 
-        # for px i
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            bad_phase_mask = sigma_clip(
-                data=flux[:,px_i],
-                sigma=sigma_threshold_phase,).mask
-        
-        # If we have more than the threshold number of bad px, mask out the
-        # entire column (i.e. mask out px_i)
-        if np.sum(bad_phase_mask) > n_max_phase_bad_px:
-            sc_mask_phase[:,px_i] = True
-
-        # If the first or last phase is a bad px, then mask out the entire row
-        # since we can't interpolate them.
-        elif bad_phase_mask[0] or bad_phase_mask[-1]:
-            sc_mask_phase[:,px_i] = True
-
-        # Otherwise interpolate the missing values using the times as X values
-        # instead of simply the pixel number
-        else:
-            # Flux interpolator (interpolating only good px)
-            interp_px_time_series_flux = interp1d(
-                x=mjds[~bad_phase_mask],
-                y=flux[:,px_i][~bad_phase_mask],
-                bounds_error=True,)
+    # Loop over all spectral segments and spectral pixels
+    for spec_i in range(n_spec):
+        for px_i in range(n_px):
+            # Sigma clip along the phase dimension to compute the bad pixel
+            # mask for px_i
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                bad_phase_mask = sigma_clip(
+                    data=flux[:,spec_i,px_i],
+                    sigma=sigma_threshold_phase,).mask
             
-            # Sigma interpolator (interpolating only good px)
-            interp_px_time_series_err = interp1d(
-                x=mjds[~bad_phase_mask],
-                y=e_spectra[:,px_i][~bad_phase_mask],
-                bounds_error=True,)
-            
-            # Interpolate and update
-            flux[:,px_i][bad_phase_mask] = \
-                interp_px_time_series_flux(mjds[bad_phase_mask])
-            
-            e_spectra[:,px_i][bad_phase_mask] = \
-                interp_px_time_series_err(mjds[bad_phase_mask])
-            
-            # Update the bad px mask to just have nan values (i.e. filled)
-            sc_mask_phase[:,px_i] = np.isnan(flux[:,px_i])
+            # If we have more than the threshold number of bad px, mask out the
+            # entire column (i.e. mask out px_i)
+            if np.sum(bad_phase_mask) > n_max_phase_bad_px:
+                sc_mask_phase[:,spec_i,px_i] = True
 
-            # HACK: this should always be 0 right?
-            assert np.sum(np.isnan(flux[:,px_i])) == 0
-        
+            # If the first or last phase is a bad px, then mask out the entire
+            # column since we can't interpolate them.
+            elif bad_phase_mask[0] or bad_phase_mask[-1]:
+                sc_mask_phase[:,spec_i,px_i] = True
+
+            # Otherwise interpolate the missing values using the times as X
+            # values instead of simply the pixel number
+            else:
+                # Flux interpolator (interpolating only good px)
+                interp_px_time_series_flux = interp1d(
+                    x=mjds[~bad_phase_mask],
+                    y=flux[:,spec_i,px_i][~bad_phase_mask],
+                    kind=interpolation_method,
+                    bounds_error=True,)
+                
+                # Sigma interpolator (interpolating only good px)
+                interp_px_time_series_err = interp1d(
+                    x=mjds[~bad_phase_mask],
+                    y=e_spectra[:,spec_i,px_i][~bad_phase_mask],
+                    kind=interpolation_method,
+                    bounds_error=True,)
+                
+                # Interpolate and update
+                flux[:,spec_i,px_i][bad_phase_mask] = \
+                    interp_px_time_series_flux(mjds[bad_phase_mask])
+                
+                e_spectra[:,spec_i,px_i][bad_phase_mask] = \
+                    interp_px_time_series_err(mjds[bad_phase_mask])
+                
+                # Update the bad px mask to just have nan values (i.e. filled)
+                sc_mask_phase[:,spec_i,px_i] = np.isnan(flux[:,spec_i,px_i])
+
+                # HACK: this should always be 0 right?
+                assert np.sum(np.isnan(flux[:,spec_i,px_i])) == 0
+    
+    #--------------------------------------------------------------------------
+    # Clip along spectral dimension
+    #--------------------------------------------------------------------------
     # Sigma clip along the spectral dimension. Note that since we're clipping
     # along the spectral dimension, we only clip the *upper* bounds so as to
     # not remove absorption features.
-    sc_mask_spec = np.full_like(bad_px_mask_init, False)
+    sc_mask_spec = np.full_like(flux, False)
 
     if do_clip_spectral_dimension:
-        for phase_i in range(n_phase):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                sc_mask_spec[phase_i,:] = sigma_clip(
-                    data=flux[phase_i,:],
-                    sigma_upper=sigma_threshold_spectral,).mask
+        for spec_i in range(n_spec):
+            for phase_i in range(n_phase):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    sc_mask_spec[phase_i,spec_i,:] = sigma_clip(
+                        data=flux[phase_i,spec_i,:],
+                        sigma_upper=sigma_threshold_spectral,).mask
         
     # Combine bad px masks
     bad_px_mask = np.logical_or(
-        bad_px_mask_init, np.logical_or(sc_mask_phase, sc_mask_spec))
+        strong_telluic_mask, np.logical_or(sc_mask_phase, sc_mask_spec))
 
-    # Clean spectra
-    flux[bad_px_mask] = np.nan
-    e_flux[bad_px_mask] = 1E20
-
+    #--------------------------------------------------------------------------
+    # Normalisation + wrapping up
+    #--------------------------------------------------------------------------
     # Finally we pre-normalise the spectra. Per Birkby+2013, this involves:
     #   1) Dividing each individual *spectrum* by its mean value
     #   2) Subtracting unity
-    mean_1D = np.nanmean(flux, axis=1)                      # [n_phase]
-    mean_2D = np.broadcast_to(mean_1D[:,None], flux.shape)  # [n_phase, n_px]
-    residuals = flux / mean_2D - 1
+    mean_2D = np.nanmean(flux, axis=2)  # [n_phase, n_spec]
+    mean_3D = np.broadcast_to(
+        mean_2D[:,:,None], flux.shape)  # [n_phase, n_spec, n_px]
+    resid_init = flux / mean_3D - 1
     
     # Also rescale uncertainties
-    e_flux /= mean_2D
+    e_flux /= mean_3D
 
-    return residuals, flux, e_flux
+    # Finally, for any remaining non-interpolated bad px, set the fluxes and
+    # uncertainties to default values
+    resid_init[bad_px_mask] = 0.0
+    flux[bad_px_mask] = 1.0
+    e_flux[bad_px_mask] = 1E20
+
+    return resid_init, flux, e_flux
 
 
 def run_sysrem(
-    spectra,
-    e_spectra,
-    bad_px_mask,
+    resid_init,
+    e_flux,
     n_iter,
-    mjds,
     tolerance=1E-6,
     max_converge_iter=100,
-    diff_method="max",
-    sigma_threshold_phase=6.0,
-    sigma_threshold_spectral=6.0,):
+    diff_method="max",):
     """Function to run the iterative SYSREM algorithm on a set of fluxes and 
     uncertainties. Note that this only runs on a single spectral segment at a
     time.
@@ -203,14 +225,9 @@ def run_sysrem(
     spectra, e_spectra: 2D float array
         Unnormalised spectra and spectroscopic uncertainties of shape 
         [n_phase, n_px].
-    
-    bad_px_mask_init: 2D float array
-        Bad px mask of shape [n_phase, n_px].
 
     n_iter: int
         The number of SYSREM iterations to run.
-    
-    mjds: TODO
 
     tolerance: float, default: 1E-6
         The convergence threshold for a given SYSREM iteration.
@@ -240,22 +257,13 @@ def run_sysrem(
         raise ValueError("Invalid diff_method, must be in {}".format(
             VALID_DIFF_FUNCS.keys()))
 
-    n_phase, n_px = spectra.shape
+    n_phase, n_px = resid_init.shape
 
     # TODO Check to make sure we have proper uncertainties
     pass
 
     # Intialise resid array for all iterations, shape [n_iter+1, n_phase, n_px]
     resid_all = np.full((n_iter+1, n_phase, n_px), np.nan)
-
-    # Use bad px mask to clean input array and compute initial residual vector
-    resid_init, flux, e_flux = clean_and_compute_initial_resid(
-        spectra=spectra,
-        e_spectra=e_spectra,
-        bad_px_mask_init=bad_px_mask,
-        mjds=mjds,
-        sigma_threshold_phase=sigma_threshold_phase,
-        sigma_threshold_spectral=sigma_threshold_spectral,)
 
     # Store median subtracted residuals
     resid_all[0] = resid_init
@@ -426,7 +434,7 @@ def cross_correlate_sysrem_resid(
     cc_rv_lims: float tuple, default: (-200,200)
         Lower and upper bounds for cross correlation in km/s.
 
-    interpolation_method: str, default: "linear"
+    interpolation_method: str, default: "cubic"
         Default interpolation method to use with scipy.interp1d. Can be one of: 
         ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
         'cubic', 'previous', or 'next'].
@@ -448,8 +456,14 @@ def cross_correlate_sysrem_resid(
     n_rv_steps = len(cc_rvs)
 
     # Intiialise output array
-    cc_values = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
+    ccv_per_spec = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
+
+    # Initialise output array for *global* cross-correlation
+    ccv_global = np.zeros((n_sysrem_iter, n_phase, n_rv_steps))
     
+    # Initialise array of RV shifted planet spectra
+    spec_4D = np.ones((n_rv_steps, n_phase, n_spec, n_px,))
+
     # Initialise template spectrum interpolator.
     temp_interp = interp1d(
         x=template_wave,
@@ -486,6 +500,9 @@ def cross_correlate_sysrem_resid(
                 # Tile this to all phases
                 spec_2D = np.broadcast_to(spec_1D[None,:], (n_phase, n_px))
                 
+                # Store this for computing the *global* cross correlation
+                spec_4D[rv_i, :, spec_i, :] = spec_2D.copy()
+
                 # HACK Enforce the the phase direction is the same
                 ss = set(spec_2D[:,1024])
                 assert len(ss) == 1
@@ -503,10 +520,30 @@ def cross_correlate_sysrem_resid(
                 cc_val = cc_num / cc_den
 
                 # Store
-                cc_values[sysrem_iter_i, :, spec_i, rv_i] = cc_val
+                ccv_per_spec[sysrem_iter_i, :, spec_i, rv_i] = cc_val
+
+        print("Computing global CC val for SYSREM iter {}/{}...".format(
+            sysrem_iter_i+1, n_sysrem_iter))
+
+        # Compute the *global* cross correlation for this SYSREM iteration
+        resid_3D = sysrem_resid[sysrem_iter_i].copy() +1
+        resid_4D = np.broadcast_to(
+            array=resid_3D[None,:,:,:],
+            shape=(n_rv_steps, n_phase, n_spec, n_px,),)
+        
+        # Sum over the px and spectral segment dimensions
+        # spec_4D has shape (n_rv_steps, n_phase, n_spec, n_px,)
+        cc_num = np.nansum(np.nansum(resid_4D * spec_4D, axis=3), axis=2)
+        cc_den = np.sqrt(
+            np.nansum(np.nansum(resid_4D**2, axis=3), axis=2)
+            * np.nansum(np.nansum(spec_4D**2, axis=3), axis=2))
+        cc_val = cc_num / cc_den
+
+        # Store
+        ccv_global[sysrem_iter_i, :, :] = cc_val.T
 
     # All done, return our array of cross correlation results
-    return cc_rvs, cc_values
+    return cc_rvs, ccv_per_spec, ccv_global
 
 
 def compute_Kp_vsys_map(

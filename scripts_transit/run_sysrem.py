@@ -33,38 +33,69 @@ for transit_i in range(ss.n_transit):
     (n_phase, n_spec, n_px) = fluxes_list[transit_i].shape
 
     # Load continuum normalised data
-    fluxes_norm, sigmas_norm, bad_px_mask_norm, poly_coeff = \
-        tu.load_normalised_spectra_from_fits(
-            fits_load_dir=ss.save_path,
-            label=ss.label,
-            n_transit=ss.n_transit,
-            transit_i=transit_i,)
+    #fluxes_norm, sigmas_norm, strong_telluic_mask, poly_coeff = \
+    #    tu.load_normalised_spectra_from_fits(
+    #        fits_load_dir=ss.save_path,
+    #        label=ss.label,
+    #        n_transit=ss.n_transit,
+    #        transit_i=transit_i,)
+
+    # TEMPORARY HACK: avoid continuum normalisation for debugging
+    mf = np.nanmedian(fluxes_list[transit_i], axis=2)
+    mf_3D = np.broadcast_to(mf[:,:,None], (n_phase, n_spec, n_px))
+    fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
+    sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
+    strong_telluic_mask = np.full_like(fluxes_norm, False)
+
+    # Clean and prepare our fluxes for input to SYSREM. This involves:
+    # - sigma clipping along phase and spectral dimension
+    # - interpolate along the phase dimension
+    resid_init, flux, e_flux_init = sr.clean_and_compute_initial_resid(
+        spectra=fluxes_norm,
+        e_spectra=sigmas_norm,
+        strong_telluic_mask=strong_telluic_mask,
+        mjds=transit_info_list[transit_i]["mjd_mid"].values,
+        sigma_threshold_phase=ss.sigma_threshold_phase,
+        sigma_threshold_spectral=ss.sigma_threshold_spectral,)
 
     #--------------------------------------------------------------------------
     # Run SYSREM for this night
     #--------------------------------------------------------------------------
-    print("Running SYSREM...")
-    resid_all = np.full((ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
+    if ss.run_sysrem_order_by_order:
+        print("Running SYSREM order-by-order:")
+        resid_all = np.full(
+            (ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
 
-    # Run SYSREM on one spectral segment at a time
-    for spec_i in range(n_spec):
-        fmt_txt = "\nSpectral segment {:0.0f}, λ~{:0.0f} nm\n".format(
-                spec_i, np.mean(waves[spec_i]))
-        print("-"*80, fmt_txt, "-"*80,sep="")
+        # Run SYSREM on one spectral segment at a time
+        for spec_i in range(n_spec):
+            fmt_txt = "\nSpectral segment {:0.0f}, λ~{:0.0f} nm\n".format(
+                    spec_i, np.mean(waves[spec_i]))
+            print("-"*80, fmt_txt, "-"*80,sep="")
+
+            resid = sr.run_sysrem(
+                resid_init=resid_init[:,spec_i,:],
+                e_flux=e_flux_init[:,spec_i,:],
+                n_iter=ss.n_sysrem_iter,
+                tolerance=ss.sysrem_convergence_tol,
+                max_converge_iter=ss.sysrem_max_convergence_iter,
+                diff_method=ss.sysrem_diff_method,)
+            
+            resid_all[:,:,spec_i,:] = resid
+    
+    else:
+        print("Running SYSREM all orders:")
+        resid_init_reshaped = resid_init.reshape((n_phase, n_spec*n_px))
+        sigmas_init_reshaped = e_flux_init.reshape((n_phase, n_spec*n_px))
 
         resid = sr.run_sysrem(
-            spectra=fluxes_norm[:,spec_i,:],
-            e_spectra=sigmas_norm[:,spec_i,:],
-            bad_px_mask=bad_px_mask_norm[:,spec_i,:],
+            resid_init=resid_init_reshaped,
+            e_flux=sigmas_init_reshaped,
             n_iter=ss.n_sysrem_iter,
-            mjds=transit_info_list[transit_i]["mjd_mid"].values,
             tolerance=ss.sysrem_convergence_tol,
             max_converge_iter=ss.sysrem_max_convergence_iter,
-            diff_method=ss.sysrem_diff_method,
-            sigma_threshold_phase=ss.sigma_threshold_phase,
-            sigma_threshold_spectral=ss.sigma_threshold_spectral,)
-        
-        resid_all[:,:,spec_i,:] = resid
+            diff_method=ss.sysrem_diff_method,)
+
+        resid_all = resid.reshape((ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
 
     # Save residuals
     tu.save_sysrem_residuals_to_fits(

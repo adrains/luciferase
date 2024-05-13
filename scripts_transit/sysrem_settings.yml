@@ -9,14 +9,12 @@
 # constructed as: <save_path>/transit_data_<label>_n<n_transits>.fits
 save_path: ""
 n_transit: 2
-label: "simulated_R100000_wasp107_CO_H2O_H2S_NH3_stellar_1_telluric_1_planet_0_boost_1_SNR_inf"
-#label: "wasp107"
+label: "simulated_R100000_wasp107_trans_boost_x1_SNR_100"
 
 #------------------------------------------------------------------------------
 # Template Settings
 #------------------------------------------------------------------------------
-stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
-
+# Molecfit transmission spectra--one for each night
 molecfit_fits:
 - "data_reduction/WASP107/220310_WASP107/molecfit_results/MODEL/BEST_FIT_MODEL.fits"
 #- "data_reduction/WASP107/230222_WASP107/molecfit_results/BEST_FIT_MODEL.fits"
@@ -28,8 +26,11 @@ tau_fill_value: 0
 
 telluric_trans_bad_px_threshold: 0.5
 
-# Grid of petitRADTRANS planet spectra
+# Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
 template_fits: "templates/WASP107b_prt_lbc/WASP107b_templates_all_R100000.fits"
+
+# Continuum normalised stellar spectrum
+stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 
 #------------------------------------------------------------------------------
 # SYSREM Settings
@@ -58,6 +59,10 @@ segments_to_keep: [15, 16, 17]
 # template spectrum rather than one from a planet
 cc_with_telluric: False
 
+# Set to true if we want to test things by cross-correlating with a stellar
+# template spectrum rather than one from a planet
+cc_with_stellar: False
+
 # Convergence threshold for each SYSREM iteration
 sysrem_convergence_tol: 1.0E-6
 
@@ -66,6 +71,9 @@ sysrem_max_convergence_iter: 100
 
 # Function used to assess convergence: ['mean', 'median', 'min', 'max']
 sysrem_diff_method: "max"
+
+# Whether to run SYSREM on all spectral segments at once, or segment-by-segment
+run_sysrem_order_by_order: True
 
 #------------------------------------------------------------------------------
 # Cross Correlation Settings
