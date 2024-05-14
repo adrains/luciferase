@@ -25,6 +25,11 @@ wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ss.save_path, ss.label, ss.n_transit)
 
+if ss.detrending_algorithm == "PISKUNOV":
+    do_normalise = False
+else:
+    do_normalise = True
+
 #------------------------------------------------------------------------------
 # Main Operation
 #------------------------------------------------------------------------------
@@ -56,7 +61,8 @@ for transit_i in range(ss.n_transit):
         strong_telluic_mask=strong_telluic_mask,
         mjds=transit_info_list[transit_i]["mjd_mid"].values,
         sigma_threshold_phase=ss.sigma_threshold_phase,
-        sigma_threshold_spectral=ss.sigma_threshold_spectral,)
+        sigma_threshold_spectral=ss.sigma_threshold_spectral,
+        do_normalise=do_normalise,)
 
     #--------------------------------------------------------------------------
     # Run SYSREM for this night

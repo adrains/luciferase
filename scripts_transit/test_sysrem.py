@@ -3,7 +3,6 @@
 import numpy as np
 import transit.utils as tu
 import transit.sysrem as sr
-from tqdm import tqdm
 import astropy.units as u
 import transit.plotting as tplt
 from astropy import constants as const
@@ -27,13 +26,22 @@ planet_rvs = \
 # Run Nik's SYSREM
 transit_i = 0
 spectra = fluxes_list[transit_i]
+sigmas = sigmas_list[transit_i]
 (n_phase, n_spec, n_px) = spectra.shape
 
-mm = np.isnan(spectra)
-spectra[mm] = np.nanmean(spectra)
+print("Cleaning datacube...")
+resid_init, flux, e_flux_init = sr.clean_and_compute_initial_resid(
+        spectra=spectra,
+        e_spectra=sigmas,
+        strong_telluic_mask=np.full_like(spectra, False),
+        mjds=transit_info_list[transit_i]["mjd_mid"].values,
+        sigma_threshold_phase=ss.sigma_threshold_phase,
+        sigma_threshold_spectral=ss.sigma_threshold_spectral,
+        do_normalise=False,)
 
-resid_all = sr.sysrem_piskunov(
-    spectra=spectra.copy(),
+print("Running SYSREM...")
+resid_all = sr._sysrem_piskunov(
+    spectra=resid_init,
     n_iter=ss.n_sysrem_iter,
     sigma_threshold=3.0,)
 
@@ -54,25 +62,10 @@ cc_rvs, ccv_per_spec, ccv_global = sr.cross_correlate_sysrem_resid(
     cc_rv_lims=ss.cc_rv_lims,
     interpolation_method="cubic",)
 
-# (n_phase, n_spec, n_cc)
-ccv_norm = ccv_per_spec.copy()
-ccvg = ccv_global.copy()
-(_, _, _, n_cc) = ccv_norm.shape
-
-# Normalise
-# TODO: move inside function
-for iter_i in range(ss.n_sysrem_iter+1):
-    for spec_i in tqdm(range(n_spec), desc="Plotting", leave=False):
-        # Sum along the CC direction
-        norm_1D = np.nansum(ccv_norm[iter_i, :,spec_i,:], axis=1)
-        norm_2D = np.broadcast_to(norm_1D[:,None], (n_phase, n_cc))
-
-        ccv_norm[iter_i, :,spec_i,:] /= norm_2D
-
 # Plot cross-correlation
 tplt.plot_sysrem_cc_2D(
     cc_rvs=cc_rvs,
-    cc_values=ccv_norm,
+    cc_values=ccv_per_spec,
     mean_spec_lambdas=np.mean(waves,axis=1),
     planet_rvs=planet_rvs,
     plot_label=ss.label,)
@@ -82,7 +75,7 @@ tplt.plot_sysrem_cc_2D(
 #------------------------------------------------------------------------------
 Kp_steps, Kp_vsys_map = sr.compute_Kp_vsys_map(
     cc_rvs=cc_rvs,
-    cc_values=ccv_norm,
+    cc_values=ccv_per_spec,
     transit_info=transit_info_list[ss.transit_i],
     syst_info=syst_info,
     Kp_lims=ss.Kp_lims,

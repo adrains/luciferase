@@ -21,7 +21,8 @@ def clean_and_compute_initial_resid(
     sigma_threshold_spectral=6.0,
     n_max_phase_bad_px=5,
     do_clip_spectral_dimension=False,
-    interpolation_method="cubic",):
+    interpolation_method="cubic",
+    do_normalise=True,):
     """Function to clean a spectral data cube prior to running SYSREM. We sigma
     clip along the phase dimension (i.e. the time series of each pixel) as well
     as along the spectral dimension. 
@@ -64,6 +65,11 @@ def clean_and_compute_initial_resid(
         ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
         'cubic', 'previous', or 'next'].
 
+    do_normalise: boolean, default: True
+        Whether to normalise the cleaned + interpolated fluxes or not. This
+        should be set to False if intending to use the Piskunov detrending
+        algorithm.
+
     Returns
     -------
     resid_init: 3D float array
@@ -90,7 +96,8 @@ def clean_and_compute_initial_resid(
 
     # Loop over all spectral segments and spectral pixels
     for spec_i in range(n_spec):
-        for px_i in range(n_px):
+        desc = "Cleaning spectrum {}/{}".format(spec_i+1, n_spec)
+        for px_i in tqdm(range(n_px), desc=desc, leave=False):
             # Sigma clip along the phase dimension to compute the bad pixel
             # mask for px_i
             with warnings.catch_warnings():
@@ -166,19 +173,30 @@ def clean_and_compute_initial_resid(
     # Finally we pre-normalise the spectra. Per Birkby+2013, this involves:
     #   1) Dividing each individual *spectrum* by its mean value
     #   2) Subtracting unity
-    mean_2D = np.nanmean(flux, axis=2)  # [n_phase, n_spec]
-    mean_3D = np.broadcast_to(
-        mean_2D[:,:,None], flux.shape)  # [n_phase, n_spec, n_px]
-    resid_init = flux / mean_3D - 1
-    
-    # Also rescale uncertainties
-    e_flux /= mean_3D
+    if do_normalise:
+        mean_2D = np.nanmean(flux, axis=2)  # [n_phase, n_spec]
+        mean_3D = np.broadcast_to(
+            mean_2D[:,:,None], flux.shape)  # [n_phase, n_spec, n_px]
+        resid_init = flux / mean_3D - 1
+        
+        # Also rescale uncertainties
+        e_flux /= mean_3D
 
-    # Finally, for any remaining non-interpolated bad px, set the fluxes and
-    # uncertainties to default values
-    resid_init[bad_px_mask] = 0.0
-    flux[bad_px_mask] = 1.0
-    e_flux[bad_px_mask] = 1E20
+        # Finally, for any remaining non-interpolated bad px, set the fluxes
+        # and uncertainties to default values
+        resid_init[bad_px_mask] = 0.0
+        flux[bad_px_mask] = 1.0
+        e_flux[bad_px_mask] = 1E20
+
+        # No normalisation
+    else:
+        resid_init = flux.copy()
+
+        # Finally, for any remaining non-interpolated bad px, set the fluxes
+        # and uncertainties to default values
+        resid_init[bad_px_mask] = np.median(resid_init[~bad_px_mask])
+        flux[bad_px_mask] = np.median(flux[~bad_px_mask])
+        e_flux[bad_px_mask] = 1E20
 
     return resid_init, flux, e_flux
 
@@ -622,6 +640,15 @@ def cross_correlate_sysrem_resid(
             # Store
             ccv_global[sysrem_iter_i, :, :] = cc_val.T
 
+    # Normalise
+    for iter_i in range(n_sysrem_iter):
+        for spec_i in tqdm(range(n_spec), desc="Normalising", leave=False):
+            # Sum along the CC direction
+            norm_1D = np.nansum(ccv_per_spec[iter_i, :,spec_i,:], axis=1)
+            norm_2D = np.broadcast_to(norm_1D[:,None], (n_phase, n_rv_steps))
+
+            ccv_per_spec[iter_i, :,spec_i,:] /= norm_2D
+
     # All done, return our array of cross correlation results
     return cc_rvs, ccv_per_spec, ccv_global
 
@@ -701,12 +728,13 @@ def compute_Kp_vsys_map(
                 # Loop over all phases
                 for phase_i in range(n_phase):
                     # Grab relevant parameters from transit_info
-                    phase = transit_info.iloc[phase_i]["phase_mid"]
+                    # Note: phases have been negated.
+                    phase = -1 * transit_info.iloc[phase_i]["phase_mid"]
                     v_bcor = transit_info.iloc[phase_i]["bcor"]
                     v_star = syst_info.loc["rv_star", "value"]
 
                     # Compute the velocity shift between this phase and the
-                    # planet rest frame velocity.
+                    # planet rest frame velocity. TODO: check sign on bcor.
                     vp = Kp * np.sin(2*np.pi*phase) + v_star - v_bcor
 
                     # Create interpolator for the CC values of this phase
