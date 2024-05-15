@@ -541,9 +541,13 @@ def cross_correlate_sysrem_resid(
     cc_rvs: 1D float array
         RV values that were used when cross correlating in km/s.
     
-    cc_values: 4D float array
+    ccv_per_spec: 4D float array
         Array of cross correlation values of shape:
         [n_sysrem_iter, n_phase, n_spec, n_rv_steps].
+
+    ccv_combined: 3D float array, default: None
+        3D float array of the *combined* cross correlations for each SYSREM
+        iteration of shape [n_sysrem_iter, n_phase, n_rv_step].
     """
     # Initialise RV vector
     cc_rvs = np.arange(cc_rv_lims[0], cc_rv_lims[1]+cc_rv_step, cc_rv_step)
@@ -556,7 +560,7 @@ def cross_correlate_sysrem_resid(
     ccv_per_spec = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
 
     # Initialise output array for *global* cross-correlation
-    ccv_global = np.zeros((n_sysrem_iter, n_phase, n_rv_steps))
+    #ccv_global = np.zeros((n_sysrem_iter, n_phase, n_rv_steps))
     
     # Initialise array of RV shifted planet spectra
     spec_4D = np.ones((n_rv_steps, n_phase, n_spec, n_px,))
@@ -623,24 +627,25 @@ def cross_correlate_sysrem_resid(
             sysrem_iter_i+1, n_sysrem_iter))
 
         # Compute the *global* cross correlation for this SYSREM iteration
-        if False:
-            resid_3D = sysrem_resid[sysrem_iter_i].copy() +1
-            resid_4D = np.broadcast_to(
-                array=resid_3D[None,:,:,:],
-                shape=(n_rv_steps, n_phase, n_spec, n_px,),)
-            
-            # Sum over the px and spectral segment dimensions
-            # spec_4D has shape (n_rv_steps, n_phase, n_spec, n_px,)
-            cc_num = np.nansum(np.nansum(resid_4D * spec_4D, axis=3), axis=2)
-            cc_den = np.sqrt(
-                np.nansum(np.nansum(resid_4D**2, axis=3), axis=2)
-                * np.nansum(np.nansum(spec_4D**2, axis=3), axis=2))
-            cc_val = cc_num / cc_den
+        """
+        resid_3D = sysrem_resid[sysrem_iter_i].copy() +1
+        resid_4D = np.broadcast_to(
+            array=resid_3D[None,:,:,:],
+            shape=(n_rv_steps, n_phase, n_spec, n_px,),)
+        
+        # Sum over the px and spectral segment dimensions
+        # spec_4D has shape (n_rv_steps, n_phase, n_spec, n_px,)
+        cc_num = np.nansum(np.nansum(resid_4D * spec_4D, axis=3), axis=2)
+        cc_den = np.sqrt(
+            np.nansum(np.nansum(resid_4D**2, axis=3), axis=2)
+            * np.nansum(np.nansum(spec_4D**2, axis=3), axis=2))
+        cc_val = cc_num / cc_den
 
-            # Store
-            ccv_global[sysrem_iter_i, :, :] = cc_val.T
+        # Store
+        ccv_global[sysrem_iter_i, :, :] = cc_val.T
+        """
 
-    # Normalise
+    # Normalise the cross correlation for each spectral segment
     for iter_i in range(n_sysrem_iter):
         for spec_i in tqdm(range(n_spec), desc="Normalising", leave=False):
             # Sum along the CC direction
@@ -649,15 +654,20 @@ def cross_correlate_sysrem_resid(
 
             ccv_per_spec[iter_i, :,spec_i,:] /= norm_2D
 
+    # Compute combined cross-correlation. Presently this is just done by
+    # combining in quadrature along the spectral segment axis
+    ccv_comb = np.sum(ccv_per_spec**2, axis=2)**0.5
+
     # All done, return our array of cross correlation results
-    return cc_rvs, ccv_per_spec, ccv_global
+    return cc_rvs, ccv_per_spec, ccv_comb
 
 
 def compute_Kp_vsys_map(
     cc_rvs,
-    cc_values,
+    ccv_per_spec,
     transit_info,
     syst_info,
+    ccv_combined=None,
     Kp_lims=(0,400),
     Kp_step=0.5,
     interpolation_method="cubic",):
@@ -671,8 +681,8 @@ def compute_Kp_vsys_map(
     cc_rvs: 1D float array
         Vector of RV steps of length [n_rv_step]
     
-    cc_values: 4D float array
-        3D float array of cross correlation results with shape:
+    ccv_per_spec: 4D float array
+        4D float array of cross correlation results with shape:
         [n_sysrem_iter, n_phase, n_spec, n_rv_step]
     
     transit_info: pandas DataFrame
@@ -680,6 +690,10 @@ def compute_Kp_vsys_map(
 
     syst_info: pandas DataFrame
         DataFrame containing planet/star/system properties.
+
+    ccv_combined: 3D float array, default: None
+        3D float array of the *combined* cross correlations for each SYSREM
+        iteration of shape [n_sysrem_iter, n_phase, n_rv_step].
 
     Kp_lims: float tuple, default: (0,400)
         Lower and upper bounds of Kp in km/s to sample between.
@@ -697,10 +711,23 @@ def compute_Kp_vsys_map(
     Kp_steps: 1D float array
         Array of Kp steps from Kp_lims[0] to Kp_lims[1] in steps of Kp_step.
     
-    Kp_vsys_map: 4D array
+    Kp_vsys_map_per_spec: 4D array
         Grid of Kp_vsys maps of shape: 
         [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
+
+    Kp_vsys_map_combined: 3D float array [optional]
+        3D floar array of the *combined* Kp-Vsys map of shape: 
+        [n_sysrem_iter, n_Kp_steps, n_rv_step].
     """
+    # If we've been given a set of combined cross-correlation values, 
+    # concatenate these to the end of our array so we can compute a Kp-Vsys map
+    # from them as well.
+    if ccv_combined is not None:
+        cc_values = np.concatenate(
+            (ccv_per_spec, ccv_combined[:,:,None,:]), axis=2)
+    else:
+        cc_values = ccv_per_spec.copy()
+
     # Grab dimensions for convenience
     (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
 
@@ -752,4 +779,14 @@ def compute_Kp_vsys_map(
                 Kp_vsys_map[sr_iter_i, spec_i, Kp_i] = \
                     np.nanmean(cc_values_shifted, axis=0)
 
-    return Kp_steps, Kp_vsys_map
+    # If we were given a combined set of CCVs, removed the combined set of
+    # cross correlation values and return that as its own variable.
+    if ccv_combined is not None:
+        Kp_vsys_map_per_spec = Kp_vsys_map[:,:-1,:,:]
+        Kp_vsys_map_combined = Kp_vsys_map[:,-1,:,:]
+
+        return Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined
+
+    # Otherwise return as is
+    else:
+        return Kp_steps, Kp_vsys_map

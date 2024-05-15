@@ -693,7 +693,8 @@ def plot_sysrem_cc_1D(
 
 def plot_sysrem_cc_2D(
     cc_rvs,
-    cc_values,
+    ccv_per_spec,
+    ccv_combined=None,
     mean_spec_lambdas=None,
     planet_rvs=None,
     fig_size=(18, 6),
@@ -709,9 +710,13 @@ def plot_sysrem_cc_2D(
     cc_rvs: 1D float array
         Vector of RV steps of length [n_rv_step]
     
-    cc_values: 3D float array
-        3D float array of cross correlation results with shape:
-        [n_sysrem_iter, n_phase, n_rv_step]
+    ccv_per_spec: 4D float array
+        4D float array of cross correlation results with shape:
+        [n_sysrem_iter, n_phase, n_spec, n_rv_step].
+
+    ccv_combined: 3D float array, default: None
+        3D float array of the *combined* cross correlations for each SYSREM
+        iteration of shape [n_sysrem_iter, n_phase, n_rv_step].
 
     mean_spec_lambdas: float array or None, default: None
         Mean values of each spectral segment  shape [n_spec].
@@ -725,6 +730,15 @@ def plot_sysrem_cc_2D(
     plot_label: str, default: ""
         Unique identifier label to add to plot filename.
     """
+    # If we've been given a set of combined cross-correlation values, 
+    # concatenate these to the end of our array so they can be plotted on their
+    # own panel.
+    if ccv_combined is not None:
+        cc_values = np.concatenate(
+            (ccv_per_spec, ccv_combined[:,:,None,:]), axis=2)
+    else:
+        cc_values = ccv_per_spec.copy()
+
     # Grab dimensions for convenience
     (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
 
@@ -745,6 +759,9 @@ def plot_sysrem_cc_2D(
     # [x_min, x_max, y_min, y_max]
     extent = [np.min(cc_rvs), np.max(cc_rvs), n_phase, 0]
 
+    #--------------------------------------------------------------------------
+    # Plot cross-correlation per spectral segment
+    #--------------------------------------------------------------------------
     # Loop over all SYSREM iterations
     for sr_iter_i in range(n_sysrem_iter):
 
@@ -769,7 +786,11 @@ def plot_sysrem_cc_2D(
             axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
 
             # Only show titles on the top (and if we've been given them)
-            if sr_iter_i == 0 and mean_spec_lambdas is not None:
+            if (sr_iter_i == 0 and spec_i == n_spec-1 
+                and ccv_combined is not None):
+                axis.set_title(label="Combined", fontsize="x-small")
+
+            elif sr_iter_i == 0 and mean_spec_lambdas is not None:
                 axis.set_title(
                     label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
                     fontsize="x-small")
@@ -801,7 +822,8 @@ def plot_sysrem_cc_2D(
 def plot_kp_vsys_map(
     cc_rvs,
     Kp_steps,
-    Kp_vsys_map,
+    Kp_vsys_map_per_spec,
+    Kp_vsys_map_combined=None,
     mean_spec_lambdas=None,
     fig_size=(18, 6),
     plot_label="",):
@@ -819,9 +841,13 @@ def plot_kp_vsys_map(
     Kp_steps: 1D float array
         Vector of Kp steps of length [n_Kp_steps]
 
-    Kp_vsys_map: 4D float array
+    Kp_vsys_map_per_spec: 4D float array
         4D float array of Kp-Vsys maps with shape:
         [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
+
+    Kp_vsys_map_combined: 3D float array, default: None
+        3D floar array of the *combined* Kp-Vsys map of shape: 
+        [n_sysrem_iter, n_Kp_steps, n_rv_step].
 
     mean_spec_lambdas: float array or None, default: None
         Mean values of each spectral segment  shape [n_spec].
@@ -832,6 +858,14 @@ def plot_kp_vsys_map(
     plot_label: str, default: ""
         Unique identifier label to add to plot filename.
     """
+    # If we've been given a set of combined Kp-Vsys map, concatenate these to
+    # the end of our array so they can be plotted on their own panel.
+    if Kp_vsys_map_combined is not None:
+        Kp_vsys_map = np.concatenate(
+            (Kp_vsys_map_per_spec, Kp_vsys_map_combined[:,None,:,:]), axis=1)
+    else:
+        Kp_vsys_map = Kp_vsys_map_per_spec.copy()
+
     # Grab dimensions for convenience
     (n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step) = Kp_vsys_map.shape
 
@@ -875,7 +909,11 @@ def plot_kp_vsys_map(
             axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
 
             # Only show titles on the top (and if we've been given them)
-            if sr_iter_i == 0 and mean_spec_lambdas is not None:
+            if (sr_iter_i == 0 and spec_i == n_spec-1 
+                and Kp_vsys_map_combined is not None):
+                axis.set_title(label="Combined", fontsize="x-small")
+
+            elif sr_iter_i == 0 and mean_spec_lambdas is not None:
                 axis.set_title(
                     label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
                     fontsize="x-small")

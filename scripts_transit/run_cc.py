@@ -9,8 +9,6 @@ import astropy.units as u
 import luciferase.utils as lu
 from astropy import constants as const
 from PyAstronomy.pyasl import instrBroadGaussFast
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 
 #------------------------------------------------------------------------------
 # Settings
@@ -38,17 +36,7 @@ planet_rvs = \
     transit_info_list[ss.transit_i]["delta"].values*const.c.cgs.to(u.km/u.s)
 
 #------------------------------------------------------------------------------
-# Import telluric spectra
-#------------------------------------------------------------------------------
-telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
-    molecfit_fits=ss.molecfit_fits[0],
-    tau_fill_value=ss.tau_fill_value,
-    convert_to_angstrom=False,
-    convert_to_nm=True,
-    output_transmission=True,)
-
-#------------------------------------------------------------------------------
-# Import planet spectra
+# Import and prepare templates
 #------------------------------------------------------------------------------
 # Load in petitRADRTRANS datacube of templates. These templates will be in
 # units of R_earth as a function of wavelength.
@@ -85,6 +73,13 @@ planet_cont = instrBroadGaussFast(
 # [Optional] For testing, we can use the telluric vector for cross correlation
 if ss.cc_with_telluric:
     print("Cross correlating with telluric template.")
+    telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
+        molecfit_fits=ss.molecfit_fits[0],
+        tau_fill_value=ss.tau_fill_value,
+        convert_to_angstrom=False,
+        convert_to_nm=True,
+        output_transmission=True,)
+
     wave_template = telluric_wave
     spectrum_template = telluric_trans
 
@@ -107,7 +102,7 @@ else:
 #------------------------------------------------------------------------------
 # Cross-correlation
 #------------------------------------------------------------------------------
-cc_rvs, ccv_per_spec, ccv_global = sr.cross_correlate_sysrem_resid(
+cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
     waves=waves,
     sysrem_resid=resid_all,
     template_wave=wave_template,
@@ -119,7 +114,8 @@ cc_rvs, ccv_per_spec, ccv_global = sr.cross_correlate_sysrem_resid(
 # Plot cross-correlation
 tplt.plot_sysrem_cc_2D(
     cc_rvs=cc_rvs,
-    cc_values=ccv_per_spec,
+    ccv_per_spec=ccv_per_spec,
+    ccv_combined=ccv_combined,
     mean_spec_lambdas=np.mean(waves,axis=1),
     planet_rvs=planet_rvs,
     plot_label=ss.label,)
@@ -127,17 +123,21 @@ tplt.plot_sysrem_cc_2D(
 #------------------------------------------------------------------------------
 # Kp-Vsys map
 #------------------------------------------------------------------------------
-Kp_steps, Kp_vsys_map = sr.compute_Kp_vsys_map(
+# Create Kp-Vsys map
+Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = sr.compute_Kp_vsys_map(
     cc_rvs=cc_rvs,
-    cc_values=ccv_per_spec,
+    ccv_per_spec=ccv_per_spec,
+    ccv_combined=ccv_combined,
     transit_info=transit_info_list[ss.transit_i],
     syst_info=syst_info,
     Kp_lims=ss.Kp_lims,
     Kp_step=ss.Kp_step,)
 
+# Plot Kp-Vsys map
 tplt.plot_kp_vsys_map(
     cc_rvs=cc_rvs,
     Kp_steps=Kp_steps,
-    Kp_vsys_map=Kp_vsys_map,
+    Kp_vsys_map_per_spec=Kp_vsys_map_per_spec,
+    Kp_vsys_map_combined=Kp_vsys_map_combined,
     mean_spec_lambdas=np.mean(waves,axis=1),
     plot_label=ss.label,)

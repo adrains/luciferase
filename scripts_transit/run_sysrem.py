@@ -25,10 +25,11 @@ wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ss.save_path, ss.label, ss.n_transit)
 
+# Currently both detrending algorithms do not require normalisation to work
 if ss.detrending_algorithm == "PISKUNOV":
     do_normalise = False
 else:
-    do_normalise = True
+    do_normalise = False
 
 #------------------------------------------------------------------------------
 # Main Operation
