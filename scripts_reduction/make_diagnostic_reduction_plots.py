@@ -177,8 +177,8 @@ for folder in folders:
             sf_path = os.path.join(folder, SLIT_FUNCS[file_i])
 
         observations.append(
-            lspec.initialise_observation_from_crires_nodding_fits(
-                fits_file_nodding_extracted=extr_path,
+            lspec.initialise_observation_from_crires_fits(
+                fits_file_extracted=extr_path,
                 fits_file_slit_func=sf_path,))
 
     # Get information about orders and detectors
