@@ -70,7 +70,8 @@ for model_i, model_path in enumerate(all_model_paths):
             x=wave,
             y=spec_broad_fine,
             bounds_error=False,
-            fill_value=np.nan,)
+            fill_value=np.nan,
+            kind="cubic",)
         
     spec_broad = spec_interp(wave_new)
 

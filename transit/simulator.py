@@ -12,30 +12,11 @@ from scipy.integrate import simps
 from PyAstronomy.pyasl import instrBroadGaussFast
 from scipy.signal import savgol_filter
 import transit.utils as tu
+import luciferase.utils as lu
 
 # -----------------------------------------------------------------------------
 # Load/save spectra
 # -----------------------------------------------------------------------------
-def read_fits_template(filepath):
-    """Load a fits file template.
-
-    Parameters
-    ----------
-    filepath: string
-        Filepath to the fits file.
-
-    Returns
-    -------
-    wave, spec: 1D float array
-        Wavelength and spectra arrays of shape n_wave.
-    """
-    with fits.open(filepath) as fits_file:
-        wave = fits_file["WAVE"].data
-        spec = fits_file["SPEC"].data[0]
-
-    return wave, spec
-
-
 def read_marcs_spectrum(filepath, wave_min, wave_max, a_limb, n_mu_samples):
     """Reads either a MARCS .plt or .itf file to extract wavelengths, mu 
     values, and radiant fluxes in units of ergs/cm^2/s/Å/µ.
@@ -80,7 +61,12 @@ def read_marcs_spectrum(filepath, wave_min, wave_max, a_limb, n_mu_samples):
         if a_limb is None and n_mu_samples is None:
             raise Exception("a_limb and n_mu_samples cannot be None.")
         
-        wave_marcs, fluxes_1d = read_fits_template(filepath=filepath,)
+        # Import MARCS fits and convert to *vacuum*
+        wave_marcs, fluxes_1d = lu.load_plumage_template_spectrum(
+            template_fits=filepath,
+            do_convert_angstroms_to_nm=False,
+            do_convert_air_to_vacuum_wl=True,)
+
         fluxes_marcs, mus = tu.generate_mock_flux_mu_grid(
             flux=fluxes_1d,
             a_limb=a_limb,
@@ -1035,7 +1021,7 @@ def simulate_transit_single_epoch(
     fluxes_marcs,
     mus_marcs,
     wave_planet,
-    trans_planet,
+    Rp_Re_vs_lambda_planet,
     telluric_wave,
     telluric_tau,
     scale_val,
@@ -1046,7 +1032,6 @@ def simulate_transit_single_epoch(
     do_equid_lambda_resample=True,
     fill_throughput_value=0,
     planet_transmission_boost_fac=1,
-    convert_from_transmission_to_radius=True,
     constant_gain=2,):
     """Simulate a single epoch of a planet during transit by modelling the
     stellar, planetary, and telluric components. This function takes into
@@ -1125,9 +1110,9 @@ def simulate_transit_single_epoch(
     fluxes_marcs, mus_marcs: 2D float array
        MARCS flux and mu arrays of shape [n_wave_marcs, n_max_n_mu].
 
-    wave_planet, trans_planet: 1D float array
-        Wavelength and transmittance arrays for the planet spectrum of shape
-        [n_wave_planet].
+    wave_planet, Rp_Re_vs_lambda_planet: 1D float array
+        Wavelength and planet radius in R_earth arrays for the planet spectrum
+        of shape [n_wave_planet].
 
     telluric_wave, telluric_tau: 1D float array
         Wavelength and tau arrays for the telluric spectrum of shape 
@@ -1219,40 +1204,20 @@ def simulate_transit_single_epoch(
         # Planet flux
         # ---------------------------------------------------------------------
         print("\tSimulating planet flux...")
-        # [Optional] Boost the strength of the planet spectrum for testing 
-        trans_planet *= planet_transmission_boost_fac
+        # [Optional] Boost the strength of the planet spectrum for testing.
+        # Make sure to use a copy so we don't affect the actual planet spectrum
+        rp_vs_lambda = Rp_Re_vs_lambda_planet.copy()
+        rp_vs_lambda *= planet_transmission_boost_fac
 
         r_e = const.R_earth   # Earth radii in metres
         r_sun = const.R_sun   # Solar radii in metres
 
         # Compute planet transmission radius as a function of wavelength
-        Rp_re =  syst_info.loc["r_planet_rearth", "value"]
-        Rs_re = \
-            (syst_info.loc["r_star_rsun", "value"] * r_sun / r_e).value
-        
-        # TODO: temporary compatability HACK
-        # If we've been given the planet spectrum in the form of a transmission
-        # spectrum, we want to convert this to an effective radius. 
-        # 
-        # Per FL, the formula to calculate the transmission spectrum is:
-        #   trans = 1 - ((modelspectrum + planet.Rp)**2  / planet.Rs**2)
-        #
-        # Meaning the reverse is:
-        #   radius = Rs * (1-trans)^0.5 - Rp
-        if convert_from_transmission_to_radius:
-            # NOTE: the sign here is important on Rp_re....FL might have gotten
-            # it wrong? Surely with a tranmission of 1 the planet has have
-            # radius equal to itself?
-            Rs_re_eff = Rs_re * np.sqrt(1 - trans_planet) + Rp_re
-
-        # Otherwise already assume that the planet spectrum is in the right
-        # format
-        else:
-            Rs_re_eff = trans_planet
+        Rs_re = (syst_info.loc["r_star_rsun", "value"] * r_sun / r_e).value
 
         # Now compute the planet/star area ratio as a function of radius
         area_star = np.pi * Rs_re **2
-        area_planet_eff = np.pi * Rs_re_eff **2
+        area_planet_eff = np.pi * rp_vs_lambda **2
         planet_blocking_frac_eff = area_planet_eff / area_star
 
         # Account for the fact that the planet might be only partially in
@@ -1454,6 +1419,8 @@ def simulate_transit_multiple_epochs(
     simulate_transit_single_epoch. See docstrings of calc_model_flux and
     simulate_transit_single_epoch for more detail.
 
+    Note: the simulator works in wavelength units of Ångström.
+
     TODO: add a warning for or correct the interpolation issues that happen
     when one of the input spectra is shorter than the observed wavelength
     range.
@@ -1615,7 +1582,7 @@ def simulate_transit_multiple_epochs(
         fluxes_marcs = np.ones_like(fluxes_marcs) * np.nanmedian(fluxes_marcs)
     
     # Import planet wavelengths, fluxes, and template (i.e. species) info
-    wave_planet, trans_planet_all, templ_info = \
+    wave_planet, Rp_Re_vs_lambda_planet_all, templ_info = \
         tu.load_transmission_templates_from_fits(
             fits_file=planet_fits,
             convert_rp_rj_to_re=True,)
@@ -1635,13 +1602,13 @@ def simulate_transit_multiple_epochs(
     if len(match_i) == 0:
         raise ValueError("Invalid molecule combination!")
     else:
-        trans_planet = trans_planet_all[int(match_i)]
+        Rp_Re_vs_lambda_planet = Rp_Re_vs_lambda_planet_all[int(match_i)]
 
     # The planet should have constant planet radii with wavelength if we're
     # simulating the transit of a planet without an atmosphere.
     if do_use_uniform_planet_spec:
-        trans_planet = np.full_like(
-            trans_planet, syst_info.loc["r_planet_rearth", "value"])
+        Rp_Re_vs_lambda_planet = np.full_like(
+            Rp_Re_vs_lambda_planet, syst_info.loc["r_planet_rearth", "value"])
     
     # Load telluric spectrum
     telluric_wave, telluric_tau, _ = tu.load_telluric_spectrum(
@@ -1674,7 +1641,7 @@ def simulate_transit_multiple_epochs(
     shape = (len(transit_info), wave_observed.shape[0], wave_observed.shape[1])
     fluxes_model_all = np.zeros(shape)
     sigma_model_all = np.zeros(shape)
-
+    
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}...".format(epoch_i))
@@ -1684,7 +1651,7 @@ def simulate_transit_multiple_epochs(
             fluxes_marcs=fluxes_marcs,
             mus_marcs=mus_marcs,
             wave_planet=wave_planet,
-            trans_planet=trans_planet,
+            Rp_Re_vs_lambda_planet=Rp_Re_vs_lambda_planet,
             telluric_wave=telluric_wave,
             telluric_tau=telluric_tau,
             scale_val=scale_vector[epoch_i],
@@ -1696,8 +1663,7 @@ def simulate_transit_multiple_epochs(
             do_equid_lambda_resample=do_equid_lambda_resample,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
-            planet_transmission_boost_fac=planet_transmission_boost_fac,
-            convert_from_transmission_to_radius=False,) # TODO: clean
+            planet_transmission_boost_fac=planet_transmission_boost_fac,)
 
         fluxes_model_all[epoch_i] = flux_counts
 
@@ -1728,12 +1694,13 @@ def simulate_transit_multiple_epochs(
         # Scale entire spectrum
         fluxes_model_all *= sf
 
-        # Compute the uncertainties
-        sigma_counts = fluxes_model_all**0.5
+        # Compute the uncertainties as Poisson uncertaintes
+        sigma_model_all = fluxes_model_all.copy()**0.5
 
-        # Assuming Gaussian uncertainties, resample the spectra to add noise
+        # Using these uncertainties, resample the spectra to add noise
+        # TODO: this should be Poisson distribution right?
         fluxes_model_all = \
-            np.random.normal(loc=fluxes_model_all, scale=sigma_counts)
+            np.random.normal(loc=fluxes_model_all, scale=sigma_model_all)
 
         # Clip this to be >= 0
         fluxes_model_all = np.clip(fluxes_model_all, a_min=0, a_max=None,)
@@ -1741,7 +1708,7 @@ def simulate_transit_multiple_epochs(
     # Otherwise no noise, scale factor = 1, Poisson uncertainties
     else:
         sf = 1
-        sigma_model_all = fluxes_model_all**0.5
+        sigma_model_all = fluxes_model_all.copy()**0.5
 
     # -------------------------------------------------------------------------
     # [Optional] Remove the effect of the blaze
@@ -1776,13 +1743,14 @@ def simulate_transit_multiple_epochs(
     rest_frame_epoch["v_y_start"] = np.median(transit_info["v_y_start"].values)
     rest_frame_epoch["v_y_end"] = np.median(transit_info["v_y_end"].values)
     
+    print("Generating component vectors...")
     _, component_vectors = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
             mus_marcs=mus_marcs,
             wave_planet=wave_planet,
-            trans_planet=trans_planet,
+            Rp_Re_vs_lambda_planet=Rp_Re_vs_lambda_planet,
             telluric_wave=telluric_wave,
             telluric_tau=telluric_tau,
             scale_val=1.0,
@@ -1794,8 +1762,7 @@ def simulate_transit_multiple_epochs(
             do_equid_lambda_resample=do_equid_lambda_resample,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
-            planet_transmission_boost_fac=planet_transmission_boost_fac,
-            convert_from_transmission_to_radius=False,)  # TODO: clean
+            planet_transmission_boost_fac=planet_transmission_boost_fac,)
 
     # [Optional] Apply blaze correction to component spectra
     if correct_for_blaze:
@@ -1847,9 +1814,16 @@ def make_sim_info_df(sim_settings_obj,):
     species.sort()
     species_str = "_".join(ss.species_to_model)
 
+    if ss.base_fits_path == "":
+        base_fits = "transit_data_{}_n{}.fits".format(
+            ss.base_fits_label, ss.n_transit)
+    else:
+        base_fits = "{}/transit_data_{}_n{}.fits".format(
+            ss.base_fits_path, ss.base_fits_label, ss.n_transit)
+
     data = [
         ["n_transit", ss.n_transit],
-        ["base_ob_info", ss.fits_load_dir],
+        ["base_ob_info", base_fits],
         ["marcs_fits", ss.marcs_fits],
         ["planet_spec", ss.planet_fits],
         ["species_modelled", species_str],

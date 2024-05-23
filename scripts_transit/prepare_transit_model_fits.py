@@ -90,7 +90,7 @@ telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
 # Stellar spectrum (continuum normalisation)
 wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
     template_fits=ds.stellar_template_fits,
-    do_convert_air_to_vacuum_wl=False,)
+    do_convert_air_to_vacuum_wl=True,)
 
 # -----------------------------------------------------------------------------
 # Interpolate all fluxes across phase and transit onto common wavelength scale
@@ -193,8 +193,8 @@ for transit_i in range(ds.n_transit):
     # Calculate mus and rvs and add them to our existing dataframes
     print("Calculating time step info...")
     tu.calculate_transit_timestep_info(
-        transit_info,
-        syst_info,
+        transit_info=transit_info,
+        syst_info=syst_info,
         do_consider_vsini=ds.do_consider_vsini,)
 
     # Sigma clip observations
@@ -279,7 +279,8 @@ for transit_i in range(ds.n_transit):
             wave_stellar=wave_stellar,
             spec_stellar=spec_stellar,
             bcors=transit_info_all[transit_i]["bcor"].values,
-            rv_star=syst_info.loc["rv_star", "value"],)
+            rv_star=syst_info.loc["rv_star", "value"],
+            airmasses=transit_info_all[transit_i]["airmass"].values,)
 
     # Construct bad px mask from tellurics
     print("Constructing bad px mask from tellurics...")

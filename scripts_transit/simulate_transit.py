@@ -13,6 +13,7 @@ import transit.utils as tu
 import transit.plotting as tplt
 import luciferase.spectra as lsp
 import luciferase.utils as lu
+import datetime
 
 # -----------------------------------------------------------------------------
 # Setup and Options
@@ -35,7 +36,7 @@ telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
 # Stellar spectrum (continuum normalisation)
 wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
     template_fits=ss.stellar_template_fits,
-    do_convert_air_to_vacuum_wl=False,)
+    do_convert_air_to_vacuum_wl=True,)
 
 # -----------------------------------------------------------------------------
 # Running the simualator
@@ -44,7 +45,10 @@ wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
 # moment we simulate real transits using real airmass/phase/velocity info and
 # simply duplicate the file and swap out the fluxes with simulated equivalents.
 waves, _, _, det, orders, transit_info_list, syst_info = \
-    tu.load_transit_info_from_fits("", ss.star_name, n_transit=ss.n_transit,)
+    tu.load_transit_info_from_fits(
+        ss.base_fits_path,
+        ss.base_fits_label,
+        n_transit=ss.n_transit,)
 
 # Initialise arrays for keeping track of simulated spectra
 model_flux_list = []
@@ -60,6 +64,12 @@ line = "-"*80
 
 # Print summary
 print(line, "\nSimulation Settings\n", line, sep="")
+if ss.base_fits_path == "":
+    print("\tBase fits\t\ttransit_data_{}_n{}.fits".format(
+        ss.base_fits_label, ss.n_transit))
+else:
+    print("\tBase fits\t\t{}/transit_data_{}_n{}.fits".format(
+        ss.base_fits_path, ss.base_fits_label, ss.n_transit))
 if ss.target_snr is None:
     print("\tSNR\t\t\tinf")
 else:
@@ -74,10 +84,10 @@ print("\tUniform planet\t\t{}\n".format(ss.do_use_uniform_planet_spec))
 
 # Run separately for each transit
 for transit_i in range(ss.n_transit):
-    print(line, "\nModelling transit #{}\n".format(transit_i), line, sep="")
+    print(line, "\nModelling transit #{}\n".format(transit_i+1), line, sep="")
     model_flux, model_sigma, component_vectors = \
         sim.simulate_transit_multiple_epochs(
-            wave_observed=waves*10,
+            wave_observed=waves*10,                 # Convert to Ångström
             syst_info=syst_info,
             transit_info=transit_info_list[transit_i],
             marcs_fits=ss.marcs_fits,
@@ -118,7 +128,6 @@ flux_components = np.array(flux_components)
 telluric_components = np.array(telluric_components)
 planet_components = np.array(planet_components)
 
-
 # -----------------------------------------------------------------------------
 # Save results to fits
 # -----------------------------------------------------------------------------
@@ -137,8 +146,13 @@ species = ss.species_to_model
 species.sort()
 species_str = "_".join(species)
 
+# Also grab the date
+date = datetime.datetime.now()
+date_str = date.strftime("%y%m%d")
+
 fn_label = "_".join([
     "{}".format(ss.label),
+    date_str,
     "{}".format(species_str),
     "stellar_{:0.0f}".format(int(not ss.do_use_uniform_stellar_spec)),
     "telluric_{:0.0f}".format(int(not ss.do_use_uniform_telluric_spec)),
@@ -153,7 +167,7 @@ sim_info = sim.make_sim_info_df(ss)
 tu.save_transit_info_to_fits(
     waves=waves,
     obs_spec_list=model_flux_list,
-    sigmas_list=model_flux_list,
+    sigmas_list=model_sigma_list,
     n_transits=ss.n_transit,
     detectors=det,
     orders=orders,
@@ -213,7 +227,8 @@ for transit_i in range(ss.n_transit):
             wave_stellar=wave_stellar,
             spec_stellar=spec_stellar,
             bcors=transit_info_list[transit_i]["bcor"].values,
-            rv_star=syst_info.loc["rv_star", "value"],)
+            rv_star=syst_info.loc["rv_star", "value"],
+            airmasses=transit_info_list[transit_i]["airmass"].values,)
 
     # Construct bad px mask from tellurics
     print("Constructing bad px mask from tellurics...")
