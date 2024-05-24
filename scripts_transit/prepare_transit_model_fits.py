@@ -182,6 +182,7 @@ phase_low = 0
 phase_high = fluxes_all[0].shape[0]
 
 for transit_i in range(ds.n_transit):
+    print("\nCleaning Night {}/{}".format(transit_i+1, ds.n_transit))
     # Grab high extent
     phase_high = phase_low + fluxes_all[transit_i].shape[0]
 
@@ -191,20 +192,23 @@ for transit_i in range(ds.n_transit):
     transit_info = transit_info_all[transit_i]
 
     # Calculate mus and rvs and add them to our existing dataframes
-    print("Calculating time step info...")
+    print("\tCalculating time step info...")
     tu.calculate_transit_timestep_info(
         transit_info=transit_info,
         syst_info=syst_info,
         do_consider_vsini=ds.do_consider_vsini,)
 
     # Sigma clip observations
-    print("Sigma clipping and cleaning data...")
+    print("\tSigma clipping and cleaning data...")
     fluxes_interp_clipped, bad_px_mask = tu.sigma_clip_observations(
+        waves=wave_adopt,
         obs_spec=fluxes,
-        bad_px_replace_val="interpolate",
-        time_steps=transit_info["jd_mid"].values,)
+        do_plot_sigma_clip_diagnostic=False,)
 
-    print("{:,} bad pixels found.".format(np.sum(bad_px_mask)))
+    n_bad_px = np.sum(bad_px_mask)
+    n_total_px = np.prod(bad_px_mask.shape)
+    print("\t{} bad pixels found ({:0.2f}%)".format(
+        n_bad_px, n_bad_px/n_total_px*100))
     
     fluxes_cleaned_all.append(fluxes_interp_clipped)
     sigmas_cleaned_all.append(sigma)
@@ -213,7 +217,7 @@ for transit_i in range(ds.n_transit):
 
     # Update low bound
     phase_low = phase_high
-    
+
 # -----------------------------------------------------------------------------
 # Consistency check
 # -----------------------------------------------------------------------------
@@ -259,7 +263,7 @@ tu.save_transit_info_to_fits(
 # -----------------------------------------------------------------------------
 # Continuum normalise data + save
 # -----------------------------------------------------------------------------
-print("Continuum normalising spectra...")
+print("\nContinuum normalising spectra...")
 for transit_i in range(ds.n_transit):
     # Grab shape for this night
     (n_phase, n_spec, n_px) = fluxes_all[transit_i].shape
@@ -283,7 +287,6 @@ for transit_i in range(ds.n_transit):
             airmasses=transit_info_all[transit_i]["airmass"].values,)
 
     # Construct bad px mask from tellurics
-    print("Constructing bad px mask from tellurics...")
     bad_px_mask_1D = telluric_trans < ds.telluric_trans_bad_px_threshold
     bad_px_mask_3D = np.tile(
         bad_px_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)

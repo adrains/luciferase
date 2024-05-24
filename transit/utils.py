@@ -576,8 +576,8 @@ def regrid_all_phases(
             phases_ref_pos = phases[nod_positions_ref]
             phase_ref_i = phases_ref_pos[len(phases_ref_pos)//n_ref_div]
 
-            print("\nDet {}: using phase #{} @ nod pos {} as reference".format(
-                det_i, phase_ref_i, reference_nod_pos))
+            txt = "\nRegridding det {}: using phase #{} @ nod pos {} as ref."
+            print(txt.format(det_i, phase_ref_i, reference_nod_pos))
 
             # Store reference wavelength vector
             wave_out[det_mask] = waves_d[phase_ref_i]
@@ -614,7 +614,8 @@ def regrid_all_phases(
         # Option B: use telluric model as reference
         # ---------------------------------------------------------------------
         elif use_telluric_model_as_ref:
-            print("\nDet {}: using Molecfit model as reference.".format(det_i))
+            txt = "\nRegridding det {}: using Molecfit model as ref."
+            print(txt.format(det_i))
             # Reshape telluric vector
             tw = telluric_wave.reshape(n_spec, n_px)
             tt = telluric_trans.reshape(n_spec, n_px)
@@ -706,7 +707,7 @@ def regrid_all_phases(
             spec_i = spec_ii[det_mask][ord_low:ord_high]
 
             print(
-                "Det {:0.0f}".format(det_i),
+                "\tDet {:0.0f}".format(det_i),
                 "Set {:0.0f}".format(set_i+1),
                 np.nanmedian(waves_d[0, ord_low:ord_high], axis=1).astype(int))
 
@@ -1511,7 +1512,10 @@ def save_transit_info_to_fits(
     label = label.replace(" ", "").replace("-", "")
     fits_file = os.path.join(
         fits_save_dir, "transit_data_{}_n{}.fits".format(label, n_transits))
-    hdu.writeto(fits_file, overwrite=True)
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        hdu.writeto(fits_file, overwrite=True)
 
 
 def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
@@ -1962,20 +1966,22 @@ def save_normalised_spectra_to_fits(
     fits_file = os.path.join(
         fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
 
-    with fits.open(fits_file, mode="update") as fits_file:
-        for extname in extensions.keys():
-            # First check if the HDU already exists
-            if extname in fits_file:
-                fits_file[extname].data = extensions[extname][0]
-            
-            # Not there, make and append
-            else:
-                hdu = fits.PrimaryHDU(extensions[extname][0])
-                hdu.header["EXTNAME"] = \
-                    (extname, extensions[extname][1])
-                fits_file.append(hdu)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with fits.open(fits_file, mode="update") as fits_file:
+            for extname in extensions.keys():
+                # First check if the HDU already exists
+                if extname in fits_file:
+                    fits_file[extname].data = extensions[extname][0]
+                
+                # Not there, make and append
+                else:
+                    hdu = fits.PrimaryHDU(extensions[extname][0])
+                    hdu.header["EXTNAME"] = \
+                        (extname, extensions[extname][1])
+                    fits_file.append(hdu)
 
-            fits_file.flush()
+                fits_file.flush()
 
 
 def load_normalised_spectra_from_fits(
@@ -2625,15 +2631,15 @@ def interpolate_wavelength_scale(
 
 
 def sigma_clip_observations(
+    waves,
     obs_spec,
     sigma_lower=5,
     sigma_upper=5,
     max_iterations=5,
-    time_steps=None,
-    bad_px_replace_val="interpolate"):
-    """Sigma clips and cleans the observations as a function of time for each
-    spectral pixel. Replaces bad pixels using value specified by 
-    bad_px_replace_val, currently nan, median, or interpolate.
+    do_plot_sigma_clip_diagnostic=False,):
+    """Sigma clips observations along the phase dimension using the median
+    normalised spectra to compute a bad pixel mask. Replaces bad pixels with 
+    nans.
 
     TODO: consider/update uncertainties.
 
@@ -2656,6 +2662,9 @@ def sigma_clip_observations(
         Value to replace bad pixels with, currently either nan, median, or 
         interpolate.
     
+    do_plot_sigma_clip_diagnostic: boolean, default: False
+        Whether to plot a diagnostic of the sigma clipped spectra.
+    
     Returns
     -------
     obs_spec: 3D float array
@@ -2666,24 +2675,6 @@ def sigma_clip_observations(
         Bad pixel mask corresponding to obs_spec of shape 
         [n_phase, n_spec, n_px].
     """
-    # Currently supported bad pixel correction methods
-    valid_bad_px_replace_vals = [
-        "nan",
-        "median",
-        "interpolate",
-    ]
-
-    # Input checking
-    if bad_px_replace_val not in valid_bad_px_replace_vals:
-        raise ValueError(
-            "bad_px_replace_val {} not supported, must be in{}".format(
-                bad_px_replace_val, valid_bad_px_replace_vals))
-
-    if bad_px_replace_val == "interpolate":
-        if time_steps is None or len(time_steps) != obs_spec.shape[0]:
-            raise ValueError(("Time steps array with len(n_phase) must be "
-                              "provided when interpolating."))
-
     # Grab array dimensions for convenience
     n_phase = obs_spec.shape[0]
     n_spec = obs_spec.shape[1]
@@ -2692,7 +2683,12 @@ def sigma_clip_observations(
     # Initialise bad px mask to return
     bad_px_mask = np.full_like(obs_spec, False).astype(bool)
 
-    # Duplicate data array
+    # Perform our sigma clipping on *normalised* data
+    med_3D = np.broadcast_to(
+        np.nanmedian(obs_spec, axis=2)[:,:,None], (obs_spec.shape))
+    fluxes_norm = obs_spec / med_3D
+
+    # Create the array of fluxes we'll return
     obs_spec_clipped = obs_spec.copy()
 
     # Iterate over spectral pixels, and clip along the phase dimension
@@ -2700,9 +2696,9 @@ def sigma_clip_observations(
 
     for spec_i in tqdm(range(0, n_spec), desc=desc, leave=False):
         for px_i in range(0, n_wave):
-            flux = obs_spec[:, spec_i, px_i]
+            flux = fluxes_norm[:, spec_i, px_i].copy()
 
-            # Iteratively sigma clip along the phase dimension
+            # Iteratively sigma clip along the phase dimension for px_i
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 clipped_fluxes_ma = sigma_clip(
@@ -2711,24 +2707,29 @@ def sigma_clip_observations(
                     sigma_upper=sigma_upper,
                     maxiters=max_iterations,)
 
-            clipped_fluxes = clipped_fluxes_ma.data
             bad_px = clipped_fluxes_ma.mask
 
-            # Now replace bad pixels according to our adopted replacement val
-            if bad_px_replace_val == "nan":
-                obs_spec_clipped[bad_px, spec_i, px_i] = np.nan
-            
-            elif bad_px_replace_val == "median":
-                obs_spec_clipped[bad_px, spec_i, px_i] = np.nanmedian(flux)
-
-            elif bad_px_replace_val == "interpolate":
-                interp_flux = interp1d(x=time_steps, y=clipped_fluxes)
-
-                obs_spec_clipped[bad_px, spec_i, px_i] = \
-                    interp_flux(time_steps[bad_px])
+            # Now replace bad pixels
+            fluxes_norm[bad_px, spec_i, px_i] = np.nan
+            obs_spec_clipped[bad_px, spec_i, px_i] = np.nan
 
             # Update bad px mask for this spectral pixel
             bad_px_mask[:, spec_i, px_i] = bad_px
+
+    if do_plot_sigma_clip_diagnostic:
+        fig, axis = plt.subplots(figsize=(20, 3))
+        for phase_i in range(n_phase):
+            for spec_i in range(n_spec):
+                axis.plot(
+                    waves[spec_i],
+                    fluxes_norm[phase_i, spec_i],
+                    color="k",
+                    linewidth=0.5,)
+        
+        axis.set_title("Sigma clipping diagnostic")
+        axis.set_xlabel("Wavelength (Å)")
+        axis.set_ylabel("Normalised Flux")
+        plt.tight_layout()
 
     return obs_spec_clipped, bad_px_mask
 

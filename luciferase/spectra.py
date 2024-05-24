@@ -2867,8 +2867,8 @@ def calc_continuum_optimisation_resid(
 
     Returns
     -------
-    resid_vect: float array
-        Uncertainty weighted residuals vector.
+    resid_vect: float
+        Sum of the uncertainty weighted residuals vector.
     """
     # Normal case: fit 1st order polynomial
     if fixed_gradient is None and len(params) == 2:
@@ -2898,7 +2898,7 @@ def calc_continuum_optimisation_resid(
     if np.sum(~np.isfinite(resid_vect)) != 0:
         raise ValueError("Non-finite residuals!")
 
-    return resid_vect
+    return np.sum(resid_vect)
 
 #------------------------------------------------------------------------------
 # Non-object oriented continuum normalisation
@@ -3076,7 +3076,6 @@ def continuum_normalise_all_spectra_with_telluric_model(
     calc_telluric_trans = interp1d(
         x=wave_telluric,
         y=trans_telluric,
-        kind="linear",
         fill_value=1.0,
         bounds_error=False,
         assume_sorted=True)
@@ -3085,14 +3084,15 @@ def continuum_normalise_all_spectra_with_telluric_model(
     calc_stellar_spec = interp1d(
         x=wave_stellar,
         y=spec_stellar,
-        kind="linear",
         bounds_error=False,
         assume_sorted=True)
 
     desc = "Continuum normalising for all spectral segments"
 
     plt.close("all")
-    fig, (poly_ax, norm_ax) = plt.subplots(2, figsize=(20, 5), sharex=True)
+    fig, axes = plt.subplots(
+        nrows=2, ncols=n_spec//3, figsize=(30, 5), sharex="col")
+    plt.subplots_adjust(hspace=0.075,)
 
     # We want our continuum normalisation--which is a linear polynomial fit--to
     # be consistent as a function of phase. This means that the gradient of the
@@ -3184,51 +3184,51 @@ def continuum_normalise_all_spectra_with_telluric_model(
             # Diagnostic plot
             # -----------------------------------------------------------------
             # Plot normalised spectrum
-            norm_ax.plot(
+            axes[1, spec_i//3].plot(
                 waves_sci[spec_i],
                 flux_norm,
                 linewidth=0.5,
                 c="k",
                 alpha=0.9,
-                label="Normalised Flux",)
+                label="Norm Flux",)
             
             # Overplot telluric transmission
-            norm_ax.plot(
+            axes[1, spec_i//3].plot(
                 waves_sci[spec_i],
                 trans_telluric,
                 linewidth=0.5,
                 c="r",
                 alpha=0.9,
-                label="Telluric Transmission",)
+                label="Molecfit",)
             
             # Overplot stellar template used for masking
-            norm_ax.plot(
+            axes[1, spec_i//3].plot(
                 waves_sci[spec_i],
                 spec_stellar,
                 linewidth=0.5, 
                 c="g",
                 alpha=0.9,
-                label="Stellar Template")
+                label="MARCS")
             
             # Overplot stellar template used for masking
-            norm_ax.plot(
+            axes[1, spec_i//3].plot(
                 waves_sci[spec_i],
                 trans_telluric*spec_stellar,
                 linewidth=0.5, 
                 c="b",
                 alpha=0.9,
-                label="Stellar + Telluric")
+                label="MARCS + Molecfit")
 
             # On separate panel plot best-fit continuum polynomials
             continuum_poly = Polynomial(poly_coeff)
-            poly_ax.plot(
+            axes[0, spec_i//3].plot(
                 waves_sci[spec_i],
                 fluxes_sci[phase_i, spec_i],
                 linewidth=0.5,
                 c="k",
                 alpha=0.9)
             
-            poly_ax.plot(
+            axes[0, spec_i//3].plot(
                 waves_sci[spec_i],
                 continuum_poly(waves_sci[spec_i]),
                 linewidth=0.5,
@@ -3236,17 +3236,17 @@ def continuum_normalise_all_spectra_with_telluric_model(
                 alpha=0.9)
 
     # Plot (unique) legend and adjust linewidths
-    handles, labels = norm_ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
+    for plot_i in range(n_spec//3):
+        handles, labels =  axes[1, spec_i//3].get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
 
-    leg = norm_ax.legend(
-        by_label.values(),
-        by_label.keys(),
-        fontsize="small",
-        loc="lower center",
-        ncol=4,)
+        leg = axes[1, plot_i].legend(
+            by_label.values(),
+            by_label.keys(),
+            fontsize="xx-small",
+            loc="lower center",
+            ncol=4,)
 
-    #plt.legend(loc="upper center",)
     plt.tight_layout()
     plt.savefig("plots/sysrem_telluric_norm_n_phase_{}.pdf".format(n_phase))
 
@@ -3361,17 +3361,12 @@ def continuum_normalise_spectrum_with_telluric_model(
             bad_px_mask,
             spec_stellar < px_absorption_threshold,)
 
-    # Set all bad pixels to non-NaN defaults that will exclude them from 
-    # the least squares fit
-    flux[bad_px_mask] = 1
-    sigma[bad_px_mask] = 1E5
-
     # Setup the list of parameters to pass to our fitting function
     args = (
-        wave_sci,
-        flux,
-        sigma,
-        trans_telluric*spec_stellar,
+        wave_sci[~bad_px_mask],
+        flux[~bad_px_mask],
+        sigma[~bad_px_mask],
+        trans_telluric[~bad_px_mask]*spec_stellar[~bad_px_mask],
         fixed_gradient,)
 
     # Do fit

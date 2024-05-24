@@ -788,7 +788,11 @@ def plot_sysrem_cc_2D(
             # Only show titles on the top (and if we've been given them)
             if (sr_iter_i == 0 and spec_i == n_spec-1 
                 and ccv_combined is not None):
-                axis.set_title(label="Combined", fontsize="x-small")
+                axis.set_title(
+                    label="Combined",
+                    fontsize="x-small",
+                    color="r",
+                    weight="bold",)
 
             elif sr_iter_i == 0 and mean_spec_lambdas is not None:
                 axis.set_title(
@@ -810,6 +814,18 @@ def plot_sysrem_cc_2D(
             # Plot planet trace if we have it
             if planet_rvs is not None:
                 axis.plot(planet_rvs, np.arange(n_phase), "--", color="white",)
+
+        # Highlight the combined axes
+        if ccv_combined is not None:
+            axis.spines['top'].set_color("red")
+            axis.spines['bottom'].set_color("red")
+            axis.spines['left'].set_color("red")
+            axis.spines['right'].set_color("red")
+
+            axis.spines['top'].set_linewidth(2)
+            axis.spines['bottom'].set_linewidth(2)
+            axis.spines['left'].set_linewidth(2)
+            axis.spines['right'].set_linewidth(2)
 
     if plot_label == "":
         plt.savefig("plots/crosscorr_2D.pdf")
@@ -911,7 +927,11 @@ def plot_kp_vsys_map(
             # Only show titles on the top (and if we've been given them)
             if (sr_iter_i == 0 and spec_i == n_spec-1 
                 and Kp_vsys_map_combined is not None):
-                axis.set_title(label="Combined", fontsize="x-small")
+                axis.set_title(
+                    label="Combined",
+                    fontsize="x-small",
+                    color="r",
+                    weight="bold",)
 
             elif sr_iter_i == 0 and mean_spec_lambdas is not None:
                 axis.set_title(
@@ -929,6 +949,18 @@ def plot_kp_vsys_map(
                     axes[sr_iter_i, spec_i].set_yticks([])
             else:
                 axis.set_ylabel(r"$K_P$ (km/s)", fontsize="x-small")
+
+        # Highlight the combined axes
+        if Kp_vsys_map_combined is not None:
+            axis.spines['top'].set_color("red")
+            axis.spines['bottom'].set_color("red")
+            axis.spines['left'].set_color("red")
+            axis.spines['right'].set_color("red")
+
+            axis.spines['top'].set_linewidth(2)
+            axis.spines['bottom'].set_linewidth(2)
+            axis.spines['left'].set_linewidth(2)
+            axis.spines['right'].set_linewidth(2)
 
     if plot_label == "":
         plt.savefig("plots/kp_vsys_2D.pdf")
@@ -994,9 +1026,8 @@ def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
     for det_i in range(3):
         det_mask = detectors == det_i+1
         fluxes_det = fluxes[:, det_mask].reshape(n_phase, n_spec//3 * n_px)
-        fluxes_det_clipped = sigma_clip(data=fluxes_det, sigma_upper=4)
         axes[det_i].imshow(
-            fluxes_det_clipped, aspect="auto", interpolation="none")
+            fluxes_det, aspect="auto", interpolation="none")
         axes[det_i].set_title("Detector #{:0.0f}".format(det_i+1))
         axes[det_i].set_ylabel("Phase")
 
