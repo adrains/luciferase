@@ -9,7 +9,9 @@
 # constructed as: <save_path>/transit_data_<label>_n<n_transits>.fits
 save_path: ""
 n_transit: 2
-label: "simulated_R100000_wasp107_trans_boost_x1_SNR_100"
+
+label: "wasp107"
+#label: "simulated_R100000_wasp107_CO_H2O_H2S_NH3_stellar_1_telluric_1_planet_1_boost_1_SNR_inf_240417"
 
 #------------------------------------------------------------------------------
 # Template Settings
@@ -28,6 +30,7 @@ telluric_trans_bad_px_threshold: 0.5
 
 # Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
 template_fits: "templates/WASP107b_prt_lbc/WASP107b_templates_all_R100000.fits"
+#template_fits: "templates/WASP107b_prt_lbc/WASP107b_Dyrek_templates_all_R100000.fits"
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -42,10 +45,10 @@ sigma_threshold_spectral: 5.0
 # Which transit to run on.
 # TODO: note that this will probably eventually be removed, but now is useful
 # for testing.
-transit_i: 0
+transit_i: 1
 
 # Number of iterations to run SYSREM for
-n_sysrem_iter: 2
+n_sysrem_iter: 5
 
 # These segments will be masked out completely. For K2148 this is 2.0-2.07um
 segments_to_mask_completely: [2, 3, 4]
@@ -81,6 +84,10 @@ detrending_algorithm: "SYSREM"
 # Sigma clipping threshold for 'PISKUNOV' detrending method
 sigma_threshold_sysrem_piskunov: 3.0
 
+# Whether to use the continuum normalised data (best for real data) or not 
+# (best for testing/simulated data without slit losses)
+do_use_continuum_normalised_data: True
+
 #------------------------------------------------------------------------------
 # Cross Correlation Settings
 #------------------------------------------------------------------------------
@@ -94,7 +101,7 @@ cc_rv_lims: [-50,50]
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
 # Step size for the Kp-Vsys map in km/s
-Kp_step: 0.5
+Kp_step: 0.25
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
 Kp_lims: [0,200]

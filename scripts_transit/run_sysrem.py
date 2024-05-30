@@ -38,20 +38,25 @@ for transit_i in range(ss.n_transit):
     # Grab dimensions of flux datacube
     (n_phase, n_spec, n_px) = fluxes_list[transit_i].shape
 
-    # Load continuum normalised data
-    #fluxes_norm, sigmas_norm, strong_telluic_mask, poly_coeff = \
-    #    tu.load_normalised_spectra_from_fits(
-    #        fits_load_dir=ss.save_path,
-    #        label=ss.label,
-    #        n_transit=ss.n_transit,
-    #        transit_i=transit_i,)
+    # Decide what data we're using
+    # 1) Load continuum normalised data
+    if ss.do_use_continuum_normalised_data:
+        print("Usinng continuum normalised spectra.")
+        fluxes_norm, sigmas_norm, strong_telluic_mask, poly_coeff = \
+            tu.load_normalised_spectra_from_fits(
+                fits_load_dir=ss.save_path,
+                label=ss.label,
+                n_transit=ss.n_transit,
+                transit_i=transit_i,)
 
-    # TEMPORARY HACK: avoid continuum normalisation for debugging
-    mf = np.nanmedian(fluxes_list[transit_i], axis=2)
-    mf_3D = np.broadcast_to(mf[:,:,None], (n_phase, n_spec, n_px))
-    fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
-    sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
-    strong_telluic_mask = np.full_like(fluxes_norm, False)
+    # 2) Avoid continuum normalisation for debugging
+    else:
+        print("Using unnormalised spectra.")
+        mf = np.nanmedian(fluxes_list[transit_i], axis=2)
+        mf_3D = np.broadcast_to(mf[:,:,None], (n_phase, n_spec, n_px))
+        fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
+        sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
+        strong_telluic_mask = np.full_like(fluxes_norm, False)
 
     # Clean and prepare our fluxes for input to SYSREM. This involves:
     # - sigma clipping along phase and spectral dimension

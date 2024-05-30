@@ -1509,7 +1509,6 @@ def save_transit_info_to_fits(
         hdu.append(sim_tab)
 
     # Done, save
-    label = label.replace(" ", "").replace("-", "")
     fits_file = os.path.join(
         fits_save_dir, "transit_data_{}_n{}.fits".format(label, n_transits))
     
