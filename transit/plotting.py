@@ -862,7 +862,7 @@ def plot_kp_vsys_map(
         [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
 
     Kp_vsys_map_combined: 3D float array, default: None
-        3D floar array of the *combined* Kp-Vsys map of shape: 
+        3D float array of the *combined* Kp-Vsys map of shape: 
         [n_sysrem_iter, n_Kp_steps, n_rv_step].
 
     mean_spec_lambdas: float array or None, default: None
@@ -1045,3 +1045,124 @@ def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
     plt.tight_layout()
     plt.savefig("plots/regrid_diagnostic_img.pdf")
     plt.savefig("plots/regrid_diagnostic_img.png", dpi=300)
+
+
+def plot_combined_kp_vsys_map_as_snr(
+    cc_rvs,
+    Kp_steps,
+    Kp_vsys_maps,
+    plot_title,
+    fig_size=(6, 10),
+    plot_label="",
+    px_x_noise_lims=150,
+    plot_noise_box_bounds=False,):
+    """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
+    correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
+    and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
+    the cross correlation, and the y axis is the Kp value, with the SNR value
+    being represented by a colour bar.
+
+    Parameters
+    ----------
+    cc_rvs: 1D float array
+        Vector of RV steps of length [n_rv_step]
+    
+    Kp_steps: 1D float array
+        Vector of Kp steps of length [n_Kp_steps]
+
+    Kp_vsys_maps: 3D float array
+        3D float array of the *combined* Kp-Vsys map of shape: 
+        [n_sysrem_iter, n_Kp_steps, n_rv_step].
+    
+    plot_title: str
+        Figure (super) title.
+
+    fig_size: float tuple, default: (6, 10)
+        Size of the figure, will have n_sysrem_iter rows and a single column.
+
+    plot_label: str, default: ""
+        Unique identifier label to add to plot filename.
+
+    px_x_noise_lims: int, default: 150
+        X bounds outside of which we compute the noise level (i.e. we mask out
+        [px_x_noise_lims:-px_x_noise_lims] in x when computing the noise)
+
+    plot_noise_box_bounds: boolean, default: False
+        Whether to plot red diagnostic lines corresponding to px_x_noise_lims. 
+    """
+    # Grab dimensions for convenience
+    (n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        sharex=True,
+        figsize=fig_size,)
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
+
+    # [x_min, x_max, y_min, y_max]
+    extent = [
+        np.min(cc_rvs), np.max(cc_rvs), np.min(Kp_steps), np.max(Kp_steps)]
+
+    # Loop over all SYSREM iterations
+    for sr_iter_i in range(n_sysrem_iter):
+        # Compute the SNR for this SYSREM iteration. To do this we compute the
+        # *noise* from the regions to the left and right of px_x_noise_lims
+        # (i.e. we mask out [px_x_noise_lims:-px_x_noise_lims] in x when
+        # computing the noise). We then also need to subtract the median value
+        # of the same region, which we can consider the 'background'.
+        noise_map = Kp_vsys_maps[sr_iter_i].copy()
+        noise_map[:,px_x_noise_lims:-px_x_noise_lims] = np.nan
+        noise_std = np.nanstd(noise_map)
+        noise_med = np.nanmedian(noise_map)
+        snr = (Kp_vsys_maps[sr_iter_i] - noise_med) / noise_std
+
+        # Grab axis for convenience
+        axis = axes[sr_iter_i]
+
+        cmap = axis.imshow(
+            X=snr,
+            aspect="auto",
+            interpolation="none",
+            extent=extent,
+            origin="lower",)
+        
+        # Sort out our colourbar
+        cb = fig.colorbar(cmap, ax=axis)
+        cb.ax.minorticks_on()
+        cb.ax.tick_params(labelsize="medium", rotation=0)
+        cb.set_label("SNR", fontsize="large")
+
+        # Axis ticks
+        axis.tick_params(axis='both', which='major', labelsize="x-small")
+        axis.xaxis.set_major_locator(plticker.MultipleLocator(base=20))
+        axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=10))
+        axes[sr_iter_i].tick_params(axis='x', labelrotation=45)
+
+        # Only show xticks on the bottom
+        if sr_iter_i != n_sysrem_iter-1:
+            axis.set_xticks([])
+        else:
+            axis.set_xlabel("RV Shift (km/s)", fontsize="x-small")
+
+        # Whether to plot vertical diagnostic lines indicating our noise bounds
+        if plot_noise_box_bounds:
+            for x_i in [px_x_noise_lims, -px_x_noise_lims]:
+                axis.vlines(
+                    x=cc_rvs[x_i],
+                    ymin=Kp_steps[0],
+                    ymax=Kp_steps[-1],
+                    linestyles="dashed",
+                    colors="r",)
+
+    plt.suptitle(plot_title)
+    plt.tight_layout()
+
+    if plot_label == "":
+        plt.savefig("plots/kp_vsys_snr.pdf")
+        plt.savefig("plots/kp_vsys_snr.png", dpi=300)
+    else:
+        plt.savefig("plots/kp_vsys_snr_{}.pdf".format(plot_label))
+        plt.savefig("plots/kp_vsys_snr_{}.png".format(plot_label), dpi=300)

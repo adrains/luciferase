@@ -5,6 +5,7 @@ Originally written in IDL by Nikolai Piskunov, ported to Python by Adam Rains.
 import os
 import glob
 import yaml
+import pickle
 import warnings
 import numpy as np
 import pandas as pd
@@ -2136,6 +2137,108 @@ def load_sysrem_residuals_from_fits(
         sysrem_resid = fits_file[ext_name].data.astype(float)
 
     return sysrem_resid
+
+
+# -----------------------------------------------------------------------------
+# Dump/load cross-correlation and Kp-Vsys maps to disk
+# -----------------------------------------------------------------------------
+def dump_cc_results(
+    filename,
+    cc_rvs,
+    ccv_ps,
+    ccv_comb,
+    Kp_steps,
+    Kp_vsys_map_ps,
+    Kp_vsys_map_comb,
+    Kp_vsys_map_ps_all_nights,
+    Kp_vsys_map_comb_all_nights,
+    sysrem_settings,):
+    """Used to dump the results of scripts_transit/run_cc.py to disk as a 
+    pickle file.
+
+    Parameters
+    ----------
+    filename: str
+        Filepath for the saved pickle.
+
+    cc_rvs: 1D float array
+        RV values that were used when cross correlating in km/s.
+    
+    ccv_ps: list of 4D float array
+        Array of cross correlation values of shape:
+        [n_sysrem_iter, n_phase, n_spec, n_rv_steps].
+
+    ccv_comb: list of 3D float array, default: None
+        3D float array of the *combined* cross correlations for each SYSREM
+        iteration of shape [n_sysrem_iter, n_phase, n_rv_step].
+
+    Kp_steps: 1D float array
+        Array of Kp steps from Kp_lims[0] to Kp_lims[1] in steps of Kp_step.
+    
+    Kp_vsys_map_ps: list of 4D float array
+        Grid of Kp_vsys maps of shape: 
+        [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
+
+    Kp_vsys_map_comb: list of 3D float array
+        3D float array of the *combined* Kp-Vsys map of shape: 
+        [n_sysrem_iter, n_Kp_steps, n_rv_step].
+
+    Kp_vsys_map_ps_all_nights: 4D float array
+        Grid of the *joint* Kp_vsys map for all nights, of shape: 
+        [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
+
+    Kp_vsys_map_comb_all_nights: 3D float array
+        Grid of the combined *joint* Kp_vsys map for all nights, of shape: 
+        [n_sysrem_iter, n_Kp_steps, n_rv_step]
+
+    sysrem_settings: YAMLSettings object
+        Settings object with attributes equivalent to YAML keys.
+    """
+    # Pack everything into a dictionary
+    cc_dict = {
+        "cc_rvs":cc_rvs,
+        "ccv_ps":ccv_ps,
+        "ccv_comb":ccv_comb,
+        "Kp_steps":Kp_steps,
+        "Kp_vsys_map_ps":Kp_vsys_map_ps,
+        "Kp_vsys_map_comb":Kp_vsys_map_comb,
+        "Kp_vsys_map_ps_all_nights":Kp_vsys_map_ps_all_nights,
+        "Kp_vsys_map_comb_all_nights":Kp_vsys_map_comb_all_nights,
+        "sysrem_settings":sysrem_settings,}
+
+    # Dump to disk as a pickle
+    with open(filename, 'wb') as output_file:
+        pickle.dump(cc_dict, output_file, pickle.HIGHEST_PROTOCOL)
+
+
+def load_cc_results(filename,):
+    """Counterpart function to dump_cc_results to load in the saved pickle of
+    CC results.
+
+    Parameters
+    ----------
+    filename: str
+        Filepath for the saved pickle.
+
+    Returns
+    -------
+    cc_dict: dict
+        Dictionary containing the CC results and Kp_maps. Keywords are:
+         - cc_rvs,
+         - ccv_ps,
+         - ccv_comb,
+         - Kp_steps,
+         - Kp_vsys_map_ps,
+         - Kp_vsys_map_comb,
+         - Kp_vsys_map_ps_all_nights,
+         - Kp_vsys_map_comb_all_nights,
+         - sysrem_settings
+    """
+    # Read in the dictionary
+    with open(filename, 'rb') as input_file:
+        cc_dict = pickle.load(input_file)
+
+    return cc_dict
 
 
 # -----------------------------------------------------------------------------

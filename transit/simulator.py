@@ -18,13 +18,14 @@ import luciferase.utils as lu
 # Load/save spectra
 # -----------------------------------------------------------------------------
 def read_marcs_spectrum(filepath, wave_min, wave_max, a_limb, n_mu_samples):
-    """Reads either a MARCS .plt or .itf file to extract wavelengths, mu 
-    values, and radiant fluxes in units of ergs/cm^2/s/Å/µ.
+    """Reads a MARCS spectrum in one of the following formats (plt, itf, fits)
+    to extract wavelengths, mu values, and radiant fluxes in units of 
+    ergs/cm^2/s/Å/µ.
 
     Parameters
     ----------
     filepath: str
-        Filepath to MARCS .itf file.
+        Filepath to MARCS file.
 
     wave_min, wave_max: float or None, default: None
         Minimum and maximum wavelengths to return in Angstrom.
@@ -43,39 +44,100 @@ def read_marcs_spectrum(filepath, wave_min, wave_max, a_limb, n_mu_samples):
     a_limb: float array or None, default: None
         Array of limb darkening coefficients
     """
-    # Format #1 for reading in mu sampled fluxes
+    # -------------------------------------------------------------------------
+    # Format #1: non-uniform sampled mus in .itf format
+    # -------------------------------------------------------------------------
     if ".itf" in filepath:
+        print("Using .itf format mu sampled MARCS spectrum.")
         wave_marcs, _, _, mus, fluxes_marcs = read_marcs_itf(
             filepath=filepath,
             wave_min=wave_min,
             wave_max=wave_max,)
     
-    # Format #2 for reading in mu sampled fluxes
+    # -------------------------------------------------------------------------
+    # Format #2: non-uniform sampled mus in .plt format
+    # -------------------------------------------------------------------------
     elif ".plt" in filepath:
+        print("Using .plt format mu sampled MARCS spectrum.")
         wave_marcs, mus, _, _, fluxes_marcs = \
             read_marcs_plt(filepath)
     
-    # HACK format for simulating mu sampled fluxes with a 1D spectrum and limb
-    # darkening coefficients.
     elif ".fits" in filepath:
-        if a_limb is None and n_mu_samples is None:
-            raise Exception("a_limb and n_mu_samples cannot be None.")
+        # Check what kind of fits file
+        with fits.open(filepath) as fits_file:
+            if "MU_ANGLES" in fits_file:
+                is_mu_sampled_fits = True
+            else:
+                is_mu_sampled_fits = False
         
-        # Import MARCS fits and convert to *vacuum*
-        wave_marcs, fluxes_1d = lu.load_plumage_template_spectrum(
-            template_fits=filepath,
-            do_convert_angstroms_to_nm=False,
-            do_convert_air_to_vacuum_wl=True,)
+        # ---------------------------------------------------------------------
+        # Format #3: *uniform* mu sampled fluxes as a fits file
+        # ---------------------------------------------------------------------
+        if is_mu_sampled_fits:
+            print("Using .fits format mu sampled MARCS spectrum.")
+            wave_marcs, _, fluxes_marcs, mu_angles = \
+                read_marcs_fits_uniform_mu(filepath)
 
-        fluxes_marcs, mus = tu.generate_mock_flux_mu_grid(
-            flux=fluxes_1d,
-            a_limb=a_limb,
-            n_mu_samples=n_mu_samples,)
+            # To be consistent with the other formats, we need to return a 2D
+            # array of mus (even though each row will be the same)
+            mus = np.broadcast_to(
+                mu_angles[None, :], (len(wave_marcs), len(mu_angles)))
+
+        # ---------------------------------------------------------------------
+        # Format #4: non-mu sampled fluxes as a fits file--manual LD needed
+        # ---------------------------------------------------------------------
+        # HACK format for simulating mu sampled fluxes with a 1D spectrum and 
+        # limb darkening coefficients.
+        elif not is_mu_sampled_fits:
+            print("Using .fits format *non* mu sampled MARCS spectrum.")
+            if a_limb is None and n_mu_samples is None:
+                raise Exception("a_limb and n_mu_samples cannot be None.")
+            
+            # Import MARCS fits and convert to *vacuum*
+            wave_marcs, fluxes_1d = lu.load_plumage_template_spectrum(
+                template_fits=filepath,
+                do_convert_angstroms_to_nm=False,
+                do_convert_air_to_vacuum_wl=True,)
+
+            fluxes_marcs, mus = tu.generate_mock_flux_mu_grid(
+                flux=fluxes_1d,
+                a_limb=a_limb,
+                n_mu_samples=n_mu_samples,)
 
     else:
         raise ValueError("Invalid MARCS format.")
     
     return wave_marcs, fluxes_marcs, mus
+
+
+def read_marcs_fits_uniform_mu(filepath):
+    """Function to import MARCS spectra uniformly sampled at different mu 
+    values and packaged into a fits file.
+
+    Parameters
+    ----------
+    filepath: str
+        Filepath to the fits file.
+
+    Returns
+    -------
+    waves: 1D float array
+        Wavelength vector for MARCS spectrum of shape [n_wave]
+
+    spec_cont_norm, spec_fluxes: 2D float array
+        MARCS spectra of shape [n_wave, n_mu]
+
+    mu_angles: 1D float array
+        Uniform mu values that each wavelength point is sampled at, of shape 
+        [n_mu].
+    """
+    with fits.open(filepath) as fits_file:
+        waves = fits_file["WAVES"].data
+        spec_cont_norm = fits_file["SPEC_CONT_NORM"].data.T
+        spec_fluxes = fits_file["SPEC_FLUXES"].data.T
+        mu_angles = fits_file["MU_ANGLES"].data
+
+    return waves, spec_cont_norm, spec_fluxes, mu_angles
 
 
 def read_marcs_plt(filepath, n_max_n_mu=69,):
@@ -1734,7 +1796,7 @@ def simulate_transit_multiple_epochs(
     rest_frame_epoch = transit_epoch.copy()
     rest_frame_epoch["is_in_transit_mid"] = True
     rest_frame_epoch["planet_area_frac_mid"] = 1    # Don't zero planet signal!
-    rest_frame_epoch["mu_mid"] = 1
+    rest_frame_epoch["mu_mid"] = np.nanmax(mus_marcs[:,0])  # HACK in case no 1
     rest_frame_epoch["airmass"] = 1
     rest_frame_epoch["gamma"] = np.median(transit_info["gamma"].values)
     rest_frame_epoch["beta"] = np.median(transit_info["beta"].values)

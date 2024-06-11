@@ -504,6 +504,7 @@ def cross_correlate_sysrem_resid(
     sysrem_resid,
     template_wave,
     template_spec,
+    bcors,
     cc_rv_step=1,
     cc_rv_lims=(-200,200),
     interpolation_method="cubic",):
@@ -524,6 +525,9 @@ def cross_correlate_sysrem_resid(
     template_wave, template_spec: 1D float array
         Wavelength scale and spectrum of template spectrum to be interpolated 
         against.
+
+    bcors: 1D float array
+        Array of barycentric corrections (-bcor + rv_star) of shape [n_phase].
 
     cc_rv_step: float, default: 1
         Step size for cross correlation in km/s.
@@ -560,7 +564,7 @@ def cross_correlate_sysrem_resid(
     ccv_per_spec = np.zeros((n_sysrem_iter, n_phase, n_spec, n_rv_steps))
 
     # Initialise output array for *global* cross-correlation
-    #ccv_global = np.zeros((n_sysrem_iter, n_phase, n_rv_steps))
+    ccv_combined = np.zeros((n_sysrem_iter, n_phase, n_rv_steps))
     
     # Initialise array of RV shifted planet spectra
     spec_4D = np.ones((n_rv_steps, n_phase, n_spec, n_px,))
@@ -581,32 +585,34 @@ def cross_correlate_sysrem_resid(
         desc = "CCing for SYSREM iter {}/{}".format(
             sysrem_iter_i+1, n_sysrem_iter)
 
+        #----------------------------------------------------------------------
+        # Combine per-spectral segment CCs
+        #----------------------------------------------------------------------
         # Loop over all spectral segments
         for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
             # Loop over all RVs and cross correlate against each phase
-            # Note: all phases need the same cross correlation to occur, so we
-            # can save on interpolation/loops by just interpolating once per RV
-            # via broadcasting our interpolated spectrum to 2D along the phase
-            # dimension.
             for rv_i, rv in enumerate(cc_rvs):
-                # Doppler shift for new wavelength scale
-                wave_rv_shift = waves[spec_i] * (1- rv/(const.c.si.value/1000))
+                # Since the barycentric velocity shifts, we can't use the same
+                # template for each phase. But we can pre-construct a 2D array
+                # of spectra and then continue to do things in a vectorised way
+                spec_2D = np.empty((n_phase, n_px))
 
-                # Interpolate to wavelength scale
-                spec_1D = temp_interp(wave_rv_shift)
+                for phase_i in range(n_phase):
+                    # Doppler shift for new wavelength scale
+                    bcor = bcors[phase_i]
+                    wave_rv_shift = \
+                        waves[spec_i] * (1-(rv+bcor)/(const.c.si.value/1000))
 
-                if np.nansum(spec_1D) == 0:
-                    raise ValueError("All nan interpolated array")
+                    # Interpolate to wavelength scale
+                    spec_1D = temp_interp(wave_rv_shift)
 
-                # Tile this to all phases
-                spec_2D = np.broadcast_to(spec_1D[None,:], (n_phase, n_px))
+                    if np.nansum(spec_1D) == 0:
+                        raise ValueError("All nan interpolated array")
+                    
+                    spec_2D[phase_i,:] = spec_1D
                 
                 # Store this for computing the *global* cross correlation
                 spec_4D[rv_i, :, spec_i, :] = spec_2D.copy()
-
-                # HACK Enforce the the phase direction is the same
-                ss = set(spec_2D[:,1024])
-                assert len(ss) == 1
                 
                 # Calculate the cross correlation weighted by the uncertainties
                 # TODO: we add +1 to the residuals so they flucuate about 1.
@@ -622,12 +628,12 @@ def cross_correlate_sysrem_resid(
 
                 # Store
                 ccv_per_spec[sysrem_iter_i, :, spec_i, rv_i] = cc_val
-
-        print("Computing global CC val for SYSREM iter {}/{}...".format(
-            sysrem_iter_i+1, n_sysrem_iter))
-
+        
+        #----------------------------------------------------------------------
+        # Combine all spectral segments into global CC for sysrem_iter_i
+        #----------------------------------------------------------------------
+        # Now that we've run the cross correlation for n_spec * n_rv, combine
         # Compute the *global* cross correlation for this SYSREM iteration
-        """
         resid_3D = sysrem_resid[sysrem_iter_i].copy() +1
         resid_4D = np.broadcast_to(
             array=resid_3D[None,:,:,:],
@@ -642,31 +648,37 @@ def cross_correlate_sysrem_resid(
         cc_val = cc_num / cc_den
 
         # Store
-        ccv_global[sysrem_iter_i, :, :] = cc_val.T
-        """
+        ccv_combined[sysrem_iter_i, :, :] = cc_val.T
 
-    # Normalise the cross correlation for each spectral segment
+    #--------------------------------------------------------------------------
+    # Normalise all cross correlations
+    #--------------------------------------------------------------------------
     for iter_i in range(n_sysrem_iter):
-        for spec_i in tqdm(range(n_spec), desc="Normalising", leave=False):
+        desc = "Normalising for SYSREM iter".format(
+            sysrem_iter_i+1, n_sysrem_iter)
+        
+        # Normalise the cross correlation for each spectral segment
+        for spec_i in tqdm(range(n_spec), desc=desc, leave=False):
             # Sum along the CC direction
             norm_1D = np.nansum(ccv_per_spec[iter_i, :,spec_i,:], axis=1)
             norm_2D = np.broadcast_to(norm_1D[:,None], (n_phase, n_rv_steps))
 
             ccv_per_spec[iter_i, :,spec_i,:] /= norm_2D
 
-    # Compute combined cross-correlation. Presently this is just done by
-    # combining in quadrature along the spectral segment axis
-    ccv_comb = np.sum(ccv_per_spec**2, axis=2)**0.5
+        # Now also normalise the *global* CC, sum along CC dimension
+        norm_1D = np.nansum(ccv_combined[iter_i,:,:], axis=1)
+        norm_2D = np.broadcast_to(norm_1D[:,None], (n_phase, n_rv_steps))
+
+        ccv_combined[iter_i,:,:] /= norm_2D
 
     # All done, return our array of cross correlation results
-    return cc_rvs, ccv_per_spec, ccv_comb
+    return cc_rvs, ccv_per_spec, ccv_combined
 
 
 def compute_Kp_vsys_map(
     cc_rvs,
     ccv_per_spec,
     transit_info,
-    syst_info,
     ccv_combined=None,
     Kp_lims=(0,400),
     Kp_step=0.5,
@@ -716,7 +728,7 @@ def compute_Kp_vsys_map(
         [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
 
     Kp_vsys_map_combined: 3D float array [optional]
-        3D floar array of the *combined* Kp-Vsys map of shape: 
+        3D float array of the *combined* Kp-Vsys map of shape: 
         [n_sysrem_iter, n_Kp_steps, n_rv_step].
     """
     # If we've been given a set of combined cross-correlation values, 
@@ -754,15 +766,13 @@ def compute_Kp_vsys_map(
 
                 # Loop over all phases
                 for phase_i in range(n_phase):
-                    # Grab relevant parameters from transit_info
-                    # Note: phases have been negated.
+                    # Grab phases from transit_info, noting the negation
                     phase = -1 * transit_info.iloc[phase_i]["phase_mid"]
-                    v_bcor = transit_info.iloc[phase_i]["bcor"]
-                    v_star = syst_info.loc["rv_star", "value"]
 
                     # Compute the velocity shift between this phase and the
-                    # planet rest frame velocity. TODO: check sign on bcor.
-                    vp = Kp * np.sin(2*np.pi*phase) + v_star - v_bcor
+                    # planet rest frame velocity. Note that we assume we've 
+                    # aready removed the stellar and barycentric velocities.
+                    vp = Kp * np.sin(2*np.pi*phase)
 
                     # Create interpolator for the CC values of this phase
                     interp_cc_vals = interp1d(
@@ -776,8 +786,11 @@ def compute_Kp_vsys_map(
                     cc_values_shifted[phase_i] = interp_cc_vals(cc_rvs - vp)
 
                 # Sum all shifted CC values along the phase axis
-                Kp_vsys_map[sr_iter_i, spec_i, Kp_i] = \
-                    np.nanmean(cc_values_shifted, axis=0)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        action='ignore', message='Mean of empty slice')
+                    Kp_vsys_map[sr_iter_i, spec_i, Kp_i] = \
+                        np.nanmean(cc_values_shifted, axis=0)
 
     # If we were given a combined set of CCVs, removed the combined set of
     # cross correlation values and return that as its own variable.
@@ -790,3 +803,33 @@ def compute_Kp_vsys_map(
     # Otherwise return as is
     else:
         return Kp_steps, Kp_vsys_map
+    
+
+def combine_kp_vsys_map(Kp_vsys_map_list):
+    """Combines Kp-Vsys maps from adjacent nights. We do this by masking out
+    negative values and then adding in quadrature.
+
+    Parameters
+    ----------
+    Kp_vsys_map_list: list of float arrays
+        List of float arrays, where the float arrays are assumed to be the same
+        shape. Typical shapes:
+         - 3D of shape: [n_sysrem_iter, n_Kp_steps, n_rv_step]
+         - 4D of shape: [n_sysrem_iter, n_spec, n_Kp_steps, n_rv_step]
+
+    Returns
+    -------
+    map_combined: float array
+        Combined map with the same shape as the input maps from each night.
+    """
+    # Stack
+    map_stacked = np.stack(Kp_vsys_map_list).copy()
+
+    # Mask out negative values
+    is_neg = map_stacked < 0
+    map_stacked[is_neg] = 0
+
+    # Add in quadtrature
+    map_combined = np.sum(map_stacked**2, axis=0)**0.5
+
+    return map_combined
