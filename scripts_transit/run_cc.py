@@ -9,7 +9,6 @@ import transit.plotting as tplt
 import astropy.units as u
 import luciferase.utils as lu
 from astropy import constants as const
-from PyAstronomy.pyasl import instrBroadGaussFast
 
 #------------------------------------------------------------------------------
 # Settings
@@ -18,7 +17,7 @@ simulation_settings_file = "scripts_transit/sysrem_settings.yml"
 ss = tu.load_yaml_settings(simulation_settings_file)
 
 #------------------------------------------------------------------------------
-# Import spectra, obs/system data, + SYSREM residuals
+# Imports
 #------------------------------------------------------------------------------
 # Import data
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
@@ -27,69 +26,12 @@ waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
 # Grab the number of nights
 n_transit = len(fluxes_list)
 
-#------------------------------------------------------------------------------
-# Import and prepare templates
-#------------------------------------------------------------------------------
-# Load in petitRADRTRANS datacube of templates. These templates will be in
-# units of R_earth as a function of wavelength.
-wave_p, spec_p_all, templ_info = tu.load_transmission_templates_from_fits(
-    fits_file=ss.template_fits,
-    min_wl_nm=16000,
-    max_wl_nm=30000,)
-
-# Clip edges to avoid edge effects introduced by interpolation
-templ_spec_all = spec_p_all[:,10:-10]
-wave_p = wave_p[10:-10] / 10
-
-molecules = templ_info.columns.values
-
-# Pick a template
-templ_i = 1     # H2O model
-
-# Convert to a transmission spectrum
-r_e = const.R_earth.si.value
-r_odot = const.R_sun.si.value
-
-rp = syst_info.loc["r_planet_rearth", "value"] 
-rs = syst_info.loc["r_star_rsun", "value"] * r_odot / r_e
-
-trans_planet = 1 - ((templ_spec_all[templ_i] + rp)**2  / rs**2)
-
-# Compute planet 'continuum' to normalise by
-planet_cont = instrBroadGaussFast(
-        wvl=wave_p,
-        flux=trans_planet,
-        resolution=300,
-        equid=True,)
-
-# [Optional] For testing, we can use the telluric vector for cross correlation
-if ss.cc_with_telluric:
-    print("Cross correlating with telluric template.")
-    telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
-        molecfit_fits=ss.molecfit_fits[0],
-        tau_fill_value=ss.tau_fill_value,
-        convert_to_angstrom=False,
-        convert_to_nm=True,
-        output_transmission=True,)
-
-    wave_template = telluric_wave
-    spectrum_template = telluric_trans
-
-# [Optional] Or we can use a stellar spectrum
-elif ss.cc_with_stellar:
-    print("Cross correlating with stellar template.")
-    wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
-        template_fits=ss.stellar_template_fits,
-        do_convert_air_to_vacuum_wl=False,)
-    
-    wave_template = wave_stellar
-    spectrum_template = spec_stellar
-
-# Otherwise run on a planet spectrum
-else:
-    print("Cross correlating with planet template.")
-    wave_template = wave_p
-    spectrum_template = trans_planet / planet_cont
+# Import template for CC
+wave_template, spectrum_template = tu.prepare_cc_template(
+    cc_settings=ss,
+    syst_info=syst_info,
+    templ_wl_nm_bounds=(16000,30000),
+    continuum_resolving_power=300,)
 
 #------------------------------------------------------------------------------
 # Do *nightly* cross correlation and Kp-Vsys maps
@@ -212,9 +154,10 @@ tplt.plot_combined_kp_vsys_map_as_snr(
 #------------------------------------------------------------------------------
 # Dump the results of CC and the resulting Kp-Vsys map to a pickle, with the
 # label, number of transits, template info, and the SYSREM settings obj as a
-# whole in the filename.
+# whole in the filename.\
+species = "_".join(ss.species_to_cc)
 fn_label = "_".join(
-    ["cc_results", ss.label, str(ss.n_transit), str("template"), str(templ_i)])
+    ["cc_results", ss.label, str(ss.n_transit), str("template"), species])
 fn = os.path.join(ss.save_path, "{}.pkl".format(fn_label))
 
 tu.dump_cc_results(

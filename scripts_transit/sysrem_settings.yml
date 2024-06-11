@@ -7,11 +7,11 @@
 #------------------------------------------------------------------------------
 # Which data cube to load. Just specify the fn_label component, and the path is
 # constructed as: <save_path>/transit_data_<label>_n<n_transits>.fits
-save_path: ""
+save_path: "simulations"
 n_transit: 2
 
-label: "wasp107"
-#label: "simulated_R100000_wasp107_CO_H2O_H2S_NH3_stellar_1_telluric_1_planet_1_boost_1_SNR_inf_240417"
+#label: "wasp107_240516"
+label: "simulated_R100000_wasp107_240610_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_SNR_150"
 
 #------------------------------------------------------------------------------
 # Template Settings
@@ -29,8 +29,11 @@ tau_fill_value: 0
 telluric_trans_bad_px_threshold: 0.5
 
 # Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
-template_fits: "templates/WASP107b_prt_lbc/WASP107b_templates_all_R100000.fits"
-#template_fits: "templates/WASP107b_prt_lbc/WASP107b_Dyrek_templates_all_R100000.fits"
+planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
+
+# The cross-correlation template will have the following species (and an
+# exception will be raised if this isn't the case)
+species_to_cc: ["H2O", "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -41,11 +44,6 @@ stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 # Sigma thresholds for sigma clipping
 sigma_threshold_phase: 5.0
 sigma_threshold_spectral: 5.0
-
-# Which transit to run on.
-# TODO: note that this will probably eventually be removed, but now is useful
-# for testing.
-transit_i: 1
 
 # Number of iterations to run SYSREM for
 n_sysrem_iter: 5
@@ -92,7 +90,7 @@ do_use_continuum_normalised_data: True
 # Cross Correlation Settings
 #------------------------------------------------------------------------------
 # Step size for the cross-correlation in km/s
-cc_rv_step: 0.25
+cc_rv_step: 0.5
 
 # Minimum and maximum extents of the cross correlation in km/s
 cc_rv_lims: [-50,50]
@@ -101,7 +99,7 @@ cc_rv_lims: [-50,50]
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
 # Step size for the Kp-Vsys map in km/s
-Kp_step: 0.25
+Kp_step: 0.5
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
 Kp_lims: [0,200]

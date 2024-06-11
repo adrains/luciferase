@@ -21,6 +21,8 @@ from astropy.stats import sigma_clip
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 from numpy.polynomial.polynomial import Polynomial
+from PyAstronomy.pyasl import instrBroadGaussFast
+import luciferase.utils as lu
 
 # -----------------------------------------------------------------------------
 # Kepler's laws
@@ -3107,3 +3109,122 @@ def load_telluric_spectrum(
         return telluric_wave, telluric_tau, calc_telluric_tau, telluric_trans
     else:
         return telluric_wave, telluric_tau, calc_telluric_tau
+
+
+def prepare_cc_template(
+    cc_settings,
+    syst_info,
+    templ_wl_nm_bounds=(16000,30000),
+    continuum_resolving_power=300,):
+    """Function to import and setup the cross-correlation template to use with
+    scripts_transit/run_cc.py. This can either return a planet, telluric, or
+    stellar spectrum depending on the settings in cc_settings.
+
+    Parameters
+    ----------
+    cc_settings: YAMLSettings object
+        Settings object with attributes equivalent to YAML keys in 
+        simulations_settings.yml.
+
+    syst_info: pandas DataFrame
+        Pandas dataframe containing the planet properties.
+
+    templ_wl_nm_bounds: float tuple, default: (16000,30000)
+        Wavelength limits in nm when importing planet template.
+
+    continuum_resolving_power: float, default: 300
+        Resolving power for determining the 'continuum' of the planet spectrum.
+
+    Returns
+    -------
+    wave_template, spectrum_template: 1D float array
+        Template wavelength and spectrum vectors of length [n_wave].
+    """
+    #--------------------------------------------------------------------------
+    # [Optional] - Run on stellar or telluric spectrum for testing
+    #--------------------------------------------------------------------------
+    # [Optional] For testing, use the telluric vector for cross correlation
+    if cc_settings.cc_with_telluric:
+        print("Cross correlating with telluric template.")
+        telluric_wave, _, _, telluric_trans = load_telluric_spectrum(
+            molecfit_fits=cc_settings.molecfit_fits[0],
+            tau_fill_value=cc_settings.tau_fill_value,
+            convert_to_angstrom=False,
+            convert_to_nm=True,
+            output_transmission=True,)
+
+        wave_template = telluric_wave
+        spectrum_template = telluric_trans
+
+    # [Optional] Or we can use a stellar spectrum
+    elif cc_settings.cc_with_stellar:
+        print("Cross correlating with stellar template.")
+        wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
+            template_fits=cc_settings.stellar_template_fits,
+            do_convert_air_to_vacuum_wl=False,)
+        
+        wave_template = wave_stellar
+        spectrum_template = spec_stellar
+
+    #--------------------------------------------------------------------------
+    # Otherwise use planet spectrum
+    #--------------------------------------------------------------------------
+    else:
+        print("Cross correlating with planet template with species: {}".format(
+            cc_settings.species_to_cc))
+        #----------------------------------------------------------------------
+        # Setup and template selection
+        #----------------------------------------------------------------------
+        # Load in petitRADRTRANS datacube of templates. These templates will be
+        # in units of R_earth as a function of wavelength.
+        wave_p, spec_p_all, templ_info = load_transmission_templates_from_fits(
+            fits_file=cc_settings.planet_fits,
+            min_wl_nm=templ_wl_nm_bounds[0],
+            max_wl_nm=templ_wl_nm_bounds[1],)
+
+        # Clip edges to avoid edge effects introduced by interpolation
+        spec_p_all = spec_p_all[:,10:-10]
+        wave_p = wave_p[10:-10] / 10
+
+        # Now select the appropriate template from trans_planet_all simulating
+        # the appropriate set of molecules. Raise an exception if we don't have
+        # a template with that combination of molecules.
+        molecule_cols = templ_info.columns.values
+        has_molecule = np.full_like(molecule_cols, False)
+
+        for mol_i, molecule in enumerate(molecule_cols):
+            if molecule in cc_settings.species_to_cc:
+                has_molecule[mol_i] = True
+
+        match_i = np.argwhere(np.all(has_molecule==templ_info.values, axis=1))
+
+        if len(match_i) == 0:
+            raise ValueError("Invalid molecule combination!")
+        else:
+            Rp_Re_vs_lambda_planet = spec_p_all[int(match_i)]
+
+        # Convert to a transmission spectrum
+        r_e = const.R_earth.si.value
+        r_odot = const.R_sun.si.value
+
+        rp = syst_info.loc["r_planet_rearth", "value"] 
+        rs = syst_info.loc["r_star_rsun", "value"] * r_odot / r_e
+
+        trans_planet = 1 - ((Rp_Re_vs_lambda_planet + rp)**2  / rs**2)
+
+        #----------------------------------------------------------------------
+        # Continuum normalisation
+        #----------------------------------------------------------------------
+        # Compute planet 'continuum' to normalise by
+        planet_cont = instrBroadGaussFast(
+            wvl=wave_p,
+            flux=trans_planet,
+            resolution=continuum_resolving_power,
+            equid=True,)
+
+        # Final continuum normalised planet spectrum with edges clipped again
+        wave_template = wave_p[10:-10]
+        spectrum_template = trans_planet[10:-10] / planet_cont[10:-10]
+
+    # All done, return
+    return wave_template, spectrum_template
