@@ -3161,7 +3161,8 @@ def prepare_cc_template(
         print("Cross correlating with stellar template.")
         wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
             template_fits=cc_settings.stellar_template_fits,
-            do_convert_air_to_vacuum_wl=False,)
+            do_convert_air_to_vacuum_wl=True,
+            do_convert_angstroms_to_nm=False,)
         
         wave_template = wave_stellar
         spectrum_template = spec_stellar

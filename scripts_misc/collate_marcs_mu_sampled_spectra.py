@@ -7,14 +7,16 @@ import glob
 import numpy as np
 from tqdm import tqdm
 from astropy.io import fits
+from PyAstronomy.pyasl import instrBroadGaussFast
 
-# Save file name
-save_path = "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49.fits"
+# Spectral resolution for broadening
+do_broadening = False
+resolving_power = 100000
 
 # Import files
 fits_path = "templates/syntspec/*.sp"
 all_files = glob.glob(fits_path)
-all_files.sort()
+all_files.sort(reverse=True)            # Sort from disc centre to the limb
 
 # Check dimensions
 data = np.loadtxt(all_files[0]).T
@@ -27,15 +29,42 @@ spec_cont_norm_all = np.empty((n_mu, n_wave))
 spec_fluxes_all = np.empty((n_mu, n_wave))
 mu_angles = np.empty((n_mu))
 
+if do_broadening:
+    save_path = \
+        "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49_R{}.fits".format(
+            resolving_power)
+    desc = "Loading and convolving spectra to R~{}".format(resolving_power)
+else:
+    save_path = "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49.fits"
+    desc = "Loading spectra"
+
 # Loop over all files
-for file_i, file in enumerate(tqdm(all_files, desc="Loading spectra")):
+for file_i, file in enumerate(tqdm(all_files, desc=desc)):
     # Load in file
     data = np.loadtxt(file).T
 
+    wave = data[0]
+    spec_cn = data[1]
+    spec_flux = data[2]
+
+    # Broaden
+    if do_broadening:
+        spec_cn = instrBroadGaussFast(
+            wvl=wave,
+            flux=spec_cn,
+            resolution=resolving_power,
+            equid=True,)
+        
+        spec_flux = instrBroadGaussFast(
+            wvl=wave,
+            flux=spec_flux,
+            resolution=resolving_power,
+            equid=True,)
+
     # Save arrays
-    waves_all[file_i] = data[0]
-    spec_cont_norm_all[file_i] = data[1]
-    spec_fluxes_all[file_i] = data[2]
+    waves_all[file_i] = wave
+    spec_cont_norm_all[file_i] = spec_cn
+    spec_fluxes_all[file_i] = spec_flux
 
     # Pull the mu value out of the filename
     # e.g. 4420g4.61z+0.00m0.683t00.851170.sp

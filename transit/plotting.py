@@ -115,7 +115,9 @@ def plot_component_spectra(
     ref_fluxes=None,
     ref_telluric_tau=None,
     ref_planet_trans=None,
-    ref_scale_vector=None,):
+    ref_scale_vector=None,
+    linewidth=0.5,
+    plot_suptitle=True,):
     """Plots fluxes, telluric transmission, and planet transmission in
     respective subplots. Can be used for both Aronson fitted results, or
     simulated components.
@@ -153,6 +155,9 @@ def plot_component_spectra(
         ncols=1,
         figsize=(20, 8),)
     
+    plt.subplots_adjust(
+        left=0.1, bottom=0.1, right=0.98, top=0.95, wspace=0.1, hspace=0.4)
+
     # Share x axes
     ax_flux.get_shared_x_axes().join(ax_flux, ax_tell, ax_trans)
 
@@ -161,31 +166,35 @@ def plot_component_spectra(
         ax_flux.plot(
             waves[spec_i],
             fluxes[spec_i],
-            linewidth=0.4,
+            linewidth=linewidth,
             color="r",
-            alpha=0.8,)
+            alpha=0.8,
+            label="Stellar" if spec_i == 0 else None,)
         
         ax_tell.plot(
             waves[spec_i],
             np.exp(-telluric_tau[spec_i]),
-            linewidth=0.4,
+            linewidth=linewidth,
             color="b",
-            alpha=0.8,)
+            alpha=0.8,
+            label="Telluric" if spec_i == 0 else None,)
         
         ax_trans.plot(
             waves[spec_i],
             planet_trans[spec_i],
             linewidth=0.4,
             color="g",
-            alpha=0.8,)
+            alpha=0.8,
+            label="Planet" if spec_i == 0 else None)
         
         ax_scale.plot(
             np.arange(len(scale_vector)),
             scale_vector,
             marker="o",
-            linewidth=0.4,
+            linewidth=linewidth,
             color="c",
-            alpha=0.8,)
+            alpha=0.8,
+            label="Slit Loss (Norm)" if spec_i == 0 else None)
         
         ax_scale.hlines(
             y=1,
@@ -200,7 +209,7 @@ def plot_component_spectra(
             ax_flux.plot(
                 waves[spec_i],
                 ref_fluxes[spec_i],
-                linewidth=0.4,
+                linewidth=linewidth,
                 color="k",
                 alpha=0.8,)
             
@@ -209,7 +218,7 @@ def plot_component_spectra(
             ax_tell.plot(
                 waves[spec_i],
                 np.exp(-ref_telluric_tau[spec_i]),
-                linewidth=0.4,
+                linewidth=linewidth,
                 color="k",
                 alpha=0.8,)
         
@@ -218,7 +227,7 @@ def plot_component_spectra(
             ax_trans.plot(
                 waves[spec_i],
                 ref_planet_trans[spec_i],
-                linewidth=0.4,
+                linewidth=linewidth,
                 color="k",
                 alpha=0.8,)
             
@@ -228,18 +237,35 @@ def plot_component_spectra(
                 np.arange(len(scale_vector)),
                 scale_vector,
                 marker="o",
-                linewidth=0.4,
+                linewidth=linewidth,
                 color="c",
                 alpha=0.8,)
 
-    fig.suptitle("Transit #{:0.0f}".format(transit_num+1))
-    ax_flux.set_title("Stellar flux")
-    ax_tell.set_title("Telluric Transmission")
-    ax_trans.set_title("Planet Transmission")
+    ax_flux.set_ylabel("Flux")
+    ax_tell.set_ylabel("Transmission")
+    ax_trans.set_ylabel(r"$(R_P/R_\star)^2$")
+    ax_scale.set_ylabel("Epoch Scale")
+
+    ax_flux.legend(loc="center right")
+    ax_tell.legend(loc="center right")
+    ax_trans.legend(loc="center right")
+    ax_scale.legend(loc="center right")
+
+    ax_flux.set_xticks([])
+    ax_tell.set_xticks([])
+
+    ax_trans.xaxis.set_major_locator(plticker.MultipleLocator(base=10))
+    ax_trans.xaxis.set_minor_locator(plticker.MultipleLocator(base=1))
+
+    ax_scale.xaxis.set_major_locator(plticker.MultipleLocator(base=5))
+    ax_scale.xaxis.set_minor_locator(plticker.MultipleLocator(base=1))
+
+    if plot_suptitle:
+        fig.suptitle("Transit #{:0.0f}".format(transit_num+1))
+    
     ax_trans.set_xlabel(r"Wavelength (${\rm \AA}$)")
     ax_scale.set_xlabel("Epoch #")
     ax_scale.set_ylim(0.5, 1.5)
-    plt.tight_layout()
 
     fig_name = "plots/{}_transit_{:0.0f}_components.pdf".format(
         star_name, transit_num)

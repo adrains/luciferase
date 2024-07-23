@@ -34,6 +34,30 @@ wave_template, spectrum_template = tu.prepare_cc_template(
     continuum_resolving_power=300,)
 
 #------------------------------------------------------------------------------
+# Print summary
+#------------------------------------------------------------------------------
+print("-"*80, "\nCross Correlation Settings\n", "-"*80, sep="")
+if ss.save_path == "":
+    print("\tSpectra fits\t\ttransit_data_{}_n{}.fits".format(
+        ss.label, ss.n_transit))
+else:
+    print("\tSpectra fits\t\t{}/transit_data_{}_n{}.fits".format(
+        ss.save_path, ss.label, ss.n_transit))
+
+if ss.cc_with_telluric:
+    print("\tTelluric template\t{}".format(ss.molecfit_fits[0]))
+elif ss.cc_with_stellar:
+    print("\tStellar template\t{}".format(ss.stellar_template_fits))
+else:
+    print("\tPlanet template\t\t{}".format(ss.planet_fits))
+    print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_cc)))
+print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
+print("\tCC RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.cc_rv_lims))
+print("\tKp RV step\t\t{:0.2f} km/s".format(ss.Kp_step))
+print("\tKp RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.Kp_lims))
+print("-"*80)
+
+#------------------------------------------------------------------------------
 # Do *nightly* cross correlation and Kp-Vsys maps
 #------------------------------------------------------------------------------
 ccv_per_spec_all = []
