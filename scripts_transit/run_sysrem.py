@@ -122,4 +122,6 @@ for transit_i in range(ss.n_transit):
         transit_i=transit_i,)
 
     # Plotting
-    tplt.plot_sysrem_residuals(waves, resid_all)
+    plot_label = "n{}_{}".format(transit_i, ss.label)
+
+    tplt.plot_sysrem_residuals(waves, resid_all, plot_label=plot_label,)

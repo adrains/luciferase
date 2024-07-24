@@ -67,6 +67,8 @@ Kp_vsys_map_combined_all = []
 
 rv_star = syst_info.loc["rv_star", "value"]
 
+species = "_".join(ss.species_to_cc)
+
 for transit_i in range(n_transit):
     #--------------------------------------------------------------------------
     # Imports and setup
@@ -112,7 +114,7 @@ for transit_i in range(n_transit):
         ccv_combined=ccv_combined,
         mean_spec_lambdas=np.mean(waves,axis=1),
         planet_rvs=planet_rvs,
-        plot_label="{}_n{}".format(ss.label, transit_i+1),)
+        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species),)
 
     #--------------------------------------------------------------------------
     # Kp-Vsys map
@@ -138,7 +140,7 @@ for transit_i in range(n_transit):
         Kp_vsys_map_per_spec=Kp_vsys_map_per_spec,
         Kp_vsys_map_combined=Kp_vsys_map_combined,
         mean_spec_lambdas=np.mean(waves,axis=1),
-        plot_label="{}_n{}".format(ss.label, transit_i+1),)
+        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species),)
     
     # Combined Kp-Vsys map for this night after merging all spectral segments
     tplt.plot_combined_kp_vsys_map_as_snr(
@@ -146,7 +148,7 @@ for transit_i in range(n_transit):
         Kp_steps=Kp_steps,
         Kp_vsys_maps=Kp_vsys_map_combined,
         plot_title="Night #{}".format(transit_i+1),
-        plot_label="{}_n{}".format(ss.label, transit_i+1),)
+        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species),)
     
 #------------------------------------------------------------------------------
 # Now *combine* each nightly Kp-Vsys map
@@ -163,7 +165,7 @@ tplt.plot_kp_vsys_map(
     Kp_vsys_map_per_spec=map_per_spec_all_nights,
     Kp_vsys_map_combined=map_combined_all_nights,
     mean_spec_lambdas=np.mean(waves,axis=1),
-    plot_label="{}_all_nights".format(ss.label),)
+    plot_label="{}_all_nights_{}".format(ss.label, species),)
 
 # Combined Kp-Vsys Map after merging all spectral segments
 tplt.plot_combined_kp_vsys_map_as_snr(
@@ -171,7 +173,7 @@ tplt.plot_combined_kp_vsys_map_as_snr(
     Kp_steps=Kp_steps,
     Kp_vsys_maps=map_combined_all_nights,
     plot_title="Combined Nights",
-    plot_label="{}_all_nights".format(ss.label),)
+    plot_label="{}_all_nights_{}".format(ss.label, species),)
 
 #------------------------------------------------------------------------------
 # Dump arrays to disk
@@ -179,7 +181,6 @@ tplt.plot_combined_kp_vsys_map_as_snr(
 # Dump the results of CC and the resulting Kp-Vsys map to a pickle, with the
 # label, number of transits, template info, and the SYSREM settings obj as a
 # whole in the filename.\
-species = "_".join(ss.species_to_cc)
 fn_label = "_".join(
     ["cc_results", ss.label, str(ss.n_transit), str("template"), species])
 fn = os.path.join(ss.save_path, "{}.pkl".format(fn_label))

@@ -551,7 +551,8 @@ def plot_sysrem_residuals(
     do_sigma_clip=False,
     sigma_upper=5,
     sigma_lower=5,
-    max_iterations=5,):
+    max_iterations=5,
+    plot_label="",):
     """Function to plot a grid of residuals as output from SYSREM. The grid has
     n_rows = n_sysrem_iter, and n_cols = n_spec.
 
@@ -649,6 +650,13 @@ def plot_sysrem_residuals(
             cbar = fig.colorbar(cmap, cax=cb_ax, aspect=5)
             #cbar.ax.set_yticklabels(ticks_rescaled)
             #cbar.set_label("Mean Wavelength of Spectral Segment")
+    
+    if plot_label == "":
+        plt.savefig("plots/sysrem_resid.pdf")
+        plt.savefig("plots/sysrem_resid.png", dpi=300)
+    else:
+        plt.savefig("plots/sysrem_resid_{}.pdf".format(plot_label))
+        plt.savefig("plots/sysrem_resid_{}.png".format(plot_label), dpi=300)
 
 
 def plot_sysrem_cc_1D(
