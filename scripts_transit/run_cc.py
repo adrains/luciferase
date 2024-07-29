@@ -7,7 +7,6 @@ import transit.utils as tu
 import transit.sysrem as sr
 import transit.plotting as tplt
 import astropy.units as u
-import luciferase.utils as lu
 from astropy import constants as const
 
 #------------------------------------------------------------------------------
@@ -71,84 +70,109 @@ species = "_".join(ss.species_to_cc)
 
 for transit_i in range(n_transit):
     #--------------------------------------------------------------------------
-    # Imports and setup
+    # [Optional] Split of A/B sequences
     #--------------------------------------------------------------------------
-    print("\nRunning on night {}/{}".format(transit_i+1, n_transit))
+    # Grab shape for convenience
+    n_phase, n_spec, n_px = fluxes_list[transit_i].shape
 
-    # Import SYSREM residuals
-    resid_all = tu.load_sysrem_residuals_from_fits(
-        ss.save_path, ss.label, ss.n_transit, transit_i,)
+    # Split A/B frames into separate sequences
+    if ss.split_AB_sequences:
+        print("Splitting A/B observations into separate sequence.")
+        nod_pos = transit_info_list[transit_i]["nod_pos"].values
+        sequence_masks = [nod_pos == "A", nod_pos == "B"]
+        sequences = ["A", "B"]
 
-    n_sysrem_iter = resid_all.shape[0]
-
-    # Grab planet RVs for overplotting on CC plot
-    planet_rvs = \
-        transit_info_list[transit_i]["delta"].values*const.c.cgs.to(u.km/u.s)
-
+    # OR run with interleaved A/B sequences
+    else:
+        print("Running with interleaved A/B sequences.")
+        sequence_masks = [np.full(n_phase, True)]
+        sequences = ["AB"]
+    
     #--------------------------------------------------------------------------
-    # Cross-correlation
+    # Loop over each sequence for this night
     #--------------------------------------------------------------------------
-    # Grab the barycentric velocities. We'll take these into account when doing
-    # the cross correlation such that we're cross correlating around the *star*
-    # rather than around the telescope frame of reference.
-    rv_bcors =  -1 * transit_info_list[transit_i]["bcor"].values + rv_star
+    for seq, seq_mask in zip(sequences, sequence_masks):
+        print("\nRunning on night {}/{}, seq {}".format(
+            transit_i+1, n_transit, seq))
 
-    cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
-        waves=waves,
-        sysrem_resid=resid_all,
-        template_wave=wave_template,
-        template_spec=spectrum_template,
-        bcors=rv_bcors,
-        cc_rv_step=ss.cc_rv_step,
-        cc_rv_lims=ss.cc_rv_lims,
-        interpolation_method="cubic",)
+        # Import SYSREM residuals
+        resid_all = tu.load_sysrem_residuals_from_fits(
+            ss.save_path, ss.label, ss.n_transit, transit_i, seq)
 
-    # Store
-    ccv_per_spec_all.append(ccv_per_spec)
-    ccv_combined_all.append(ccv_combined)
+        n_sysrem_iter = resid_all.shape[0]
 
-    # Plot cross-correlation
-    tplt.plot_sysrem_cc_2D(
-        cc_rvs=cc_rvs,
-        ccv_per_spec=ccv_per_spec,
-        ccv_combined=ccv_combined,
-        mean_spec_lambdas=np.mean(waves,axis=1),
-        planet_rvs=planet_rvs,
-        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species),)
+        # Grab planet RVs for overplotting on CC plot
+        planet_rvs = transit_info_list[transit_i]["delta"].values[seq_mask]
+        planet_rvs = planet_rvs * const.c.cgs.to(u.km/u.s)
 
-    #--------------------------------------------------------------------------
-    # Kp-Vsys map
-    #--------------------------------------------------------------------------
-    # Create Kp-Vsys map *per spectral segment*
-    Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
-        sr.compute_Kp_vsys_map(
+        #----------------------------------------------------------------------
+        # Cross-correlation
+        #----------------------------------------------------------------------
+        # Grab the barycentric velocities. We'll take these into account when
+        # doing the cross correlation such that we're cross correlating around
+        # the *star* rather than around the telescope frame of reference.
+        rv_bcors =  \
+            -1*transit_info_list[transit_i]["bcor"].values[seq_mask] + rv_star
+
+        cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
+            waves=waves,
+            sysrem_resid=resid_all,
+            template_wave=wave_template,
+            template_spec=spectrum_template,
+            bcors=rv_bcors,
+            cc_rv_step=ss.cc_rv_step,
+            cc_rv_lims=ss.cc_rv_lims,
+            interpolation_method="cubic",)
+
+        # Store
+        ccv_per_spec_all.append(ccv_per_spec)
+        ccv_combined_all.append(ccv_combined)
+
+        # Plot cross-correlation
+        tplt.plot_sysrem_cc_2D(
             cc_rvs=cc_rvs,
             ccv_per_spec=ccv_per_spec,
             ccv_combined=ccv_combined,
-            transit_info=transit_info_list[transit_i],
-            Kp_lims=ss.Kp_lims,
-            Kp_step=ss.Kp_step,)
+            mean_spec_lambdas=np.mean(waves,axis=1),
+            planet_rvs=planet_rvs,
+            plot_label="{}_n{}_{}_{}".format(
+                ss.label, transit_i+1, seq, species),)
 
-    # Store
-    Kp_vsys_map_per_spec_all.append(Kp_vsys_map_per_spec)
-    Kp_vsys_map_combined_all.append(Kp_vsys_map_combined)
+        #----------------------------------------------------------------------
+        # Kp-Vsys map
+        #----------------------------------------------------------------------
+        # Create Kp-Vsys map *per spectral segment*
+        Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
+            sr.compute_Kp_vsys_map(
+                cc_rvs=cc_rvs,
+                ccv_per_spec=ccv_per_spec,
+                ccv_combined=ccv_combined,
+                transit_info=transit_info_list[transit_i],
+                Kp_lims=ss.Kp_lims,
+                Kp_step=ss.Kp_step,)
 
-    # Plot overview Kp-Vsys map
-    tplt.plot_kp_vsys_map(
-        cc_rvs=cc_rvs,
-        Kp_steps=Kp_steps,
-        Kp_vsys_map_per_spec=Kp_vsys_map_per_spec,
-        Kp_vsys_map_combined=Kp_vsys_map_combined,
-        mean_spec_lambdas=np.mean(waves,axis=1),
-        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species),)
-    
-    # Combined Kp-Vsys map for this night after merging all spectral segments
-    tplt.plot_combined_kp_vsys_map_as_snr(
-        cc_rvs=cc_rvs,
-        Kp_steps=Kp_steps,
-        Kp_vsys_maps=Kp_vsys_map_combined,
-        plot_title="Night #{}".format(transit_i+1),
-        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species),)
+        # Store
+        Kp_vsys_map_per_spec_all.append(Kp_vsys_map_per_spec)
+        Kp_vsys_map_combined_all.append(Kp_vsys_map_combined)
+
+        # Plot overview Kp-Vsys map
+        tplt.plot_kp_vsys_map(
+            cc_rvs=cc_rvs,
+            Kp_steps=Kp_steps,
+            Kp_vsys_map_per_spec=Kp_vsys_map_per_spec,
+            Kp_vsys_map_combined=Kp_vsys_map_combined,
+            mean_spec_lambdas=np.mean(waves,axis=1),
+            plot_label="{}_n{}_{}_{}".format(
+                ss.label, transit_i+1, seq, species),)
+        
+        # Combined Kp-Vsys map for this seq after merging all spectral segments
+        tplt.plot_combined_kp_vsys_map_as_snr(
+            cc_rvs=cc_rvs,
+            Kp_steps=Kp_steps,
+            Kp_vsys_maps=Kp_vsys_map_combined,
+            plot_title="Night #{} ({})".format(transit_i+1, seq),
+            plot_label="{}_n{}_{}_{}".format(
+                ss.label, transit_i+1, seq, species),)
     
 #------------------------------------------------------------------------------
 # Now *combine* each nightly Kp-Vsys map

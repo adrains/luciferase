@@ -11,7 +11,8 @@ save_path: "simulations"
 n_transit: 2
 
 #label: "wasp107_240516"
-label: "simulated_R100000_wasp107_240610_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_SNR_150"
+label: "wasp107_np_corr"
+#label: "simulated_R100000_wasp107_240610_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_SNR_150"
 
 #------------------------------------------------------------------------------
 # Template Settings
@@ -26,14 +27,12 @@ molecfit_fits:
 # Fill value for missing telluric tau values
 tau_fill_value: 0
 
-telluric_trans_bad_px_threshold: 0.5
-
 # Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
 planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
-species_to_cc: ["H2O", "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
+species_to_cc: ["H2O"] #, "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -55,14 +54,6 @@ segments_to_mask_completely: [2, 3, 4]
 # of segments to speed things up.
 do_drop_segments: False
 segments_to_keep: [15, 16, 17]
-
-# Set to true if we want to test things by cross-correlating with a telluric
-# template spectrum rather than one from a planet
-cc_with_telluric: False
-
-# Set to true if we want to test things by cross-correlating with a stellar
-# template spectrum rather than one from a planet
-cc_with_stellar: False
 
 # Convergence threshold for each SYSREM iteration
 sysrem_convergence_tol: 1.0E-6
@@ -86,14 +77,37 @@ sigma_threshold_sysrem_piskunov: 3.0
 # (best for testing/simulated data without slit losses)
 do_use_continuum_normalised_data: True
 
+# Whether to split A and B frames into two separate sequences. If True, SYSREM
+# will be run 2x per night (with each set of residuals having their own fits
+# HDU). This then results in two sets of cross-correlations per night.
+split_AB_sequences: True
+
+# Whether to mask out strong tellurics when running SYSREM. See below for more
+# details on how this works.
+do_mask_strong_tellurics_in_sysrem: False
+
+# Threshold value for what we consider strong telluric absorption. This value
+# is the *lowest* level we allow a telluric line to absorb to in a continuum
+# normalised spectrum. That is, a value of 0.2 means 80% telluric absorption is
+# our limit, and any lines deeper than this are masked.
+telluric_trans_bad_px_threshold: 0.2
+
 #------------------------------------------------------------------------------
 # Cross Correlation Settings
 #------------------------------------------------------------------------------
+# Set to true if we want to test things by cross-correlating with a telluric
+# template spectrum rather than one from a planet
+cc_with_telluric: False
+
+# Set to true if we want to test things by cross-correlating with a stellar
+# template spectrum rather than one from a planet
+cc_with_stellar: False
+
 # Step size for the cross-correlation in km/s
 cc_rv_step: 0.5
 
 # Minimum and maximum extents of the cross correlation in km/s
-cc_rv_lims: [-50,50]
+cc_rv_lims: [-40,40]
 
 #------------------------------------------------------------------------------
 # Kp-Vsys Settings
