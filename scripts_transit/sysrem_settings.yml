@@ -73,9 +73,11 @@ detrending_algorithm: "SYSREM"
 # Sigma clipping threshold for 'PISKUNOV' detrending method
 sigma_threshold_sysrem_piskunov: 3.0
 
-# Whether to use the continuum normalised data (best for real data) or not 
-# (best for testing/simulated data without slit losses)
-do_use_continuum_normalised_data: True
+# Used to select how the data is normalised prior to running SYSREM:
+#   True: data is continuum normalised to the 'true' continuum value using 
+#         a molecfit telluric model, MARCS spectrum, and airmasses.
+#   False: each spectral segment is simply normalised by its median flux
+do_use_continuum_normalised_data: False
 
 # Whether to split A and B frames into two separate sequences. If True, SYSREM
 # will be run 2x per night (with each set of residuals having their own fits

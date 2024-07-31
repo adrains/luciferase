@@ -15,7 +15,6 @@ from numpy.polynomial.polynomial import Polynomial, polyfit
 def clean_and_compute_initial_resid(
     spectra,
     e_spectra,
-    strong_telluic_mask,
     mjds,
     sigma_threshold_phase=6.0,
     sigma_threshold_spectral=6.0,
@@ -34,10 +33,6 @@ def clean_and_compute_initial_resid(
     ----------
     spectra, e_spectra: 3D float array
         Unnormalised spectra and spectroscopic uncertainties of shape 
-        [n_phase, n_spec, n_px].
-    
-    strong_telluic_mask: 3D float array
-        Mask for spectral regions with strong telluric absorption with shape 
         [n_phase, n_spec, n_px].
 
     mjds: 1D float array
@@ -164,8 +159,7 @@ def clean_and_compute_initial_resid(
                         sigma_upper=sigma_threshold_spectral,).mask
         
     # Combine bad px masks
-    bad_px_mask = np.logical_or(
-        strong_telluic_mask, np.logical_or(sc_mask_phase, sc_mask_spec))
+    bad_px_mask = np.logical_or(sc_mask_phase, sc_mask_spec)
 
     #--------------------------------------------------------------------------
     # Normalisation + wrapping up
@@ -577,8 +571,6 @@ def cross_correlate_sysrem_resid(
         bounds_error=False,
         fill_value=np.nan,)
 
-    print("Cross correlating...")
-
     # Loop over each set of residuals for each SYSREM iteration
     for sysrem_iter_i in range(n_sysrem_iter):
 
@@ -628,7 +620,7 @@ def cross_correlate_sysrem_resid(
 
                 # Store
                 ccv_per_spec[sysrem_iter_i, :, spec_i, rv_i] = cc_val
-        
+
         #----------------------------------------------------------------------
         # Combine all spectral segments into global CC for sysrem_iter_i
         #----------------------------------------------------------------------
