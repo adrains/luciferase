@@ -68,7 +68,8 @@ Kp_vsys_map_combined_all = []
 
 rv_star = syst_info.loc["rv_star", "value"]
 
-species = "_".join(ss.species_to_cc)
+species_label = "_".join(ss.species_to_cc)
+species_list = ", ".join(ss.species_to_cc)
 
 for transit_i in range(n_transit):
     #--------------------------------------------------------------------------
@@ -137,7 +138,7 @@ for transit_i in range(n_transit):
             mean_spec_lambdas=np.mean(waves,axis=1),
             planet_rvs=planet_rvs,
             plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species),)
+                ss.label, transit_i+1, seq, species_label),)
 
         #----------------------------------------------------------------------
         # Kp-Vsys map
@@ -167,16 +168,17 @@ for transit_i in range(n_transit):
             Kp_vsys_map_combined=Kp_vsys_map_combined,
             mean_spec_lambdas=np.mean(waves,axis=1),
             plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species),)
+                ss.label, transit_i+1, seq, species_label),)
         
         # Combined Kp-Vsys map for this seq after merging all spectral segments
         tplt.plot_combined_kp_vsys_map_as_snr(
             cc_rvs=cc_rvs_subset,
             Kp_steps=Kp_steps,
             Kp_vsys_maps=Kp_vsys_map_combined,
-            plot_title="Night #{} ({})".format(transit_i+1, seq),
+            plot_title="Night #{} ({}):".format(
+                transit_i+1, seq, species_list),
             plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species),)
+                ss.label, transit_i+1, seq, species_label),)
 
 Kp_vsys_map_per_spec_all = np.array(Kp_vsys_map_per_spec_all)
 Kp_vsys_map_combined_all = np.array(Kp_vsys_map_combined_all)
@@ -189,13 +191,13 @@ Kp_vsys_map_combined_all = np.array(Kp_vsys_map_combined_all)
 # not split the sequences, we only need to make one set of summary plots.
 if ss.split_AB_sequences:
     # Setup plot labels and titles
-    plot_labels = ["{}_n{}_AB_{}".format(ss.label, ti+1, species)
+    plot_labels = ["{}_n{}_AB_{}".format(ss.label, ti+1, species_label)
                    for ti in range(n_transit)]
-    plot_labels.append("{}_all_nights_{}".format(ss.label, species))
+    plot_labels.append("{}_all_nights_{}".format(ss.label, species_label))
 
-    plot_titles = ["Night #{} (AB): {}".format(ti+1, species) 
+    plot_titles = ["Night #{} (AB): {}".format(ti+1, species_list) 
                    for ti in range(n_transit)]
-    plot_titles.append("Combined Nights: {}".format(species))
+    plot_titles.append("Combined Nights: {}".format(species_list))
 
     # Setup a mask such to enable combining the A/B sequences within a given
     # night. e.g. [1, 1, 0, 0] for night 1 when there are two nights.
@@ -208,9 +210,9 @@ if ss.split_AB_sequences:
 
 # If we haven't split up the sequences, set things up to combine all nights
 else:
-    plot_labels = ["{}_all_nights_{}".format(ss.label, species)]
-    plot_titles = ["Combined Nights: {}".format(species)]
-    map_masks = [np.full(n_transit*2, True)]
+    plot_labels = ["{}_all_nights_{}".format(ss.label, species_label)]
+    plot_titles = ["Combined Nights: {}".format(species_list)]
+    map_masks = [np.full(n_transit, True)]
 
 # Now combine all sequences and nights by looping over labels, titles, & masks
 for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
@@ -244,8 +246,8 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
 # Dump the results of CC and the resulting Kp-Vsys map to a pickle, with the
 # label, number of transits, template info, and the SYSREM settings obj as a
 # whole in the filename.\
-fn_label = "_".join(
-    ["cc_results", ss.label, str(ss.n_transit), str("template"), species])
+fn_label = "_".join([
+    "cc_results", ss.label, str(ss.n_transit), str("template"), species_label])
 fn = os.path.join(ss.save_path, "{}.pkl".format(fn_label))
 
 tu.dump_cc_results(

@@ -559,8 +559,13 @@ def cross_correlate_sysrem_resid(
 
     # Initialise output array for *global* cross-correlation
     ccv_combined = np.zeros((n_sysrem_iter, n_phase, n_rv_steps))
-    
-    # Initialise array of RV shifted planet spectra
+
+    #--------------------------------------------------------------------------
+    # Create 4D interpolated grid of spectra
+    #--------------------------------------------------------------------------
+    # Loop over spectral, phase, and RV dimensions to create a template grid.
+    # This will be constant for all SYSREM iterations, so we create it once and
+    # use it as many times as we need.
     spec_4D = np.ones((n_rv_steps, n_phase, n_spec, n_px,))
 
     # Initialise template spectrum interpolator.
@@ -571,6 +576,31 @@ def cross_correlate_sysrem_resid(
         bounds_error=False,
         fill_value=np.nan,)
 
+    for spec_i in range(n_spec):
+        desc = "Creating spectral template grid {}/{} for all RVs".format(
+            spec_i+1, n_spec)
+        
+        for rv_i, rv in enumerate(tqdm(cc_rvs, leave=False, desc=desc)):
+            for phase_i in range(n_phase):
+                # Doppler shift for new wavelength scale
+                bcor = bcors[phase_i]
+                wave_rv_shift = \
+                    waves[spec_i] * (1-(rv+bcor)/(const.c.si.value/1000))
+
+                # Interpolate to wavelength scale
+                spec_1D = temp_interp(wave_rv_shift)
+
+                # If this is ever true, our template is insufficiently long
+                # in wavelength.
+                if np.sum(np.isnan(spec_1D)) > 0:
+                    raise ValueError("Nans in interpolated array")
+            
+                # Store 1D spectrum
+                spec_4D[rv_i, phase_i, spec_i, :] = spec_1D
+
+    #--------------------------------------------------------------------------
+    # Cross correlation
+    #--------------------------------------------------------------------------
     # Loop over each set of residuals for each SYSREM iteration
     for sysrem_iter_i in range(n_sysrem_iter):
 
@@ -580,33 +610,12 @@ def cross_correlate_sysrem_resid(
         #----------------------------------------------------------------------
         # Combine per-spectral segment CCs
         #----------------------------------------------------------------------
-        # Loop over all spectral segments
+        # Cross correlate each [n_phase, n_px] slice from spec_4D
         for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
             # Loop over all RVs and cross correlate against each phase
             for rv_i, rv in enumerate(cc_rvs):
-                # Since the barycentric velocity shifts, we can't use the same
-                # template for each phase. But we can pre-construct a 2D array
-                # of spectra and then continue to do things in a vectorised way
-                spec_2D = np.empty((n_phase, n_px))
-
-                for phase_i in range(n_phase):
-                    # Doppler shift for new wavelength scale
-                    bcor = bcors[phase_i]
-                    wave_rv_shift = \
-                        waves[spec_i] * (1-(rv+bcor)/(const.c.si.value/1000))
-
-                    # Interpolate to wavelength scale
-                    spec_1D = temp_interp(wave_rv_shift)
-
-                    # If this is ever true, our template is insufficiently long
-                    # in wavelength.
-                    if np.sum(np.isnan(spec_1D)) > 0:
-                        raise ValueError("Nans in interpolated array")
-                    
-                    spec_2D[phase_i,:] = spec_1D
-                
                 # Store this for computing the *global* cross correlation
-                spec_4D[rv_i, :, spec_i, :] = spec_2D.copy()
+                spec_2D = spec_4D[rv_i, :, spec_i, :]
                 
                 # Calculate the cross correlation weighted by the uncertainties
                 # TODO: we add +1 to the residuals so they flucuate about 1.
