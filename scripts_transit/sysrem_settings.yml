@@ -10,9 +10,17 @@
 save_path: "simulations"
 n_transit: 2
 
-#label: "wasp107_240516"
-label: "wasp107_np_corr"
-#label: "simulated_R100000_wasp107_240610_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_SNR_150"
+# Real data
+# ---------
+#label: "wasp107_np_corr"
+
+# SNR~130 sim with all species + slit losses
+# -------------------------------------------
+#label: "simulated_R100000_wasp107_240802_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_130"
+
+# SNR~300 sim with all species + slit losses
+# -------------------------------------------
+label: "simulated_R100000_wasp107_240802_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_300"
 
 #------------------------------------------------------------------------------
 # Template Settings
@@ -47,14 +55,6 @@ sigma_threshold_spectral: 5.0
 # Number of iterations to run SYSREM for
 n_sysrem_iter: 5
 
-# These segments will be masked out completely. For K2148 this is 2.0-2.07um
-segments_to_mask_completely: [2, 3, 4]
-
-# Alternatively, for testing purposes we can just plain cut drop the number
-# of segments to speed things up.
-do_drop_segments: False
-segments_to_keep: [15, 16, 17]
-
 # Convergence threshold for each SYSREM iteration
 sysrem_convergence_tol: 1.0E-6
 
@@ -86,12 +86,17 @@ split_AB_sequences: True
 
 # Whether to mask out strong tellurics when running SYSREM. See below for more
 # details on how this works.
-do_mask_strong_tellurics_in_sysrem: False
+do_mask_strong_tellurics_in_sysrem: True
 
 # Threshold value for what we consider strong telluric absorption. This value
 # is the *lowest* level we allow a telluric line to absorb to in a continuum
 # normalised spectrum. That is, a value of 0.2 means 80% telluric absorption is
-# our limit, and any lines deeper than this are masked.
+# our limit, and any lines deeper than this are masked. Note that there are two
+# main motiviations for masking:
+# 1) Masking out pixels that are saturated (0% transmitted flux) *before* the
+#    instrumental broadening, that is to say masking pixels with no 
+#    astrophysical information content.
+# 2) Masking out low SNR pixels.
 telluric_trans_bad_px_threshold: 0.2
 
 #------------------------------------------------------------------------------
@@ -105,17 +110,30 @@ cc_with_telluric: False
 # template spectrum rather than one from a planet
 cc_with_stellar: False
 
-# Step size for the cross-correlation in km/s
-cc_rv_step: 0.5
+# Step size for the cross-correlation in km/s. Finer sampling might give a
+# higher detection SNR depending on where the best fitting velocity sits, but
+# values below the pixel velocity resolution of the instrument will be 
+# correlated so this shouldm't be a huge improvement. For CRIRES+ not 
+# recommended to sample < 0.5 km/s. 
+cc_rv_step: 1.0
 
-# Minimum and maximum extents of the cross correlation in km/s
-cc_rv_lims: [-40,40]
+# Minimum and maximum extents of the cross correlation in km/s. Note that this
+# range should be larger than the actual central range you expect the planet to
+# realistically inhabit as edge effects will be introduced at the edges of the
+# Kp-Vsys plot, which then can just be clipped off when plotting.
+cc_rv_lims: [-100,100]
 
 #------------------------------------------------------------------------------
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
-# Step size for the Kp-Vsys map in km/s
-Kp_step: 0.5
+# Step size for the Kp-Vsys map in km/s. Same caveats as for cc_rv_step above.
+Kp_step: 1.0
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
 Kp_lims: [0,200]
+
+# This is the RV range of the x axis for our Kp-Vsys plots. This should be a
+# smaller range than cc_rv_lims, as the idea is we CC wider than we need, then
+# clip off the edges to a) remove edge effects, and b) focus on the region the
+# planet is actually in.
+kp_vsys_x_range: [-50,50]

@@ -55,6 +55,7 @@ print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
 print("\tCC RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.cc_rv_lims))
 print("\tKp RV step\t\t{:0.2f} km/s".format(ss.Kp_step))
 print("\tKp RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.Kp_lims))
+print("\tVsys RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.kp_vsys_x_range))
 print("-"*80)
 
 #------------------------------------------------------------------------------
@@ -102,7 +103,7 @@ for transit_i in range(n_transit):
 
         # Grab planet RVs for overplotting on CC plot
         planet_rvs = transit_info_list[transit_i]["delta"].values[seq_mask]
-        planet_rvs = planet_rvs * const.c.cgs.to(u.km/u.s)
+        planet_rvs = planet_rvs * const.c.cgs.to(u.km/u.s).value
 
         #----------------------------------------------------------------------
         # Cross-correlation
@@ -144,14 +145,15 @@ for transit_i in range(n_transit):
         print("Computing Kp-Vsys map...")
 
         # Create Kp-Vsys map *per spectral segment*
-        Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
+        cc_rvs_subset, Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
             sr.compute_Kp_vsys_map(
                 cc_rvs=cc_rvs,
                 ccv_per_spec=ccv_per_spec,
                 ccv_combined=ccv_combined,
                 transit_info=transit_info_list[transit_i],
                 Kp_lims=ss.Kp_lims,
-                Kp_step=ss.Kp_step,)
+                Kp_step=ss.Kp_step,
+                vsys_lims=ss.kp_vsys_x_range,)
 
         # Store
         Kp_vsys_map_per_spec_all.append(Kp_vsys_map_per_spec)
@@ -159,7 +161,7 @@ for transit_i in range(n_transit):
 
         # Plot overview Kp-Vsys map
         tplt.plot_kp_vsys_map(
-            cc_rvs=cc_rvs,
+            cc_rvs=cc_rvs_subset,
             Kp_steps=Kp_steps,
             Kp_vsys_map_per_spec=Kp_vsys_map_per_spec,
             Kp_vsys_map_combined=Kp_vsys_map_combined,
@@ -169,7 +171,7 @@ for transit_i in range(n_transit):
         
         # Combined Kp-Vsys map for this seq after merging all spectral segments
         tplt.plot_combined_kp_vsys_map_as_snr(
-            cc_rvs=cc_rvs,
+            cc_rvs=cc_rvs_subset,
             Kp_steps=Kp_steps,
             Kp_vsys_maps=Kp_vsys_map_combined,
             plot_title="Night #{} ({})".format(transit_i+1, seq),
@@ -187,12 +189,13 @@ Kp_vsys_map_combined_all = np.array(Kp_vsys_map_combined_all)
 # not split the sequences, we only need to make one set of summary plots.
 if ss.split_AB_sequences:
     # Setup plot labels and titles
-    plot_labels = ["{}_n{}_AB_{}".format(ss.label, ti, species)
+    plot_labels = ["{}_n{}_AB_{}".format(ss.label, ti+1, species)
                    for ti in range(n_transit)]
     plot_labels.append("{}_all_nights_{}".format(ss.label, species))
 
-    plot_titles = ["Night #{} (AB)".format(ti+1) for ti in range(n_transit)]
-    plot_titles.append("Combined Nights")
+    plot_titles = ["Night #{} (AB): {}".format(ti+1, species) 
+                   for ti in range(n_transit)]
+    plot_titles.append("Combined Nights: {}".format(species))
 
     # Setup a mask such to enable combining the A/B sequences within a given
     # night. e.g. [1, 1, 0, 0] for night 1 when there are two nights.
@@ -206,7 +209,7 @@ if ss.split_AB_sequences:
 # If we haven't split up the sequences, set things up to combine all nights
 else:
     plot_labels = ["{}_all_nights_{}".format(ss.label, species)]
-    plot_titles = ["Combined Nights"]
+    plot_titles = ["Combined Nights: {}".format(species)]
     map_masks = [np.full(n_transit*2, True)]
 
 # Now combine all sequences and nights by looping over labels, titles, & masks

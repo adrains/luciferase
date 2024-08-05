@@ -598,8 +598,10 @@ def cross_correlate_sysrem_resid(
                     # Interpolate to wavelength scale
                     spec_1D = temp_interp(wave_rv_shift)
 
-                    if np.nansum(spec_1D) == 0:
-                        raise ValueError("All nan interpolated array")
+                    # If this is ever true, our template is insufficiently long
+                    # in wavelength.
+                    if np.sum(np.isnan(spec_1D)) > 0:
+                        raise ValueError("Nans in interpolated array")
                     
                     spec_2D[phase_i,:] = spec_1D
                 
@@ -609,13 +611,17 @@ def cross_correlate_sysrem_resid(
                 # Calculate the cross correlation weighted by the uncertainties
                 # TODO: we add +1 to the residuals so they flucuate about 1.
                 # This should be doublechecked.
-                resid = sysrem_resid[sysrem_iter_i, :, spec_i].copy() +1
+                resid = sysrem_resid[sysrem_iter_i, :, spec_i].copy() + 1
                 
+                # We need to mask out entirely nan columns in order for the 
+                # cross-correlation maths to behave.
+                nm = ~np.all(np.isnan(resid,), axis=0)
+
                 # Calculate cross-correlation, sum along pixel dimension
-                cc_num = np.nansum(resid * spec_2D, axis=1)
+                cc_num = np.nansum(resid[:,nm] * spec_2D[:,nm], axis=1)
                 cc_den = np.sqrt(
-                    np.nansum(resid**2, axis=1)
-                    * np.nansum(spec_2D**2, axis=1))
+                    np.nansum(resid[:,nm]**2, axis=1)
+                    * np.nansum(spec_2D[:,nm]**2, axis=1))
                 cc_val = cc_num / cc_den
 
                 # Store
@@ -630,13 +636,23 @@ def cross_correlate_sysrem_resid(
         resid_4D = np.broadcast_to(
             array=resid_3D[None,:,:,:],
             shape=(n_rv_steps, n_phase, n_spec, n_px,),)
-        
-        # Sum over the px and spectral segment dimensions
+
+        # We still need to mask out all-nan columns here, and the easiest way
+        # to do that is to simply concatenate the spectral segment and pixel
+        # dimensions into one single long dimension.
+        resid_4Dc = resid_4D.reshape((n_rv_steps, n_phase, n_spec*n_px,))
+        spec_4Dc = spec_4D.reshape((n_rv_steps, n_phase, n_spec*n_px,))
+
+        # Compute mask for where entire phase dimension is all nans. We assume
+        # that this mask will be in common for all SYSREM iterations.
+        nm = ~np.all(np.isnan(resid_4Dc[0],), axis=0)
+
+        # Sum over the (now collapsed) px and spectral segment dimensions
         # spec_4D has shape (n_rv_steps, n_phase, n_spec, n_px,)
-        cc_num = np.nansum(np.nansum(resid_4D * spec_4D, axis=3), axis=2)
+        cc_num = np.nansum(resid_4Dc[:,:,nm] * spec_4Dc[:,:,nm], axis=2)
         cc_den = np.sqrt(
-            np.nansum(np.nansum(resid_4D**2, axis=3), axis=2)
-            * np.nansum(np.nansum(spec_4D**2, axis=3), axis=2))
+            np.nansum(resid_4Dc[:,:,nm]**2, axis=2)
+            * np.nansum(spec_4Dc[:,:,nm]**2, axis=2))
         cc_val = cc_num / cc_den
 
         # Store
@@ -674,6 +690,7 @@ def compute_Kp_vsys_map(
     ccv_combined=None,
     Kp_lims=(0,400),
     Kp_step=0.5,
+    vsys_lims=None,
     interpolation_method="cubic",):
     """Function to compute the Kp-Vsys map given a set of cross correlation
     values from cross_correlate_sysrem_resid.
@@ -705,6 +722,13 @@ def compute_Kp_vsys_map(
     Kp_step: float, default: 0.5
         Kp step size to use when sampling in km/s.
 
+    vsys_lims: tuple array or None, default: None
+        This is the RV range of the x axis for our Kp-Vsys plots. This should
+        be a smaller range than cc_rvs, as the idea is we CC wider than we
+        need, then clip off the edges to a) remove edge effects, and b) focus
+        on the region the planet is actually in. If None, no limits are
+        applied.
+
     interpolation_method: str, default: "cubic"
         Default interpolation method to use with scipy.interp1d. Can be one of: 
         ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
@@ -712,6 +736,9 @@ def compute_Kp_vsys_map(
 
     Returns
     -------
+    cc_rvs_subset: 1D float array
+        Updated vector of RV steps of length per vsys_lims.
+    
     Kp_steps: 1D float array
         Array of Kp steps from Kp_lims[0] to Kp_lims[1] in steps of Kp_step.
     
@@ -736,7 +763,7 @@ def compute_Kp_vsys_map(
     (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
 
     # Initialise Kp sampling
-    Kp_steps = np.arange(Kp_lims[0], Kp_lims[1], Kp_step)
+    Kp_steps = np.arange(Kp_lims[0], Kp_lims[1]+1, Kp_step)
 
     n_Kp_steps = len(Kp_steps)
 
@@ -784,17 +811,33 @@ def compute_Kp_vsys_map(
                     Kp_vsys_map[sr_iter_i, spec_i, Kp_i] = \
                         np.nanmean(cc_values_shifted, axis=0)
 
+    # If we've been provided vsys (i.e. x axis) limits, now that we've
+    # created our Kp-Vsys map we can clip the edges off to avoid edge effects.
+    if vsys_lims is not None:
+        if vsys_lims[0] >= vsys_lims[1]:
+            raise ValueError("vsys_lims[0] must be < vsys_lims[1]")
+        
+        vsys_mask = np.logical_and(
+            cc_rvs >= vsys_lims[0],
+            cc_rvs <= vsys_lims[1])
+        Kp_vsys_map = Kp_vsys_map[:,:,:,vsys_mask]
+
+        # And update cc_rvs
+        cc_rvs_subset = np.arange(
+            vsys_lims[0], vsys_lims[1]+1, np.diff(cc_rvs)[0])
+
     # If we were given a combined set of CCVs, removed the combined set of
     # cross correlation values and return that as its own variable.
     if ccv_combined is not None:
         Kp_vsys_map_per_spec = Kp_vsys_map[:,:-1,:,:]
         Kp_vsys_map_combined = Kp_vsys_map[:,-1,:,:]
 
-        return Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined
+        return cc_rvs_subset, Kp_steps, Kp_vsys_map_per_spec, \
+            Kp_vsys_map_combined
 
     # Otherwise return as is
     else:
-        return Kp_steps, Kp_vsys_map
+        return cc_rvs_subset, Kp_steps, Kp_vsys_map
     
 
 def combine_kp_vsys_map(Kp_vsys_map_list):

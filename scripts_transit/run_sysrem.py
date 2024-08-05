@@ -25,7 +25,8 @@ wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ss.save_path, ss.label, ss.n_transit)
 
-# Currently both detrending algorithms do not require normalisation to work
+# Currently both detrending algorithms do not require normalisation (note: not
+# in a continuum normalisation way, but in a SYSREM residual prep way) to work
 # TODO: this should be revisted and relates to whether we are treating the
 # removed SYSREM components as additive or multiplicative. 
 do_normalise = False
@@ -45,8 +46,21 @@ for transit_i in range(ss.n_transit):
     # Grab dimensions of flux datacube
     (n_phase, n_spec, n_px) = fluxes_list[transit_i].shape
 
-    # Decide which set of fluxes to use
-    # 1) Load continuum normalised fluxes
+    #--------------------------------------------------------------------------
+    # Create telluric mask
+    #--------------------------------------------------------------------------
+    # We need this for masking out tellurics for a) determining median flux
+    # values for spectral normalisation, and b) masking out strong tellurics
+    # before running SYSREM.
+    telluric_mask_1D = telluric_trans < ss.telluric_trans_bad_px_threshold
+    telluric_mask_2D = telluric_mask_1D.reshape(n_spec, n_px)
+    telluric_mask_3D = np.tile(
+        telluric_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)
+
+    #--------------------------------------------------------------------------
+    # Import and prepare fluxes for this night
+    #--------------------------------------------------------------------------
+    # Option 1) Load continuum normalised fluxes
     if ss.do_use_continuum_normalised_data:
         print("Using continuum normalised spectra.")
         fluxes_norm, sigmas_norm, _, _ = \
@@ -56,25 +70,22 @@ for transit_i in range(ss.n_transit):
                 n_transit=ss.n_transit,
                 transit_i=transit_i,)
 
-    # 2) Simply normalise each spectral segment by its median value.
+    # Option 2) Simply normalise each spectral segment by its median value
+    # *after* masking out strong tellurics when determining median values. We
+    # use our precalculated telluric mask to do this, ensuring a constistent 
+    # level for those tellurics considered 'strong'.
     else:
-        print("Using unnormalised spectra.")
-        mf = np.nanmedian(fluxes_list[transit_i], axis=2)
+        print("Using (+telluric masked) median normalised spectra.")
+        # Determine median fluxes of shape [n_phase, n_spec] after masking
+        # strong telluric lines
+        masked_fluxes = fluxes_list[transit_i].copy()
+        masked_fluxes[:,telluric_mask_2D] = np.nan
+        mf = np.nanmedian(masked_fluxes, axis=2)
         mf_3D = np.broadcast_to(mf[:,:,None], (n_phase, n_spec, n_px))
+
+        # Normalise fluxes
         fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
         sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
-
-    #--------------------------------------------------------------------------
-    # [Optional] Telluric masking
-    #--------------------------------------------------------------------------
-    # Mask out strong telluric features when running SYSREM
-    if ss.do_mask_strong_tellurics_in_sysrem:
-        telluic_mask_1D = telluric_trans < ss.telluric_trans_bad_px_threshold
-        telluic_mask_3D = np.tile(
-            telluic_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)
-    # No masking
-    else:
-        telluic_mask_3D = np.full(fluxes_norm.shape, False)
 
     #--------------------------------------------------------------------------
     # [Optional] Split of A/B sequences
@@ -110,9 +121,14 @@ for transit_i in range(ss.n_transit):
 
         n_phase_seq = np.sum(seq_mask)
 
+        #----------------------------------------------------------------------
+        # [Optional] Mask out strong tellurics
+        #----------------------------------------------------------------------
         # Mask out strong tellurics by setting these pixels to nans
-        # Note: telluic_mask_3D will be all False if not doing masking.
-        resid_init[telluic_mask_3D[seq_mask]] = np.nan
+        # Note: telluric_mask_3D will be all False if not doing masking.
+        if ss.do_mask_strong_tellurics_in_sysrem:
+            telluric_mask_seq = telluric_mask_3D[seq_mask]
+            resid_init[telluric_mask_seq] = np.nan
 
         #----------------------------------------------------------------------
         # Option 1: Order-by-order detrending
@@ -128,9 +144,18 @@ for transit_i in range(ss.n_transit):
                         spec_i, np.mean(waves[spec_i]))
                 print("-"*80, fmt_txt, "-"*80,sep="")
 
+                # Only run SYSREM on unmasked regions
+                if ss.do_mask_strong_tellurics_in_sysrem: 
+                    unmasked_px = ~telluric_mask_2D[spec_i,:]
+                    resid_init_masked = resid_init[:,spec_i,unmasked_px]
+                    e_flux_masked = e_flux_init[:,spec_i,unmasked_px]
+                else:
+                    resid_init_masked = resid_init[:,spec_i]
+                    e_flux_masked = e_flux_init[:,spec_i]
+
                 resid = sr.detrend_spectra(
-                    resid_init=resid_init[:,spec_i,:],
-                    e_resid=e_flux_init[:,spec_i,:],
+                    resid_init=resid_init_masked,
+                    e_resid=e_flux_masked,
                     detrending_algorithm=ss.detrending_algorithm,
                     n_iter=ss.n_sysrem_iter,
                     tolerance=ss.sysrem_convergence_tol,
@@ -138,7 +163,10 @@ for transit_i in range(ss.n_transit):
                     diff_method=ss.sysrem_diff_method,
                     sigma_threshold=ss.sigma_threshold_sysrem_piskunov,)
                 
-                resid_all[:, :,spec_i,:] = resid
+                if ss.do_mask_strong_tellurics_in_sysrem:
+                    resid_all[:, :,spec_i, unmasked_px] = resid
+                else:
+                    resid_all[:, :,spec_i] = resid
         #----------------------------------------------------------------------
         # Option 2: Simultaneous detrending
         #----------------------------------------------------------------------
