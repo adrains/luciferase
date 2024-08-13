@@ -175,7 +175,7 @@ for transit_i in range(n_transit):
             cc_rvs=cc_rvs_subset,
             Kp_steps=Kp_steps,
             Kp_vsys_maps=Kp_vsys_map_combined,
-            plot_title="Night #{} ({}):".format(
+            plot_title="Night #{} ({}): {}".format(
                 transit_i+1, seq, species_list),
             plot_label="{}_n{}_{}_{}".format(
                 ss.label, transit_i+1, seq, species_label),)
@@ -225,7 +225,7 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
 
     # Plot overview Kp-Vsys map with all spectral segments
     tplt.plot_kp_vsys_map(
-        cc_rvs=cc_rvs,
+        cc_rvs=cc_rvs_subset,
         Kp_steps=Kp_steps,
         Kp_vsys_map_per_spec=map_per_spec_all_nights,
         Kp_vsys_map_combined=map_combined_all_nights,
@@ -234,7 +234,7 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
 
     # Combined Kp-Vsys Map after merging all spectral segments
     tplt.plot_combined_kp_vsys_map_as_snr(
-        cc_rvs=cc_rvs,
+        cc_rvs=cc_rvs_subset,
         Kp_steps=Kp_steps,
         Kp_vsys_maps=map_combined_all_nights,
         plot_title=title,

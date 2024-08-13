@@ -104,22 +104,35 @@ for transit_i in range(ss.n_transit):
         sequences = ["AB"]
 
     #--------------------------------------------------------------------------
-    # Clean and run SYSREM for this night
+    # Clean
     #--------------------------------------------------------------------------
-    # Loop over each of our sequences
-    for seq, seq_mask in zip(sequences, sequence_masks):
-        # Clean and prepare our fluxes for input to SYSREM. This involves:
-        # - sigma clipping along phase and spectral dimension
-        # - interpolate along the phase dimension
-        resid_init, flux, e_flux_init = sr.clean_and_compute_initial_resid(
-            spectra=fluxes_norm[seq_mask],
-            e_spectra=sigmas_norm[seq_mask],
-            mjds=transit_info_list[transit_i]["mjd_mid"].values[seq_mask],
-            sigma_threshold_phase=ss.sigma_threshold_phase,
-            sigma_threshold_spectral=ss.sigma_threshold_spectral,
-            do_normalise=do_normalise,)
+    # TODO WHY FIRST
+    # Clean and prepare our fluxes for input to SYSREM. This involves:
+    # - sigma clipping along phase and spectral dimension
+    # - interpolate along the phase dimension
+    resid_init_full, flux, e_flux_init = sr.clean_and_compute_initial_resid(
+        spectra=fluxes_norm,
+        e_spectra=sigmas_norm,
+        mjds=transit_info_list[transit_i]["mjd_mid"].values,
+        sigma_threshold_phase=ss.sigma_threshold_phase,
+        sigma_threshold_spectral=ss.sigma_threshold_spectral,
+        do_normalise=do_normalise,)
 
-        n_phase_seq = np.sum(seq_mask)
+    #--------------------------------------------------------------------------
+    # Run SYSREM for this night
+    #--------------------------------------------------------------------------
+    for seq, seq_mask in zip(sequences, sequence_masks):
+        # Now that we've cleaned the full sequence, select subsequences as req
+        resid_init = resid_init_full.copy()
+
+        # Broadcast sequence mask to all dimensions
+        #seq_mask_3D = np.broadcast_to(
+        #    seq_mask[:,None,None], (n_phase, n_spec, n_px))
+
+        # Now set all values from the opposite sequence to nan
+        resid_init[~seq_mask,:,:] = np.nan
+
+        #n_phase_seq = np.sum(seq_mask)
 
         #----------------------------------------------------------------------
         # [Optional] Mask out strong tellurics
@@ -127,8 +140,8 @@ for transit_i in range(ss.n_transit):
         # Mask out strong tellurics by setting these pixels to nans
         # Note: telluric_mask_3D will be all False if not doing masking.
         if ss.do_mask_strong_tellurics_in_sysrem:
-            telluric_mask_seq = telluric_mask_3D[seq_mask]
-            resid_init[telluric_mask_seq] = np.nan
+            #telluric_mask_seq = telluric_mask_3D[seq_mask]
+            resid_init[telluric_mask_3D] = np.nan
 
         #----------------------------------------------------------------------
         # Option 1: Order-by-order detrending
@@ -136,7 +149,7 @@ for transit_i in range(ss.n_transit):
         if ss.run_sysrem_order_by_order and ss.detrending_algorithm != "PISKUNOV":
             print("Running detrending order-by-order:")
             resid_all = np.full(
-                (ss.n_sysrem_iter+1, n_phase_seq, n_spec, n_px), np.nan)
+                (ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
 
             # Run SYSREM on one spectral segment at a time
             for spec_i in range(n_spec):
@@ -184,18 +197,22 @@ for transit_i in range(ss.n_transit):
                 sigma_threshold=ss.sigma_threshold_sysrem_piskunov,)
 
             resid_all = resid.reshape(
-                (ss.n_sysrem_iter+1, n_phase_seq, n_spec, n_px))
+                (ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
+
+        #seq_mask_4D = np.broadcast_to(
+        #    seq_mask_3D[None,:,:,:], (ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
 
         # Save residuals
         tu.save_sysrem_residuals_to_fits(
             fits_load_dir=ss.save_path,
             label=ss.label,
             n_transit=ss.n_transit,
-            sysrem_resid=resid_all,
+            sysrem_resid=resid_all[:,seq_mask],    # Only save correct seq
             transit_i=transit_i,
             sequence=seq)
 
         # Plotting
         plot_label = "n{}_{}_{}".format(transit_i, seq, ss.label)
 
-        tplt.plot_sysrem_residuals(waves, resid_all, plot_label=plot_label,)
+        tplt.plot_sysrem_residuals(
+            waves, resid_all[:,seq_mask], plot_label=plot_label,)

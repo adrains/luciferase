@@ -1089,7 +1089,8 @@ def plot_combined_kp_vsys_map_as_snr(
     fig_size=(6, 10),
     plot_label="",
     px_x_noise_lims=150,
-    plot_noise_box_bounds=False,):
+    plot_noise_box_bounds=False,
+    tick_spacing=1.0,):
     """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
     correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
@@ -1165,9 +1166,20 @@ def plot_combined_kp_vsys_map_as_snr(
         
         # Sort out our colourbar
         cb = fig.colorbar(cmap, ax=axis)
+
+        min_snr = np.nanmin(snr)
+        max_snr = np.nanmax(snr)
+        delta_snr = max_snr - min_snr
+
+        ticks = np.arange(np.floor(min_snr), np.ceil(max_snr), tick_spacing)
+
+        cb.set_ticks(ticks)
+        cb.set_ticklabels(ticks)
+
         cb.ax.minorticks_on()
         cb.ax.tick_params(labelsize="medium", rotation=0)
         cb.set_label("SNR", fontsize="large")
+
 
         # Axis ticks
         axis.tick_params(axis='both', which='major', labelsize="x-small")
