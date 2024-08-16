@@ -8,6 +8,7 @@ import transit.utils as tu
 import transit.sysrem as sr
 import transit.plotting as tplt
 import luciferase.utils as lu
+from PyAstronomy.pyasl import instrBroadGaussFast
 
 #------------------------------------------------------------------------------
 # Setup
@@ -86,6 +87,52 @@ for transit_i in range(ss.n_transit):
         # Normalise fluxes
         fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
         sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
+
+    #--------------------------------------------------------------------------
+    # [Optional] Rescale A/B sequence amplitudes
+    #--------------------------------------------------------------------------
+    # There currently remains some residual inconsistencies between A/B spectra
+    # that manifest as wavelength dependent flux amplitude variations (as 
+    # opposed to wavelength scale issues). A temporary hack to fix this
+    # involves applying a correction based on the smoothed ratio between median
+    # A/B spectra within a given night, with the 'resolving power' of the
+    # smoothing given by ss.AB_ratio_smoothing_resolution, which should be set
+    # such than the R << 100,000 of our CRIRES spectra.
+    if ss.do_AB_sequence_amplitude_correction:
+        print("Running amplitude correction on A/B seq")
+        # Compute median A/B spectra in the phase dimension for [n_spec, n_px]
+        is_A = transit_info_list[transit_i]["nod_pos"].values == "A"
+        flux_A = np.nanmedian(fluxes_norm[is_A], axis=0)
+        flux_B = np.nanmedian(fluxes_norm[~is_A], axis=0)
+
+        # Calculate the flux ratio between these median A/B spectra
+        flux_ratio = flux_A / flux_B
+
+        # Set any nan values to 1.0
+        flux_ratio[np.isnan(flux_ratio)] = 1.0
+
+        # Also mask out any pixels with ratios 5%
+        px_to_mask = np.logical_or(flux_ratio > 1.05, flux_ratio < 0.95)
+        flux_ratio[px_to_mask] = 1.0
+
+        # Smooth this flux ratio
+        flux_ratio_smoothed = flux_ratio.copy()
+
+        for spec_i in range(n_spec):
+            flux_ratio_smoothed[spec_i] = instrBroadGaussFast(
+                wvl=waves[spec_i],
+                flux=flux_ratio[spec_i],
+                resolution=ss.AB_ratio_smoothing_resolution,
+                equid=True,
+                edgeHandling="firstlast",)
+            
+        # Scale B sequence by flux ratio
+        n_B = np.sum(~is_A)
+        flux_ratio_smoothed_3D = np.broadcast_to(
+            array=flux_ratio_smoothed[None,:,:],
+            shape=(n_B, n_spec, n_px),)
+        
+        fluxes_norm[~is_A] *= flux_ratio_smoothed
 
     #--------------------------------------------------------------------------
     # [Optional] Split of A/B sequences
