@@ -71,6 +71,10 @@ rv_star = syst_info.loc["rv_star", "value"]
 species_label = "_".join(ss.species_to_cc)
 species_list = ", ".join(ss.species_to_cc)
 
+# This holds the combined map for each seq/night, plus the final combined map
+combined_maps = []
+combined_map_titles = []
+
 for transit_i in range(n_transit):
     #--------------------------------------------------------------------------
     # [Optional] Split A/B sequences
@@ -159,6 +163,7 @@ for transit_i in range(n_transit):
         # Store
         Kp_vsys_map_per_spec_all.append(Kp_vsys_map_per_spec)
         Kp_vsys_map_combined_all.append(Kp_vsys_map_combined)
+        combined_maps.append(Kp_vsys_map_combined)
 
         # Plot overview Kp-Vsys map
         tplt.plot_kp_vsys_map(
@@ -170,13 +175,17 @@ for transit_i in range(n_transit):
             plot_label="{}_n{}_{}_{}".format(
                 ss.label, transit_i+1, seq, species_label),)
         
+        # Store so we can plot all the combined maps at the end
+        map_title = "Night #{} ({})".format(transit_i+1, seq)
+        combined_map_titles.append(map_title)
+
         # Combined Kp-Vsys map for this seq after merging all spectral segments
         tplt.plot_combined_kp_vsys_map_as_snr(
             cc_rvs=cc_rvs_subset,
             Kp_steps=Kp_steps,
             Kp_vsys_maps=Kp_vsys_map_combined,
-            plot_title="Night #{} ({}): {}".format(
-                transit_i+1, seq, species_list),
+            plot_title=map_title,
+            plot_suptitle=species_list,
             plot_label="{}_n{}_{}_{}".format(
                 ss.label, transit_i+1, seq, species_label),)
 
@@ -195,9 +204,8 @@ if ss.split_AB_sequences:
                    for ti in range(n_transit)]
     plot_labels.append("{}_all_nights_{}".format(ss.label, species_label))
 
-    plot_titles = ["Night #{} (AB): {}".format(ti+1, species_list) 
-                   for ti in range(n_transit)]
-    plot_titles.append("Combined Nights: {}".format(species_list))
+    plot_titles = ["Night #{} (AB)".format(ti+1) for ti in range(n_transit)]
+    plot_titles.append("Combined Nights")
 
     # Setup a mask such to enable combining the A/B sequences within a given
     # night. e.g. [1, 1, 0, 0] for night 1 when there are two nights.
@@ -223,6 +231,9 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
     map_combined_all_nights = \
         sr.combine_kp_vsys_map(Kp_vsys_map_combined_all[map_mask])
 
+    combined_maps.append(map_combined_all_nights)
+    combined_map_titles.append(title)
+
     # Plot overview Kp-Vsys map with all spectral segments
     tplt.plot_kp_vsys_map(
         cc_rvs=cc_rvs_subset,
@@ -238,7 +249,18 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
         Kp_steps=Kp_steps,
         Kp_vsys_maps=map_combined_all_nights,
         plot_title=title,
+        plot_suptitle="{}: {}".format(ss.label, species_list),
         plot_label=label,)
+    
+# Make a plot of all the sequences/nights together
+combined_maps = np.stack(combined_maps)
+tplt.plot_combined_kp_vsys_map_as_snr(
+    cc_rvs=cc_rvs_subset,
+    Kp_steps=Kp_steps,
+    Kp_vsys_maps=combined_maps,
+    plot_title=combined_map_titles,
+    plot_suptitle="{}: {}".format(ss.label, species_list),
+    plot_label="{}_all_seq_{}".format(ss.label, species_label),)
 
 #------------------------------------------------------------------------------
 # Dump arrays to disk
