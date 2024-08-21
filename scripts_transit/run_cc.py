@@ -22,6 +22,13 @@ ss = tu.load_yaml_settings(simulation_settings_file)
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ss.save_path, ss.label, ss.n_transit)
 
+# If masking orders during analysis, select subset of wavelength scale
+if ss.do_mask_orders_for_analysis:
+    n_spec = len(ss.selected_segments)
+
+    waves_full = waves
+    waves = waves[ss.selected_segments,:]
+
 # Grab the number of nights
 n_transit = len(fluxes_list)
 
@@ -50,6 +57,10 @@ elif ss.cc_with_stellar:
 else:
     print("\tPlanet template\t\t{}".format(ss.planet_fits))
     print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_cc)))
+if ss.do_mask_orders_for_analysis:
+    print("\tSpectral segments\t{}".format(ss.selected_segments))
+else:
+    print("\tSpectral segments\tAll")
 print("\tSplit A/B sequences\t{}".format(ss.split_AB_sequences))
 print("\tRun in stellar RV frame\t{}".format(ss.run_sysrem_in_stellar_frame))
 print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
@@ -106,6 +117,12 @@ for transit_i in range(n_transit):
             ss.save_path, ss.label, ss.n_transit, transit_i, seq)
 
         n_sysrem_iter = resid_all.shape[0]
+        
+        # If we're masking out orders for analysis (e.g. because a given
+        # species has no lines in certain spectral segments) do so here.
+        if ss.do_mask_orders_for_analysis:
+            resid_all_full = resid_all
+            resid_all = resid_all[:,:,ss.selected_segments,:]
 
         # Grab planet RVs for overplotting on CC plot
         planet_rvs = transit_info_list[transit_i]["delta"].values[seq_mask]

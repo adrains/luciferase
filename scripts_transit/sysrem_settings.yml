@@ -49,7 +49,7 @@ planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
 # Species: H2O, H2S, NH3, CO, PH3, SiO, CH4, CO2, C2H2, HCN
-species_to_cc: ["H2S"] #, "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
+species_to_cc: ["CO"] #, "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -132,6 +132,14 @@ cc_with_telluric: False
 # Set to true if we want to test things by cross-correlating with a stellar
 # template spectrum rather than one from a planet
 cc_with_stellar: False
+
+# Orders to analyse. If this is true, we only cross-correlate and compute
+# Kp-Vsys maps for the spectral segments whose indices are listed in below in
+# selected_segments. This is useful for for excluding orders which do not
+# meaningfully contribute to the CC, e.g. for CO which only has absorption
+# features in 6/18 segments of the CRIRES K2148 grating.
+do_mask_orders_for_analysis: True
+selected_segments: [12,13,14,15,16,17]
 
 # Step size for the cross-correlation in km/s. Finer sampling might give a
 # higher detection SNR depending on where the best fitting velocity sits, but
