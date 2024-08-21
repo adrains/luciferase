@@ -22,6 +22,13 @@ label: "wasp107_np_corr"
 # -------------------------------------------
 #label: "simulated_R100000_wasp107_240802_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_300"
 
+# Nightly velocity offsets in km/s. This array should have the same length as
+# the number of transits and is used to account for observed RV offsets between 
+# nights (which is to say that this is not a relevant setting for simulations).
+# A positive velocity shifts the Kp-Vsys diagram to the right, and negative
+# to the left.
+nightly_rv_offsets: [0, -1]
+
 #------------------------------------------------------------------------------
 # Template Settings
 #------------------------------------------------------------------------------
@@ -37,11 +44,12 @@ tau_fill_value: 0
 
 # Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
 planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
+#planet_fits: "templates/WASP107b_Welbanks_Aur-Ret_templates_all_R100000.fits"
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
 # Species: H2O, H2S, NH3, CO, PH3, SiO, CH4, CO2, C2H2, HCN
-species_to_cc: ["H2O", "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
+species_to_cc: ["H2S"] #, "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -110,6 +118,10 @@ split_AB_sequences: False
 # telluric_trans_bad_px_threshold for more details on how this works.
 do_mask_strong_tellurics_in_sysrem: True
 
+# Whether to run SYSREM in the telluric frame (False, default) or the stellar
+# frame (True). Note that changing this setting will require re-running SYSREM.
+run_sysrem_in_stellar_frame: False
+
 #------------------------------------------------------------------------------
 # Cross Correlation Settings
 #------------------------------------------------------------------------------
@@ -147,4 +159,4 @@ Kp_lims: [0,200]
 # smaller range than cc_rv_lims, as the idea is we CC wider than we need, then
 # clip off the edges to a) remove edge effects, and b) focus on the region the
 # planet is actually in.
-kp_vsys_x_range: [-50,50]
+kp_vsys_x_range: [-40,40]

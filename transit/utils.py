@@ -3231,7 +3231,8 @@ def prepare_cc_template(
             wvl=wave_p,
             flux=trans_planet,
             resolution=continuum_resolving_power,
-            equid=True,)
+            equid=True,
+            edgeHandling="firstlast",)
 
         # Final continuum normalised planet spectrum with edges clipped again
         wave_template = wave_p[10:-10]

@@ -12,6 +12,75 @@ from scipy.interpolate import interp1d
 import astropy.constants as const
 from numpy.polynomial.polynomial import Polynomial, polyfit
 
+
+def change_flux_restframe(
+    waves,
+    fluxes,
+    sigmas,
+    rv_bcors,
+    interpolation_method="linear",):
+    """Regrids respective datacubes of fluxes and flux uncertainties to a
+    different velocity frame (e.g. the stellar rest frame).
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Wavelength scale of shape [n_spec, n_px].
+
+    fluxes, sigmas: 3D float array
+        Flux and flux uncertainty arrays of shape [n_phase, n_spec, n_px].
+
+    rv_bcors: 1D float array
+        Array of velocity shifts in km/s of shape [n_phase].
+
+    interpolation_method: str, default: "linear"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+    
+    Returns
+    -------
+    fluxes_new, sigmas_new: 3D float array
+        Regridded flux and flux uncertainty arrays of shape
+        [n_phase, n_spec, n_px].
+    """
+    # Grab dimensions for convenience
+    n_phase, n_spec, n_px = fluxes.shape
+
+    # Intialise output vectors
+    fluxes_new = fluxes.copy()
+    sigmas_new = sigmas.copy()
+
+    for phase_i in range(n_phase):
+        desc = "Regridding phase {}/{}".format(phase_i+1, n_phase)
+        for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
+            # Initialise interpolators
+            flux_interp = interp1d(
+                x=waves[spec_i],
+                y=fluxes[phase_i, spec_i],
+                kind=interpolation_method,
+                bounds_error=False,
+                fill_value=np.nan,)
+            
+            sigma_interp = interp1d(
+                x=waves[spec_i],
+                y=sigmas[phase_i, spec_i],
+                kind=interpolation_method,
+                bounds_error=False,
+                fill_value=np.nan,)
+    
+            # Doppler shift for new wavelength scale
+            rv_bcor = rv_bcors[phase_i]
+            wave_rv_shift = \
+                waves[spec_i] * (1-(-rv_bcor)/(const.c.si.value/1000))
+
+            # Interpolate to wavelength scale
+            fluxes_new[phase_i, spec_i] = flux_interp(wave_rv_shift)
+            sigmas_new[phase_i, spec_i] = sigma_interp(wave_rv_shift)
+
+    return fluxes_new, sigmas_new
+
+
 def clean_and_compute_initial_resid(
     spectra,
     e_spectra,

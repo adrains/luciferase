@@ -10,6 +10,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.ticker as plticker
 from tqdm import tqdm
 from astropy.stats import sigma_clip
+from matplotlib.patches import Rectangle
 
 # Ensure the plotting folder exists to save to
 here_path = os.path.dirname(__file__)
@@ -1242,3 +1243,95 @@ def plot_combined_kp_vsys_map_as_snr(
     else:
         plt.savefig("plots/kp_vsys_snr_{}.pdf".format(plot_label))
         plt.savefig("plots/kp_vsys_snr_{}.png".format(plot_label), dpi=300)
+
+
+def visualise_templates(
+    waves,
+    sr_settings,
+    syst_info, 
+    species_to_cc=["H2O", "CO", "NH3", "H2S"],
+    y_min=0.99,
+    y_max=1.005,
+    figsize=(20,6)):
+    """Plots comparison of continuum normalised *single species* exoplanet
+    atmosphere template spectra with overlaid observed wavelength scale.
+
+    TODO: due to the way that tu.prepare_cc_template is currently implemented,
+    we have to repeatedly update/restore the contents of ss
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Observed wavelength scale of shape [n_spec, n_px]
+
+    sr_settings: YAMLSettings Object
+        SYSREM settings object.
+
+    syst_info: pandas DataFrame
+        Dataframe containing information about the star+planet system.
+
+    species_to_cc: str list, default: ["H2O", "CO", "NH3", "H2S"]
+        List of molecular species.
+        
+    y_min: float, default: 0.99
+        Minimum limit on y axis.
+
+    y_max: float, default: 1.005
+        Maximum limit on y axis.
+
+    figsize: float tuple, default: (20,6)
+        Figure size.
+    """
+    plt.close("all")
+    fig, axis = plt.subplots(figsize=figsize,)
+
+    all_templates = []
+
+    # Loop over all species, continuum normalise, smooth, and plot.
+    for species in species_to_cc:
+        # Update species list, but keep a record of old value to restore later
+        old_species = sr_settings.species_to_cc
+        sr_settings.species_to_cc = [species]
+
+        wave_template, spectrum_template = tu.prepare_cc_template(
+            cc_settings=sr_settings,
+            syst_info=syst_info,
+            templ_wl_nm_bounds=(19000,25000),
+            continuum_resolving_power=300,)
+        
+        # Restore old list of species
+        sr_settings.species_to_cc = old_species
+        
+        all_templates.append(all_templates)
+
+        axis.plot(
+            wave_template,
+            spectrum_template,
+            linewidth=0.5,
+            label=species,
+            alpha=0.5)
+   
+   # Make lines in legend thicker for visibility
+    leg = plt.legend(ncol=len(species_to_cc))
+
+    for legobj in leg.legendHandles:
+        legobj.set_linewidth(1.5)
+
+    # Now plot rectangular patches corresponding to CRIRES wavelength scale
+    delta_y = y_max - y_min
+
+    for spec_i in range(len(waves)):
+        w_min = waves[spec_i].min()
+        w_max = waves[spec_i].max()
+        delta_wave = w_max - w_min
+        rect = Rectangle(
+            xy=(w_min, y_min),
+            width=delta_wave,
+            height=delta_y,
+            facecolor='grey',
+            alpha=0.1)
+        axis.add_patch(rect)
+
+    axis.set_xlim(wave_template[0], wave_template[-1])
+    axis.set_ylim(y_min, y_max)
+    plt.tight_layout()

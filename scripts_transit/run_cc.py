@@ -51,6 +51,7 @@ else:
     print("\tPlanet template\t\t{}".format(ss.planet_fits))
     print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_cc)))
 print("\tSplit A/B sequences\t{}".format(ss.split_AB_sequences))
+print("\tRun in stellar RV frame\t{}".format(ss.run_sysrem_in_stellar_frame))
 print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
 print("\tCC RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.cc_rv_lims))
 print("\tKp RV step\t\t{:0.2f} km/s".format(ss.Kp_step))
@@ -116,9 +117,25 @@ for transit_i in range(n_transit):
         print("Cross correlating...")
         # Grab the barycentric velocities. We'll take these into account when
         # doing the cross correlation such that we're cross correlating around
-        # the *star* rather than around the telescope frame of reference.
-        rv_bcors =  \
-            -1*transit_info_list[transit_i]["bcor"].values[seq_mask] + rv_star
+        # the *star* rather than around the telescope frame of reference. If
+        # we're running in the standard telluric frame, we just take these as
+        # is. However, if running in the stellar frame we need to account for
+        # the fact the data has already been partially shifted.
+        bcors = transit_info_list[transit_i]["bcor"].values[seq_mask]
+
+        # There might be unexplained RV offsets from night-to-night, which are
+        # accounted for here.
+        rv_offset = ss.nightly_rv_offsets[transit_i]
+
+        # If SYSREM was run in the stellar frame, we've already corrected for 
+        # the *change* in bcor, but not bcor itself or the stellar velocity.
+        if ss.run_sysrem_in_stellar_frame:
+            rv_bcors = np.full_like(bcors, -1*bcors[0]) + rv_star + rv_offset
+
+        # Otherwise we ran SYSREM in the telluric frame and there has been no
+        # doppler shifting yet, so we need to do it all here.
+        else: 
+            rv_bcors = -1*bcors + rv_star + rv_offset
 
         cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
             waves=waves,

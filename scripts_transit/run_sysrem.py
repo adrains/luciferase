@@ -46,7 +46,7 @@ telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
 for transit_i in range(ss.n_transit):
     # Grab dimensions of flux datacube
     (n_phase, n_spec, n_px) = fluxes_list[transit_i].shape
-
+    
     #--------------------------------------------------------------------------
     # Create telluric mask
     #--------------------------------------------------------------------------
@@ -87,6 +87,31 @@ for transit_i in range(ss.n_transit):
         # Normalise fluxes
         fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
         sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
+
+    #--------------------------------------------------------------------------
+    # [Optional] Regrid the data to be in the stellar rest frame
+    #--------------------------------------------------------------------------
+    if ss.run_sysrem_in_stellar_frame:
+        print("Regridding data to stellar rest frame.")
+        # To regrid to the stellar frame, we opt to do the minimal possible
+        # interpolation here in that we just interpolate to the RV frame of the
+        # first exposure and shift every subsequent exposure by delta bcor. We
+        # then leave doing the full interpolation to the cross-correlation
+        # step.
+        bcors = transit_info_list[transit_i]["bcor"].values
+        bcors -= bcors[0]
+        rv_bcors =  -1*bcors
+
+        # Shift spectra into stellar frame
+        fluxes_norm, sigmas_norm = sr.change_flux_restframe(
+            waves=waves,
+            fluxes=fluxes_norm,
+            sigmas=sigmas_norm,
+            rv_bcors=rv_bcors,
+            interpolation_method="linear",)
+
+    else:
+        print("Leaving data in telluric rest frame.")
 
     #--------------------------------------------------------------------------
     # [Optional] Rescale A/B sequence amplitudes
@@ -172,14 +197,8 @@ for transit_i in range(ss.n_transit):
         # Now that we've cleaned the full sequence, select subsequences as req
         resid_init = resid_init_full.copy()
 
-        # Broadcast sequence mask to all dimensions
-        #seq_mask_3D = np.broadcast_to(
-        #    seq_mask[:,None,None], (n_phase, n_spec, n_px))
-
         # Now set all values from the opposite sequence to nan
         resid_init[~seq_mask,:,:] = np.nan
-
-        #n_phase_seq = np.sum(seq_mask)
 
         #----------------------------------------------------------------------
         # [Optional] Mask out strong tellurics
@@ -245,9 +264,6 @@ for transit_i in range(ss.n_transit):
 
             resid_all = resid.reshape(
                 (ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
-
-        #seq_mask_4D = np.broadcast_to(
-        #    seq_mask_3D[None,:,:,:], (ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
 
         # Save residuals
         tu.save_sysrem_residuals_to_fits(
