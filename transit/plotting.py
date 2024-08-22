@@ -1335,3 +1335,84 @@ def visualise_templates(
     axis.set_xlim(wave_template[0], wave_template[-1])
     axis.set_ylim(y_min, y_max)
     plt.tight_layout()
+
+
+def plot_autocorrelation(
+    wave_obs,
+    autocorr_rvs,
+    autocorr_2D,
+    autocorr_comb,
+    plot_label,
+    plot_title,
+    figsize=(18, 4),):
+    """For each spectral segment and given an appropriate systemic velocity, 
+    plots the autocorrelation of the exoplanet atmosphere spectral template
+    over a range of RVs. The goal is to check for aliases away from 0 km/s that
+    could manifest as false positives in the Kp-Vsys map space.
+
+    Takes as input the output of sysrem.compute_template_autocorrelation.
+
+    Parameters
+    ----------
+    wave_obs: 2D float array
+        Observed wavelength vector of shape [n_spec, n_px]
+
+    autocorr_rvs: 1D float array
+        Wavelengths over which the autocorrelation was computed, [n_rvs].
+    
+    autocorr_2D: 2D float array
+        Autocorrelation for each spectral segment of shape [n_spec, n_rvs].
+
+    autocorr_comb: 2D float array
+        Autocorrelation combining all spectral segments of shape [n_rvs].
+
+    plot_label: str
+        Label to be added to saved plot filename.
+
+    plot_title: str
+        Title for the plot.
+    
+    figsize: float tuple, default: (18, 4)
+        Size of the figure.
+    """
+    (n_spec, n_px) = wave_obs.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(1,n_spec+1, figsize=figsize)
+
+    # Plot autocorrelation for each spectral segment
+    for spec_i in range(n_spec):
+        axes[spec_i].plot(autocorr_rvs, autocorr_2D[spec_i], linewidth=0.5)
+        axes[spec_i].vlines(
+            x=0,
+            ymin=np.min(autocorr_2D[spec_i]),
+            ymax=1, linestyles="dashed",
+            linewidth=0.5, color="k")
+        axes[spec_i].set_title("{:0.0f} nm".format(np.mean(wave_obs[spec_i])))
+        axes[spec_i].set_xlabel("RV (km/s)")
+        axes[spec_i].set_yticks([])
+        axes[spec_i].xaxis.set_major_locator(plticker.MultipleLocator(base=20))
+        axes[spec_i].xaxis.set_minor_locator(plticker.MultipleLocator(base=10))
+
+    # And plot the autocorrelation after combining all spectral segments
+    axes[-1].plot(autocorr_rvs, autocorr_comb, linewidth=0.5)
+    axes[-1].vlines(
+        x=0,
+        ymin=np.min(autocorr_comb),
+        ymax=1,
+        linestyles="dashed",
+        linewidth=0.5,
+        color="k")
+    axes[-1].set_yticks([])
+    axes[-1].set_xlabel("RV (km/s)")
+    axes[-1].set_title("Combined")
+    axes[-1].xaxis.set_major_locator(plticker.MultipleLocator(base=20))
+    axes[-1].xaxis.set_minor_locator(plticker.MultipleLocator(base=10))
+
+    # Other plot settings + save
+    fig.suptitle(plot_title, fontsize="medium")
+
+    plt.tight_layout()
+
+    plt.savefig("plots/autocorr_{}.pdf".format(plot_label))
+    plt.savefig("plots/autocorr_{}.png".format(plot_label), dpi=300)

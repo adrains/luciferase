@@ -946,3 +946,122 @@ def combine_kp_vsys_map(Kp_vsys_map_list):
     map_combined = np.sum(map_stacked**2, axis=0)**0.5
 
     return map_combined
+
+
+def compute_template_autocorrelation(
+    wave_obs,
+    wave_template,
+    flux_template,
+    rv_syst,
+    rv_lims=(-40,40),
+    rv_step=1.0,
+    interpolation_method="cubic",):
+    """Compute the autocorrelation of a template spectrum across different
+    wavelength bands given a systemic RV. Used to determine if there are CC
+    peaks in addition to the central one at 0 km/s for use when investigating
+    false positives in Kp-Vsys space.
+
+    Parameters
+    ----------
+    wave_obs: 2D float array
+        Observed wavelength vector of shape [n_spec, n_px]
+
+    wave_template, flux_template: 1D float array
+        Template wavelength and flux vectors.
+
+    rv_syst: float
+        Systemic RV in km/s to interpolate the reference to, and do the cross-
+        correlation around.
+
+    rv_lims: float tuple, default: (-40:40)
+        RV limits of the cross-correlation in km/s.
+
+    rv_step: float, default: 1.0
+        RV step size when cross-correlating in km/s.
+
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+
+    Returns
+    -------
+    autocorr_rvs: 1D float array
+        Wavelengths over which the autocorrelation was computed, [n_rvs].
+    
+    autocorr_2D: 2D float array
+        Autocorrelation for each spectral segment of shape [n_spec, n_rvs].
+
+    autocorr_comb: 2D float array
+        Autocorrelation combining all spectral segments of shape [n_rvs].
+    """
+    # Grab shape for convenience
+    (n_spec, n_px) = wave_obs.shape
+
+    # Create interpolator for the template spectrum
+    temp_interp = interp1d(
+        x=wave_template,
+        y=flux_template,
+        kind=interpolation_method,
+        bounds_error=False,
+        fill_value=np.nan,)
+
+    # Setup RV vector to interpolate over
+    autocorr_rvs = np.arange(rv_lims[0], rv_lims[1]+rv_step, rv_step)
+    n_rvs = len(autocorr_rvs)
+
+    # Initialise output autocorrelation vector
+    autocorr_2D = np.full((n_spec, n_rvs), np.nan)
+    
+    # And initialisation storage for reference and interpolated fluxes for
+    # later computing the combined autocorrelation.
+    flux_ref_all = np.full_like(wave_obs, np.nan)
+    flux_rv_shift_all = np.full((n_rvs, n_spec, n_px), np.nan)
+
+    #--------------------------------------------------------------------------
+    # Per-spectral segment autocorrelation
+    #--------------------------------------------------------------------------
+    # Loop over all spectral segments
+    for spec_i in range(n_spec):
+        # Interpolate 'reference' template spectrum to system velocity
+        wave_ref = wave_obs[spec_i] * (1-(rv_syst)/(const.c.si.value/1000))
+        flux_ref = temp_interp(wave_ref)
+
+        # Store
+        flux_ref_all[spec_i] = flux_ref
+
+        # Cross correlate for all steps
+        for rv_i, rv in enumerate(autocorr_rvs):
+            wave_rv_shift = \
+                wave_obs[spec_i] * (1-(rv+rv_syst)/(const.c.si.value/1000))
+
+            # Interpolate to wavelength scale
+            flux_rv_shift = temp_interp(wave_rv_shift)
+
+            flux_rv_shift_all[rv_i, spec_i] = flux_rv_shift
+
+            # Calculate cross-correlation, sum along pixel dimension
+            cc_num = np.nansum(flux_ref * flux_rv_shift)
+            cc_den = np.sqrt(
+                np.nansum(flux_ref**2) * np.nansum(flux_rv_shift**2))
+            autocorr_2D[spec_i, rv_i] = cc_num / cc_den
+
+    #--------------------------------------------------------------------------
+    # Combined segment autocorrelation
+    #--------------------------------------------------------------------------
+    # Concatenate spec and px dimensions, then broadcast to n_rvs dimension
+    flux_ref_all_1D = np.reshape(flux_ref_all, (n_spec*n_px))
+    flux_ref_all_2D = \
+        np.broadcast_to(flux_ref_all_1D[None,:], (n_rvs, n_spec*n_px))
+    
+    flux_rv_shift_all_2D = np.reshape(flux_rv_shift_all, (n_rvs, n_spec*n_px))
+
+    # Calculate cross-correlation, sum along spectral/pixel dimension
+    cc_num = np.nansum(flux_ref_all_2D * flux_rv_shift_all_2D, axis=1)
+    cc_den = np.sqrt(
+        np.nansum(flux_ref_all_2D**2, axis=1)
+        * np.nansum(flux_rv_shift_all_2D**2, axis=1))
+    autocorr_comb = cc_num / cc_den
+
+    return autocorr_rvs, autocorr_2D, autocorr_comb
+

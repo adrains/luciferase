@@ -223,6 +223,27 @@ for transit_i in range(n_transit):
             plot_label="{}_n{}_{}_{}".format(
                 ss.label, transit_i+1, seq, species_label),)
 
+    # For this night do an autocorrelation with our template spectrum and plot
+    # the results. Our objective here is to look for aliases/other cross-
+    # correlation peaks that could manifest as false positives in the Kp-Vsys
+    # map space.
+    ac_rvs, ac_2D, ac_comb = sr.compute_template_autocorrelation(
+        wave_obs=waves,
+        wave_template=wave_template,
+        flux_template=spectrum_template,
+        rv_syst=np.median(rv_bcors),
+        rv_lims=ss.kp_vsys_x_range,
+        rv_step=ss.Kp_step,)
+    
+    tplt.plot_autocorrelation(
+        wave_obs=waves,
+        autocorr_rvs=ac_rvs,
+        autocorr_2D=ac_2D,
+        autocorr_comb=ac_comb,
+        plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species_label),
+        plot_title="{}, Night {}: {}".format(
+            ss.label, transit_i+1, species_label))
+
 Kp_vsys_map_per_spec_all = np.array(Kp_vsys_map_per_spec_all)
 Kp_vsys_map_combined_all = np.array(Kp_vsys_map_combined_all)
 
