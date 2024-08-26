@@ -112,6 +112,9 @@ for transit_i in range(n_transit):
         print("\nRunning on night {}/{}, seq {}".format(
             transit_i+1, n_transit, seq))
 
+        # Grab transit_info for this sequence + transit
+        transit_info_seq = transit_info_list[transit_i][seq_mask]
+
         # Import SYSREM residuals
         resid_all = tu.load_sysrem_residuals_from_fits(
             ss.save_path, ss.label, ss.n_transit, transit_i, seq)
@@ -125,7 +128,7 @@ for transit_i in range(n_transit):
             resid_all = resid_all[:,:,ss.selected_segments,:]
 
         # Grab planet RVs for overplotting on CC plot
-        planet_rvs = transit_info_list[transit_i]["delta"].values[seq_mask]
+        planet_rvs = transit_info_seq["delta"].values
         planet_rvs = planet_rvs * const.c.cgs.to(u.km/u.s).value
 
         #----------------------------------------------------------------------
@@ -138,7 +141,7 @@ for transit_i in range(n_transit):
         # we're running in the standard telluric frame, we just take these as
         # is. However, if running in the stellar frame we need to account for
         # the fact the data has already been partially shifted.
-        bcors = transit_info_list[transit_i]["bcor"].values[seq_mask]
+        bcors = transit_info_seq["bcor"].values
 
         # There might be unexplained RV offsets from night-to-night, which are
         # accounted for here.
@@ -183,13 +186,19 @@ for transit_i in range(n_transit):
         #----------------------------------------------------------------------
         print("Computing Kp-Vsys map...")
 
+        # When creating Kp-Vsys maps, we don't want to combine the phases where
+        # the planet is not transiting, so we need to mask appropriately.
+        # TODO: run all this twice, once using out-of-transit phases only, and
+        # once using in-transit phases only for comparison purposes.
+        in_transit = transit_info_seq["is_in_transit_mid"].values
+
         # Create Kp-Vsys map *per spectral segment*
         cc_rvs_subset, Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
             sr.compute_Kp_vsys_map(
                 cc_rvs=cc_rvs,
-                ccv_per_spec=ccv_per_spec,
-                ccv_combined=ccv_combined,
-                transit_info=transit_info_list[transit_i],
+                ccv_per_spec=ccv_per_spec[:,in_transit],
+                ccv_combined=ccv_combined[:,in_transit],
+                transit_info=transit_info_seq[in_transit],
                 Kp_lims=ss.Kp_lims,
                 Kp_step=ss.Kp_step,
                 vsys_lims=ss.kp_vsys_x_range,)
