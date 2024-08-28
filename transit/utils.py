@@ -2053,7 +2053,8 @@ def save_sysrem_residuals_to_fits(
     n_transit,
     sysrem_resid,
     transit_i,
-    sequence,):
+    sequence,
+    rv_frame,):
     """Function to save a datacube of sysrem residuals to a fits HDU. The
     residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px), with the
     transit/night number in the extension name.
@@ -2080,9 +2081,13 @@ def save_sysrem_residuals_to_fits(
     sequence: str
         Used to note whether the saved residuals are from separate A ('A') or B
         ('B') nodding sequences, or are interleaved ('AB').
+
+    rv_frame: str
+        RV frame that SYSREM was run in, either 'telluric' or 'stellar'.
     """
     # HDU info
-    ext_name = "SYSREM_RESID_{:0.0f}_{}".format(transit_i, sequence)
+    ext_name = "SYSREM_RESID_{:0.0f}_{}_{}".format(
+        transit_i, sequence, rv_frame)
     ext_desc = "Residuals after running SYSREM."
 
     # Load in the fits file
@@ -2108,7 +2113,8 @@ def load_sysrem_residuals_from_fits(
     label,
     n_transit,
     transit_i,
-    sequence,):
+    sequence,
+    rv_frame,):
     """Function to load a datacube of sysrem residuals from a fits HDU. The
     residuals will have shape (n_sysrem_iter, n_phase, n_spec, n_px), with the
     transit/night number in the extension name.
@@ -2131,6 +2137,9 @@ def load_sysrem_residuals_from_fits(
         Used to note whether the saved residuals are from separate A ('A') or B
         ('B') nodding sequences, or are interleaved ('AB').
 
+    rv_frame: str
+        RV frame that SYSREM was run in, either 'telluric' or 'stellar'.
+        
     Returns
     -------
     sysrem_resid: 4D or 5D float array
@@ -2142,7 +2151,8 @@ def load_sysrem_residuals_from_fits(
     fits_file = os.path.join(
         fits_load_dir, "transit_data_{}_n{}.fits".format(label, n_transit))
 
-    ext_name = "SYSREM_RESID_{:0.0f}_{}".format(transit_i, sequence)
+    ext_name = "SYSREM_RESID_{:0.0f}_{}_{}".format(
+        transit_i, sequence, rv_frame)
 
     # Open the fits file and grab the data
     with fits.open(fits_file, mode="readonly") as fits_file:

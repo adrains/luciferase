@@ -80,8 +80,13 @@ Kp_vsys_map_combined_all = []
 
 rv_star = syst_info.loc["rv_star", "value"]
 
+rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
+
 species_label = "_".join(ss.species_to_cc)
 species_list = ", ".join(ss.species_to_cc)
+
+# Setup plotting subfolder
+plot_folder = "plots/{}_{}/".format(ss.label, species_label)
 
 # This holds the combined map for each seq/night, plus the final combined map
 combined_maps = []
@@ -117,7 +122,7 @@ for transit_i in range(n_transit):
 
         # Import SYSREM residuals
         resid_all = tu.load_sysrem_residuals_from_fits(
-            ss.save_path, ss.label, ss.n_transit, transit_i, seq)
+            ss.save_path, ss.label, ss.n_transit, transit_i, seq, rv_frame,)
 
         n_sysrem_iter = resid_all.shape[0]
         
@@ -179,7 +184,8 @@ for transit_i in range(n_transit):
             mean_spec_lambdas=np.mean(waves,axis=1),
             planet_rvs=planet_rvs,
             plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species_label),)
+                ss.label, transit_i+1, seq, species_label),
+            plot_folder=plot_folder,)
 
         #----------------------------------------------------------------------
         # Kp-Vsys map
@@ -216,7 +222,8 @@ for transit_i in range(n_transit):
             Kp_vsys_map_combined=Kp_vsys_map_combined,
             mean_spec_lambdas=np.mean(waves,axis=1),
             plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species_label),)
+                ss.label, transit_i+1, seq, species_label),
+            plot_folder=plot_folder,)
         
         # Store so we can plot all the combined maps at the end
         map_title = "Night #{} ({})".format(transit_i+1, seq)
@@ -230,7 +237,8 @@ for transit_i in range(n_transit):
             plot_title=map_title,
             plot_suptitle=species_list,
             plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species_label),)
+                ss.label, transit_i+1, seq, species_label),
+            plot_folder=plot_folder,)
 
     # For this night do an autocorrelation with our template spectrum and plot
     # the results. Our objective here is to look for aliases/other cross-
@@ -251,7 +259,8 @@ for transit_i in range(n_transit):
         autocorr_comb=ac_comb,
         plot_label="{}_n{}_{}".format(ss.label, transit_i+1, species_label),
         plot_title="{}, Night {}: {}".format(
-            ss.label, transit_i+1, species_label))
+            ss.label, transit_i+1, species_label),
+        plot_folder=plot_folder,)
 
 Kp_vsys_map_per_spec_all = np.array(Kp_vsys_map_per_spec_all)
 Kp_vsys_map_combined_all = np.array(Kp_vsys_map_combined_all)
@@ -305,7 +314,8 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
         Kp_vsys_map_per_spec=map_per_spec_all_nights,
         Kp_vsys_map_combined=map_combined_all_nights,
         mean_spec_lambdas=np.mean(waves,axis=1),
-        plot_label=label,)
+        plot_label=label,
+        plot_folder=plot_folder,)
 
     # Combined Kp-Vsys Map after merging all spectral segments
     tplt.plot_combined_kp_vsys_map_as_snr(
@@ -314,7 +324,8 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
         Kp_vsys_maps=map_combined_all_nights,
         plot_title=title,
         plot_suptitle="{}: {}".format(ss.label, species_list),
-        plot_label=label,)
+        plot_label=label,
+        plot_folder=plot_folder,)
     
 # Make a plot of all the sequences/nights together
 combined_maps = np.stack(combined_maps)
@@ -324,7 +335,8 @@ tplt.plot_combined_kp_vsys_map_as_snr(
     Kp_vsys_maps=combined_maps,
     plot_title=combined_map_titles,
     plot_suptitle="{}: {}".format(ss.label, species_list),
-    plot_label="{}_all_seq_{}".format(ss.label, species_label),)
+    plot_label="{}_all_seq_{}".format(ss.label, species_label),
+    plot_folder=plot_folder,)
 
 #------------------------------------------------------------------------------
 # Dump arrays to disk

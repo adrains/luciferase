@@ -266,13 +266,15 @@ for transit_i in range(ss.n_transit):
                 (ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
 
         # Save residuals
+        rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
         tu.save_sysrem_residuals_to_fits(
             fits_load_dir=ss.save_path,
             label=ss.label,
             n_transit=ss.n_transit,
             sysrem_resid=resid_all[:,seq_mask],    # Only save correct seq
             transit_i=transit_i,
-            sequence=seq)
+            sequence=seq,
+            rv_frame=rv_frame,)
 
         # Plotting
         plot_label = "n{}_{}_{}".format(transit_i, seq, ss.label)

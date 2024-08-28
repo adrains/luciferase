@@ -553,7 +553,8 @@ def plot_sysrem_residuals(
     sigma_upper=5,
     sigma_lower=5,
     max_iterations=5,
-    plot_label="",):
+    plot_label="",
+    plot_folder="plots/",):
     """Function to plot a grid of residuals as output from SYSREM. The grid has
     n_rows = n_sysrem_iter, and n_cols = n_spec.
 
@@ -568,6 +569,9 @@ def plot_sysrem_residuals(
 
     fig_size: float array, default: (18,6)
         Shape of the figure.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
     """
     resid = resid.copy()
 
@@ -652,12 +656,18 @@ def plot_sysrem_residuals(
             #cbar.ax.set_yticklabels(ticks_rescaled)
             #cbar.set_label("Mean Wavelength of Spectral Segment")
     
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
     if plot_label == "":
-        plt.savefig("plots/sysrem_resid.pdf")
-        plt.savefig("plots/sysrem_resid.png", dpi=300)
+        plot_fn = os.path.join(plot_folder, "sysrem_resid")
     else:
-        plt.savefig("plots/sysrem_resid_{}.pdf".format(plot_label))
-        plt.savefig("plots/sysrem_resid_{}.png".format(plot_label), dpi=300)
+        plot_fn = os.path.join(
+            plot_folder, "sysrem_resid_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
 
 
 def plot_sysrem_cc_1D(
@@ -733,7 +743,8 @@ def plot_sysrem_cc_2D(
     mean_spec_lambdas=None,
     planet_rvs=None,
     fig_size=(18, 6),
-    plot_label="",):
+    plot_label="",
+    plot_folder="plots/",):
     """Function to plot a 2D plot of the values obtained by cross correlating
     against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
@@ -764,6 +775,9 @@ def plot_sysrem_cc_2D(
 
     plot_label: str, default: ""
         Unique identifier label to add to plot filename.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
     """
     # If we've been given a set of combined cross-correlation values, 
     # concatenate these to the end of our array so they can be plotted on their
@@ -862,12 +876,18 @@ def plot_sysrem_cc_2D(
             axis.spines['left'].set_linewidth(2)
             axis.spines['right'].set_linewidth(2)
 
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
     if plot_label == "":
-        plt.savefig("plots/crosscorr_2D.pdf")
-        plt.savefig("plots/crosscorr_2D.png", dpi=300)
+        plot_fn = os.path.join(plot_folder, "crosscorr_2D")
     else:
-        plt.savefig("plots/crosscorr_2D_{}.pdf".format(plot_label))
-        plt.savefig("plots/crosscorr_2D_{}.png".format(plot_label), dpi=300)
+        plot_fn = os.path.join(
+            plot_folder, "crosscorr_2D_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
 
 
 def plot_kp_vsys_map(
@@ -877,7 +897,8 @@ def plot_kp_vsys_map(
     Kp_vsys_map_combined=None,
     mean_spec_lambdas=None,
     fig_size=(18, 6),
-    plot_label="",):
+    plot_label="",
+    plot_folder="plots/",):
     """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
     correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
@@ -908,6 +929,9 @@ def plot_kp_vsys_map(
 
     plot_label: str, default: ""
         Unique identifier label to add to plot filename.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
     """
     # If we've been given a set of combined Kp-Vsys map, concatenate these to
     # the end of our array so they can be plotted on their own panel.
@@ -997,12 +1021,18 @@ def plot_kp_vsys_map(
             axis.spines['left'].set_linewidth(2)
             axis.spines['right'].set_linewidth(2)
 
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
     if plot_label == "":
-        plt.savefig("plots/kp_vsys_2D.pdf")
-        plt.savefig("plots/kp_vsys_2D.png", dpi=300)
+        plot_fn = os.path.join(plot_folder, "kp_vsys_2D")
     else:
-        plt.savefig("plots/kp_vsys_2D_{}.pdf".format(plot_label))
-        plt.savefig("plots/kp_vsys_2D_{}.png".format(plot_label), dpi=300)
+        plot_fn = os.path.join(
+            plot_folder, "kp_vsys_2D_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
 
 
 def plot_regrid_diagnostics_rv(rvs_all, wave_adopt, detectors,):
@@ -1092,7 +1122,8 @@ def plot_combined_kp_vsys_map_as_snr(
     plot_label="",
     px_x_noise_lims=150,
     plot_noise_box_bounds=False,
-    tick_spacing=1.0,):
+    tick_spacing=1.0,
+    plot_folder="plots/",):
     """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
     correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = n_maps (e.g. night 1, night 2). By 2D it is meant that the 
@@ -1129,7 +1160,10 @@ def plot_combined_kp_vsys_map_as_snr(
         [px_x_noise_lims:-px_x_noise_lims] in x when computing the noise)
 
     plot_noise_box_bounds: boolean, default: False
-        Whether to plot red diagnostic lines corresponding to px_x_noise_lims. 
+        Whether to plot red diagnostic lines corresponding to px_x_noise_lims.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots. 
     """
     # Grab dimensions for convenience (this depends on how many maps we have)
     if len(Kp_vsys_maps.shape) == 3:
@@ -1237,12 +1271,18 @@ def plot_combined_kp_vsys_map_as_snr(
 
     fig.suptitle(plot_suptitle, fontsize="medium")
 
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
     if plot_label == "":
-        plt.savefig("plots/kp_vsys_snr.pdf")
-        plt.savefig("plots/kp_vsys_snr.png", dpi=300)
+        plot_fn = os.path.join(plot_folder, "kp_vsys_snr")
     else:
-        plt.savefig("plots/kp_vsys_snr_{}.pdf".format(plot_label))
-        plt.savefig("plots/kp_vsys_snr_{}.png".format(plot_label), dpi=300)
+        plot_fn = os.path.join(
+            plot_folder, "kp_vsys_snr_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
 
 
 def visualise_templates(
@@ -1344,7 +1384,8 @@ def plot_autocorrelation(
     autocorr_comb,
     plot_label,
     plot_title,
-    figsize=(18, 4),):
+    figsize=(18, 4),
+    plot_folder="plots/",):
     """For each spectral segment and given an appropriate systemic velocity, 
     plots the autocorrelation of the exoplanet atmosphere spectral template
     over a range of RVs. The goal is to check for aliases away from 0 km/s that
@@ -1374,6 +1415,9 @@ def plot_autocorrelation(
     
     figsize: float tuple, default: (18, 4)
         Size of the figure.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
     """
     (n_spec, n_px) = wave_obs.shape
 
@@ -1414,5 +1458,11 @@ def plot_autocorrelation(
 
     plt.tight_layout()
 
-    plt.savefig("plots/autocorr_{}.pdf".format(plot_label))
-    plt.savefig("plots/autocorr_{}.png".format(plot_label), dpi=300)
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    plot_fn = os.path.join(plot_folder, "autocorr_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
