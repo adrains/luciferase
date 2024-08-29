@@ -277,7 +277,13 @@ for transit_i in range(ss.n_transit):
             rv_frame=rv_frame,)
 
         # Plotting
-        plot_label = "n{}_{}_{}".format(transit_i, seq, ss.label)
+        plot_title = "Night {} ({}): {} [{}]".format(
+            transit_i+1, seq, ss.label, rv_frame)
+        plot_label = "{}_n{}_{}_{}".format(
+            rv_frame, transit_i+1, seq, ss.label)
 
         tplt.plot_sysrem_residuals(
-            waves, resid_all[:,seq_mask], plot_label=plot_label,)
+            waves,
+            resid_all[:,seq_mask],
+            plot_label=plot_label,
+            plot_title=plot_title,)

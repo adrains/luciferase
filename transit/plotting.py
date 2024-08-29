@@ -554,7 +554,8 @@ def plot_sysrem_residuals(
     sigma_lower=5,
     max_iterations=5,
     plot_label="",
-    plot_folder="plots/",):
+    plot_folder="plots/",
+    plot_title="",):
     """Function to plot a grid of residuals as output from SYSREM. The grid has
     n_rows = n_sysrem_iter, and n_cols = n_spec.
 
@@ -570,8 +571,14 @@ def plot_sysrem_residuals(
     fig_size: float array, default: (18,6)
         Shape of the figure.
 
+    plot_label: str, default: ""
+        Filename label for plot, will be saved as sysrem_resid_<label>.pdf/png.
+
     plot_folder: str, default: "plots/"
         Folder to save plots to. By default just a subdirectory called plots.
+
+    plot_title: str, default: ""
+        Suptitle for the plot.
     """
     resid = resid.copy()
 
@@ -586,7 +593,7 @@ def plot_sysrem_residuals(
         figsize=fig_size,)
     
     plt.subplots_adjust(
-        left=0.05, bottom=0.05, right=0.95, top=0.95, wspace=0.1)
+        left=0.05, bottom=0.05, right=0.95, top=0.925, wspace=0.1)
 
     for sr_iter_i in range(n_sysrem_iter):
         desc = "Plotting SYSREM resid for iter #{}".format(sr_iter_i)
@@ -643,6 +650,12 @@ def plot_sysrem_residuals(
             else:
                 axis.set_yticks([])
             
+            # Only show titles on the top
+            if sr_iter_i == 0:
+                axis.set_title(
+                    label=r"${:0.0f}\,\mu$m".format(np.median(waves[spec_i])),
+                    fontsize="x-small")
+            
             # Show just one colour bar per iteration
             #ticks_norm = np.arange(0,1.25,0.25)
             #ticks_rescaled = (ticks_norm * (vmax-vmin) + vmin).astype(int)
@@ -656,6 +669,8 @@ def plot_sysrem_residuals(
             #cbar.ax.set_yticklabels(ticks_rescaled)
             #cbar.set_label("Mean Wavelength of Spectral Segment")
     
+    plt.suptitle(plot_title, fontsize="small")
+
     # Check save folder and save
     if not os.path.isdir(plot_folder):
         os.mkdir(plot_folder)
@@ -1120,9 +1135,9 @@ def plot_combined_kp_vsys_map_as_snr(
     plot_suptitle="",
     fig_size=(5, 10),
     plot_label="",
-    px_x_noise_lims=150,
+    kp_vsys_snr_rv_exclude=(-15,15),
     plot_noise_box_bounds=False,
-    tick_spacing=1.0,
+    tick_spacing=2.0,
     plot_folder="plots/",):
     """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
     correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
@@ -1155,9 +1170,8 @@ def plot_combined_kp_vsys_map_as_snr(
     plot_label: str, default: ""
         Unique identifier label to add to plot filename.
 
-    px_x_noise_lims: int, default: 150
-        X bounds outside of which we compute the noise level (i.e. we mask out
-        [px_x_noise_lims:-px_x_noise_lims] in x when computing the noise)
+    kp_vsys_snr_rv_exclude: int, default: (-15,15)
+        X bounds in km/s outside of which we compute the noise level.
 
     plot_noise_box_bounds: boolean, default: False
         Whether to plot red diagnostic lines corresponding to px_x_noise_lims.
@@ -1203,7 +1217,12 @@ def plot_combined_kp_vsys_map_as_snr(
             # computing the noise). We then also need to subtract the median 
             # value of the same region, which we can consider the 'background'.
             noise_map = Kp_vsys_maps[map_i, sr_iter_i].copy()
-            noise_map[:,px_x_noise_lims:-px_x_noise_lims] = np.nan
+
+            exclude_mask = np.logical_and(
+                cc_rvs > kp_vsys_snr_rv_exclude[0],
+                cc_rvs < kp_vsys_snr_rv_exclude[1])
+
+            noise_map[:,exclude_mask] = np.nan
             noise_std = np.nanstd(noise_map)
             noise_med = np.nanmedian(noise_map)
             snr = (Kp_vsys_maps[map_i, sr_iter_i] - noise_med) / noise_std
