@@ -8,7 +8,6 @@ import transit.utils as tu
 import transit.sysrem as sr
 import transit.plotting as tplt
 import luciferase.utils as lu
-from PyAstronomy.pyasl import instrBroadGaussFast
 
 #------------------------------------------------------------------------------
 # Setup
@@ -40,6 +39,9 @@ telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
     convert_to_nm=True,
     output_transmission=True,)
 
+(n_spec, n_px) = waves.shape
+telluric_trans_2D = telluric_trans.reshape(n_spec, n_px)
+
 #------------------------------------------------------------------------------
 # Main Operation
 #------------------------------------------------------------------------------
@@ -53,15 +55,14 @@ for transit_i in range(ss.n_transit):
     # We need this for masking out tellurics for a) determining median flux
     # values for spectral normalisation, and b) masking out strong tellurics
     # before running SYSREM.
-    telluric_mask_1D = telluric_trans < ss.telluric_trans_bad_px_threshold
-    telluric_mask_2D = telluric_mask_1D.reshape(n_spec, n_px)
-    telluric_mask_3D = np.tile(
-        telluric_mask_1D, n_phase).reshape(n_phase, n_spec, n_px)
+    telluric_mask_2D = telluric_trans_2D < ss.telluric_trans_bad_px_threshold
+    telluric_mask_3D = np.broadcast_to(
+        telluric_mask_2D[None,:,:], (n_phase, n_spec, n_px))
 
     #--------------------------------------------------------------------------
     # Import and prepare fluxes for this night
     #--------------------------------------------------------------------------
-    # Option 1) Load continuum normalised fluxes
+    # Option 1) Load *physically meaningfully* continuum normalised fluxes
     if ss.do_use_continuum_normalised_data:
         print("Using continuum normalised spectra.")
         fluxes_norm, sigmas_norm, _, _ = \
@@ -71,22 +72,23 @@ for transit_i in range(ss.n_transit):
                 n_transit=ss.n_transit,
                 transit_i=transit_i,)
 
-    # Option 2) Simply normalise each spectral segment by its median value
-    # *after* masking out strong tellurics when determining median values. We
-    # use our precalculated telluric mask to do this, ensuring a constistent 
-    # level for those tellurics considered 'strong'.
+    # Option 2) First do a median normalisation (masking out strong tellurics)
+    # then, optionally, do an additional continuum normalisation that either
+    # assumes there are only two continua (A and B) and one must be corrected 
+    # to the other, or that the continuum is time varying.
     else:
-        print("Using (+telluric masked) median normalised spectra.")
-        # Determine median fluxes of shape [n_phase, n_spec] after masking
-        # strong telluric lines
-        masked_fluxes = fluxes_list[transit_i].copy()
-        masked_fluxes[:,telluric_mask_2D] = np.nan
-        mf = np.nanmedian(masked_fluxes, axis=2)
-        mf_3D = np.broadcast_to(mf[:,:,None], (n_phase, n_spec, n_px))
-
-        # Normalise fluxes
-        fluxes_norm = fluxes_list[transit_i].copy() / mf_3D
-        sigmas_norm = sigmas_list[transit_i].copy() / mf_3D
+        print("Continuum normalising data.")
+        fluxes_norm, sigmas_norm = sr.continuum_normalise_datacube(
+            waves=waves,
+            fluxes=fluxes_list[transit_i],
+            sigmas=sigmas_list[transit_i],
+            telluric_trans=telluric_trans_2D,
+            nodding_pos=transit_info_list[transit_i]["nod_pos"].values,
+            telluric_trans_bad_px_threshold=ss.telluric_trans_bad_px_threshold,
+            continuum_correction_kind=ss.continuum_correction_kind,
+            continuum_ratio_smoothing_resolution=\
+                ss.continuum_corr_smoothing_resolution,
+            do_diagnostic_plotting=False,)
 
     #--------------------------------------------------------------------------
     # [Optional] Regrid the data to be in the stellar rest frame
@@ -114,53 +116,7 @@ for transit_i in range(ss.n_transit):
         print("Leaving data in telluric rest frame.")
 
     #--------------------------------------------------------------------------
-    # [Optional] Rescale A/B sequence amplitudes
-    #--------------------------------------------------------------------------
-    # There currently remains some residual inconsistencies between A/B spectra
-    # that manifest as wavelength dependent flux amplitude variations (as 
-    # opposed to wavelength scale issues). A temporary hack to fix this
-    # involves applying a correction based on the smoothed ratio between median
-    # A/B spectra within a given night, with the 'resolving power' of the
-    # smoothing given by ss.AB_ratio_smoothing_resolution, which should be set
-    # such than the R << 100,000 of our CRIRES spectra.
-    if ss.do_AB_sequence_amplitude_correction:
-        print("Running amplitude correction on A/B seq")
-        # Compute median A/B spectra in the phase dimension for [n_spec, n_px]
-        is_A = transit_info_list[transit_i]["nod_pos"].values == "A"
-        flux_A = np.nanmedian(fluxes_norm[is_A], axis=0)
-        flux_B = np.nanmedian(fluxes_norm[~is_A], axis=0)
-
-        # Calculate the flux ratio between these median A/B spectra
-        flux_ratio = flux_A / flux_B
-
-        # Set any nan values to 1.0
-        flux_ratio[np.isnan(flux_ratio)] = 1.0
-
-        # Also mask out any pixels with ratios 5%
-        px_to_mask = np.logical_or(flux_ratio > 1.05, flux_ratio < 0.95)
-        flux_ratio[px_to_mask] = 1.0
-
-        # Smooth this flux ratio
-        flux_ratio_smoothed = flux_ratio.copy()
-
-        for spec_i in range(n_spec):
-            flux_ratio_smoothed[spec_i] = instrBroadGaussFast(
-                wvl=waves[spec_i],
-                flux=flux_ratio[spec_i],
-                resolution=ss.AB_ratio_smoothing_resolution,
-                equid=True,
-                edgeHandling="firstlast",)
-            
-        # Scale B sequence by flux ratio
-        n_B = np.sum(~is_A)
-        flux_ratio_smoothed_3D = np.broadcast_to(
-            array=flux_ratio_smoothed[None,:,:],
-            shape=(n_B, n_spec, n_px),)
-        
-        fluxes_norm[~is_A] *= flux_ratio_smoothed
-
-    #--------------------------------------------------------------------------
-    # [Optional] Split of A/B sequences
+    # [Optional] Split A/B sequences
     #--------------------------------------------------------------------------
     # Split A/B frames into separate sequences
     if ss.split_AB_sequences:

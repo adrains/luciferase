@@ -27,7 +27,7 @@ label: "wasp107_np_corr"
 # nights (which is to say that this is not a relevant setting for simulations).
 # A positive velocity shifts the Kp-Vsys diagram to the right, and negative
 # to the left.
-nightly_rv_offsets: [0, -1]
+nightly_rv_offsets: [0, 0]
 
 #------------------------------------------------------------------------------
 # Template Settings
@@ -49,7 +49,7 @@ planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
 # Species: H2O, H2S, NH3, CO, PH3, SiO, CH4, CO2, C2H2, HCN
-species_to_cc: ["CO"] #, "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
+species_to_cc: ["H2O"]
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -76,14 +76,17 @@ do_use_continuum_normalised_data: False
 #    instrumental broadening, that is to say masking pixels with no 
 #    astrophysical information content.
 # 2) Masking out low SNR pixels.
-telluric_trans_bad_px_threshold: 0.2
+telluric_trans_bad_px_threshold: 0.25
 
-# Whether to apply a wavelength dependent amplitude correction to the A/B 
-# sequences in the form of the smoothed ratio between the median A/B sequences
-do_AB_sequence_amplitude_correction: True
+# Whether to apply a wavelength dependent continuum normalisation to our
+# spectra. This can either be 'AB' whereby we transform B spectra to have the
+# continuum of A spectra, or 'per_phase' where we assume that there is a *time
+# varying* continuum and correct each phase to a reference spectrum. Setting to
+# any other value will run with only a median normalisation.
+continuum_correction_kind: "per_phase"
 
-# Resolving power to smooth the above A/B correction to.
-AB_ratio_smoothing_resolution: 500
+# Spectral resolution to smooth the continuum normalisation to
+continuum_corr_smoothing_resolution: 1000
 
 #------------------------------------------------------------------------------
 # SYSREM Settings
@@ -138,7 +141,7 @@ cc_with_stellar: False
 # selected_segments. This is useful for for excluding orders which do not
 # meaningfully contribute to the CC, e.g. for CO which only has absorption
 # features in 6/18 segments of the CRIRES K2148 grating.
-do_mask_orders_for_analysis: True
+do_mask_orders_for_analysis: False
 selected_segments: [12,13,14,15,16,17]
 
 # Step size for the cross-correlation in km/s. Finer sampling might give a
@@ -146,7 +149,7 @@ selected_segments: [12,13,14,15,16,17]
 # values below the pixel velocity resolution of the instrument will be 
 # correlated so this shouldm't be a huge improvement. For CRIRES+ not 
 # recommended to sample < 0.5 km/s. 
-cc_rv_step: 1.0
+cc_rv_step: 1
 
 # Minimum and maximum extents of the cross correlation in km/s. Note that this
 # range should be larger than the actual central range you expect the planet to
@@ -158,13 +161,19 @@ cc_rv_lims: [-120,120]
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
 # Step size for the Kp-Vsys map in km/s. Same caveats as for cc_rv_step above.
-Kp_step: 1.0
+Kp_step: 1
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
-Kp_lims: [0,200]
+Kp_lims: [0,250]
 
 # This is the RV range of the x axis for our Kp-Vsys plots. This should be a
 # smaller range than cc_rv_lims, as the idea is we CC wider than we need, then
 # clip off the edges to a) remove edge effects, and b) focus on the region the
 # planet is actually in.
 kp_vsys_x_range: [-40,40]
+
+# We exclude RVs within these bounds when computing the noise for our Kp-Vsys
+# maps. This range should be set to exclude the points around Vsys = 0, and
+# should be sufficiently smaller than kp_vsys_x_range to allow a reasonable
+# region from which to compute noise statistics for.
+kp_vsys_snr_rv_exclude: [-15, 15]

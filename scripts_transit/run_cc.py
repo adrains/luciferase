@@ -39,6 +39,8 @@ wave_template, spectrum_template = tu.prepare_cc_template(
     templ_wl_nm_bounds=(16000,30000),
     continuum_resolving_power=300,)
 
+rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
+
 #------------------------------------------------------------------------------
 # Print summary
 #------------------------------------------------------------------------------
@@ -62,7 +64,7 @@ if ss.do_mask_orders_for_analysis:
 else:
     print("\tSpectral segments\tAll")
 print("\tSplit A/B sequences\t{}".format(ss.split_AB_sequences))
-print("\tRun in stellar RV frame\t{}".format(ss.run_sysrem_in_stellar_frame))
+print("\tRV frame\t\t{}".format(rv_frame))
 print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
 print("\tCC RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.cc_rv_lims))
 print("\tKp RV step\t\t{:0.2f} km/s".format(ss.Kp_step))
@@ -80,13 +82,11 @@ Kp_vsys_map_combined_all = []
 
 rv_star = syst_info.loc["rv_star", "value"]
 
-rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
-
 species_label = "_".join(ss.species_to_cc)
 species_list = ", ".join(ss.species_to_cc)
 
 # Setup plotting subfolder
-plot_folder = "plots/{}_{}/".format(ss.label, species_label)
+plot_folder = "plots/{}_{}_{}/".format(rv_frame, ss.label, species_label)
 
 # This holds the combined map for each seq/night, plus the final combined map
 combined_maps = []
@@ -238,6 +238,7 @@ for transit_i in range(n_transit):
             plot_suptitle=species_list,
             plot_label="{}_n{}_{}_{}".format(
                 ss.label, transit_i+1, seq, species_label),
+            kp_vsys_snr_rv_exclude=ss.kp_vsys_snr_rv_exclude,
             plot_folder=plot_folder,)
 
     # For this night do an autocorrelation with our template spectrum and plot
@@ -325,6 +326,7 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
         plot_title=title,
         plot_suptitle="{}: {}".format(ss.label, species_list),
         plot_label=label,
+        kp_vsys_snr_rv_exclude=ss.kp_vsys_snr_rv_exclude,
         plot_folder=plot_folder,)
     
 # Make a plot of all the sequences/nights together
@@ -334,8 +336,9 @@ tplt.plot_combined_kp_vsys_map_as_snr(
     Kp_steps=Kp_steps,
     Kp_vsys_maps=combined_maps,
     plot_title=combined_map_titles,
-    plot_suptitle="{}: {}".format(ss.label, species_list),
+    plot_suptitle="[{}] {}: {}".format(rv_frame, ss.label, species_list),
     plot_label="{}_all_seq_{}".format(ss.label, species_label),
+    kp_vsys_snr_rv_exclude=ss.kp_vsys_snr_rv_exclude,
     plot_folder=plot_folder,)
 
 #------------------------------------------------------------------------------

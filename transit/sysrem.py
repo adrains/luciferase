@@ -11,6 +11,8 @@ from tqdm import tqdm
 from scipy.interpolate import interp1d
 import astropy.constants as const
 from numpy.polynomial.polynomial import Polynomial, polyfit
+from PyAstronomy.pyasl import instrBroadGaussFast
+import matplotlib.pyplot as plt
 
 
 def change_flux_restframe(
@@ -79,6 +81,190 @@ def change_flux_restframe(
             sigmas_new[phase_i, spec_i] = sigma_interp(wave_rv_shift)
 
     return fluxes_new, sigmas_new
+
+
+def continuum_normalise_datacube(
+    waves,
+    fluxes,
+    sigmas,
+    telluric_trans,
+    nodding_pos,
+    telluric_trans_bad_px_threshold,
+    continuum_correction_kind,
+    continuum_ratio_smoothing_resolution,
+    do_diagnostic_plotting=False,):
+    """Applies a consistent continuum normalisation to a spectral datacube. We
+    can do one of the following:
+        a) median norm
+        b) median norm + B --> A frame continuum normalisation
+        c) median norm + per phase continuum normalisation vs ref spectrum
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Wavelength scale of shape [n_spec, n_px].
+
+    fluxes, sigmas: 3D float array
+        Unnormalised flux and sigma arrays of shape [n_phase, n_spec, n_px].
+
+    telluric_trans: 2D float array
+        Telluric transmission array of shape [n_spec, n_wave].
+
+    nodding_pos: str array
+        Array of nodding positions (either 'A' or 'B'), of length [n_phase].
+
+    continuum_correction_kind: str
+        Whether to apply a wavelength dependent continuum normalisation to our
+        spectra. This can either be 'AB' whereby we transform B spectra to have
+        the continuum of A spectra, or 'per_phase' where we assume that there
+        is a *time varying* continuum and correct each phase to a reference
+        spectrum. Setting to any other value will run with only a median
+        normalisation.
+
+    continuum_ratio_smoothing_resolution: int
+        Resolution to smooth the continuum normalisation to (e.g. R~500).
+
+    do_diagnostic_plotting: bool, default: False
+        Whether to plot diagnostic plot.
+    """
+    # Setup
+    (n_phase, n_spec, n_px) = fluxes.shape
+
+    is_A = nodding_pos == "A"
+
+    #--------------------------------------------------------------------------
+    # Median normalisation
+    #--------------------------------------------------------------------------
+    # Normalise each spectral segment by its median value *after* masking out
+    # strong tellurics when determining median values. We use our precalculated
+    # telluric mask to do this, ensuring a constistent level for those
+    # tellurics considered 'strong'.
+    telluric_mask_2D = telluric_trans < telluric_trans_bad_px_threshold
+
+    # Determine median fluxes of shape [n_phase, n_spec] after masking
+    # strong telluric lines
+    masked_fluxes = fluxes.copy()
+    masked_fluxes[:,telluric_mask_2D] = np.nan
+    med_fluxes = np.nanmedian(masked_fluxes, axis=2)
+    med_fluxes_3D = np.broadcast_to(
+        med_fluxes[:,:,None], (n_phase, n_spec, n_px))
+
+    # Normalise fluxes
+    fluxes_norm = fluxes.copy() / med_fluxes_3D
+    sigmas_norm = sigmas.copy() / med_fluxes_3D
+
+    if do_diagnostic_plotting:
+        fluxes_med_norm = fluxes_norm.copy()
+    
+    # Compute median A/B spectra in the phase dimension for [n_spec, n_px]
+    flux_A = np.nanmedian(fluxes_norm[is_A], axis=0)
+    flux_B = np.nanmedian(fluxes_norm[~is_A], axis=0)
+
+    #--------------------------------------------------------------------------
+    # Continuum adjustment option 1: B --> A normalisation
+    #--------------------------------------------------------------------------
+    # Option 1: A/B correction where we assume that all A frames and all B
+    # frames share a continuum shape, and they simply need to be transformed
+    # into each other.
+    if continuum_correction_kind == "AB":
+        # Calculate the flux ratio between these median A/B spectra
+        flux_ratio = flux_A / flux_B
+
+        # Set any nan values to 1.0
+        flux_ratio[np.isnan(flux_ratio)] = 1.0
+
+        # Also mask out any pixels with ratios 5%
+        px_to_mask = np.logical_or(flux_ratio > 1.5, flux_ratio < 0.5)
+        flux_ratio[px_to_mask] = 1.0
+
+        # Smooth this flux ratio
+        flux_ratio_smoothed = flux_ratio.copy()
+
+        for spec_i in range(n_spec):
+            flux_ratio_smoothed[spec_i] = instrBroadGaussFast(
+                wvl=waves[spec_i],
+                flux=flux_ratio[spec_i],
+                resolution=continuum_ratio_smoothing_resolution,
+                equid=True,
+                edgeHandling="firstlast",)
+            
+        # Scale B sequence by flux ratio
+        fluxes_norm[~is_A] *= flux_ratio_smoothed
+        sigmas_norm[~is_A] *= flux_ratio_smoothed
+    
+    #--------------------------------------------------------------------------
+    # Continuum adjustment option 2: per-phase normalisation
+    #--------------------------------------------------------------------------
+    # Option 2: per-phase adjustment, where we treat every phase as having
+    # an independent continuum, and correct each to some reference (in this
+    # case our reference is the median A flux).
+    elif continuum_correction_kind == "per_phase":
+        # Initialise [n_phase, n_spec, n_px] smoothed ratio vector
+        flux_ratio_smoothed = np.ones_like(fluxes)
+
+        # For each spectrum compute the smoothed ratio between it and our
+        # adopted reference spectrum.
+        desc = "Normalising all phases to reference continuum"
+
+        for phase_i in tqdm(range(n_phase), leave=False, desc=desc):
+            for spec_i in range(n_spec):
+                # Compute ratio
+                flux_ratio = fluxes_norm[phase_i, spec_i] / flux_A[spec_i]
+
+                # Set any nan values to 1.0
+                flux_ratio[np.isnan(flux_ratio)] = 1.0
+
+                # Also mask out any pixels with ratios > |5%|
+                px_to_mask = np.logical_or(
+                    flux_ratio > 1.05, flux_ratio < 0.95)
+                flux_ratio[px_to_mask] = 1.0
+
+                # Smooth ratio to lower spectral resolution
+                flux_ratio_smoothed[phase_i, spec_i] = instrBroadGaussFast(
+                    wvl=waves[spec_i],
+                    flux=flux_ratio,
+                    resolution=continuum_ratio_smoothing_resolution,
+                    equid=True,
+                    edgeHandling="firstlast",)
+                
+        # Normalise flux and sigma arrays
+        fluxes_norm /= flux_ratio_smoothed
+        sigmas_norm /= flux_ratio_smoothed
+
+        #----------------------------------------------------------------------
+        # Diagnostic plotting
+        #----------------------------------------------------------------------
+        if do_diagnostic_plotting:
+            plt.close("all")
+            fig, (ax_init, ax_corr, ax_ratios) = plt.subplots(
+                nrows=3, sharey=True, sharex=True, figsize=(18,8))
+
+            for phase_i in range(n_phase):
+                for spec_i in range(n_spec):
+                    # Median norm
+                    ax_init.plot(
+                        waves[spec_i],
+                        fluxes_med_norm[phase_i, spec_i],
+                        c="r" if is_A[phase_i] else "k",
+                        linewidth=0.5,)
+
+                    # Cont norm
+                    ax_corr.plot(
+                        waves[spec_i],
+                        fluxes_norm[phase_i, spec_i],
+                        c="r" if is_A[phase_i] else "k",
+                        linewidth=0.5,)
+                    
+                    # Ratios
+                    ax_ratios.plot(
+                        waves[spec_i],
+                        flux_ratio_smoothed[phase_i, spec_i],
+                        c="r" if is_A[phase_i] else "k",
+                        linewidth=0.5,)
+                    
+            plt.tight_layout()
+
+    return fluxes_norm, sigmas_norm
 
 
 def clean_and_compute_initial_resid(
