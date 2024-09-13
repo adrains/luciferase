@@ -1485,3 +1485,152 @@ def plot_autocorrelation(
 
     plt.savefig("{}.pdf".format(plot_fn))
     plt.savefig("{}.png".format(plot_fn), dpi=300)
+
+
+def plot_in_and_out_of_transit_histograms(
+    ccv_per_spec,
+    ccv_combined,
+    in_transit,
+    mean_spec_lambdas,
+    fig_size=(6, 8),
+    plot_label="",
+    plot_title="",
+    plot_folder="plots/",
+    n_bins=75,):
+    """Function to plot a grid of histograms comparing the cross-correlation
+    values for in-transit vs out-of-transit phases.
+
+    Parameters
+    ----------
+    ccv_per_spec: 4D float array or None
+        4D float array of cross correlation results with shape:
+        [n_sysrem_iter, n_phase, n_spec, n_rv_step].
+
+    ccv_combined: 3D float array or None
+        3D float array of the *combined* cross correlations for each SYSREM
+        iteration of shape [n_sysrem_iter, n_phase, n_rv_step].
+
+    in_transit: bool array
+        Boolean array with True for phases in-transit, and False for phases not
+        in transit.
+
+    mean_spec_lambdas: float array or None, default: None
+        Mean values of each spectral segment  shape [n_spec].
+
+    figsize: float tuple, default: (6, 8)
+        Size of the figure.
+
+    plot_label: str
+        Label to be added to saved plot filename.
+
+    plot_title: str
+        Title for the plot.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
+
+    n_bins: int, default:75
+        Number of bins for the histogram.
+    """
+    if ccv_per_spec is None and ccv_combined is not None:
+        cc_values = ccv_combined[:,:,None,:]
+
+    # If we've been given a set of combined cross-correlation values, 
+    # concatenate these to the end of our array so they can be plotted on their
+    # own panel.
+    elif ccv_combined is not None:
+        cc_values = np.concatenate(
+            (ccv_per_spec, ccv_combined[:,:,None,:]), axis=2)
+        
+    else:
+        cc_values = ccv_per_spec.copy()
+
+    # Grab dimensions for convenience
+    (n_sysrem_iter, n_phase, n_spec, n_rv_step) = cc_values.shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        ncols=n_spec,
+        figsize=fig_size,)
+    
+    # For consistency, ensure we have a 2D array of axes (even if we don't)
+    if n_spec == 1:
+        axes = axes[:,None]
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.05, right=0.95, top=0.925, wspace=0.1, hspace=0.3)
+
+    #--------------------------------------------------------------------------
+    # Plot cross-correlation per spectral segment
+    #--------------------------------------------------------------------------
+    # Loop over all SYSREM iterations
+    for sr_iter_i in range(n_sysrem_iter):
+
+        desc = "Plotting hist for SYSREM iter #{}".format(sr_iter_i)
+        
+        # Loop over all spectral segments
+        for spec_i in tqdm(range(n_spec), leave=False, desc=desc):
+            # Grab axis for convenience
+            axis = axes[sr_iter_i, spec_i]
+
+            ccv_it = cc_values[sr_iter_i, in_transit, spec_i].flatten()
+            ccv_oot = cc_values[sr_iter_i, ~in_transit, spec_i].flatten()
+
+            _ = axis.hist(
+                ccv_it,
+                bins=n_bins,
+                density=True,
+                label="In Transit",
+                color="r",
+                alpha=0.5)
+            
+            _ = axis.hist(
+                ccv_oot,
+                bins=n_bins,
+                density=True,
+                label="Out of Transit",
+                color="k",
+                alpha=0.5,)
+
+            axis.tick_params(labelsize="xx-small")
+            axis.set_yticks([])
+
+            offset = axis.xaxis.get_offset_text()
+            offset.set_size("xx-small")
+
+            # Only show titles on the top (and if we've been given them)
+            if (sr_iter_i == 0 and spec_i == n_spec-1 
+                and ccv_combined is not None):
+                axis.set_title(
+                    label="Combined",
+                    fontsize="x-small",
+                    color="r",
+                    weight="bold",)
+
+            elif sr_iter_i == 0 and mean_spec_lambdas is not None:
+                axis.set_title(
+                    label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
+                    fontsize="x-small")
+
+    axes[0,0].legend(
+        loc="upper center",
+        ncol=2,
+        fontsize="xx-small",
+        bbox_to_anchor=(0.5, 1.05),)
+
+    fig.suptitle(plot_title, fontsize="medium")
+
+    # ---------
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    if plot_label == "":
+        plot_fn = os.path.join(plot_folder, "hist_comp")
+    else:
+        plot_fn = os.path.join(
+            plot_folder, "hist_comp_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)

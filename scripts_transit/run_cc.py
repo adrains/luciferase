@@ -64,6 +64,7 @@ if ss.do_mask_orders_for_analysis:
 else:
     print("\tSpectral segments\tAll")
 print("\tSplit A/B sequences\t{}".format(ss.split_AB_sequences))
+print("\tPer-px resid weighting\t{}".format(ss.normalise_resid_by_per_phase_std))
 print("\tRV frame\t\t{}".format(rv_frame))
 print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
 print("\tCC RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.cc_rv_lims))
@@ -120,6 +121,9 @@ for transit_i in range(n_transit):
         # Grab transit_info for this sequence + transit
         transit_info_seq = transit_info_list[transit_i][seq_mask]
 
+        # Grab a mask to discriminate in/out of transit phases
+        in_transit = transit_info_seq["is_in_transit_mid"].values
+
         # Import SYSREM residuals
         resid_all = tu.load_sysrem_residuals_from_fits(
             ss.save_path, ss.label, ss.n_transit, transit_i, seq, rv_frame,)
@@ -162,6 +166,14 @@ for transit_i in range(n_transit):
         else: 
             rv_bcors = -1*bcors + rv_star + rv_offset
 
+        # Normalise (i.e. weight) residuals by per-px std computed over all
+        # phases (within a given night). This downweights time-varying pixels,
+        # specifically those associated with tellurics.
+        if ss.normalise_resid_by_per_phase_std:
+            std_3D = np.nanstd(resid_all, axis=1)
+            std_4D = np.broadcast_to(std_3D[:,None,:,:], resid_all.shape)
+            resid_all /= std_4D
+
         cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
             waves=waves,
             sysrem_resid=resid_all,
@@ -170,7 +182,7 @@ for transit_i in range(n_transit):
             bcors=rv_bcors,
             cc_rv_step=ss.cc_rv_step,
             cc_rv_lims=ss.cc_rv_lims,
-            interpolation_method="cubic",)
+            interpolation_method="linear",)
 
         # Store
         ccv_per_spec_all.append(ccv_per_spec)
@@ -188,15 +200,30 @@ for transit_i in range(n_transit):
             plot_folder=plot_folder,)
 
         #----------------------------------------------------------------------
+        # Cross-correlation histograms
+        #----------------------------------------------------------------------
+        # Plot histograms comparing the in-transit and out-of-transit phases of
+        # the cross-correlation function. TODO: just plot for the velocities
+        # where we expect the planet to be.
+        hist_title = "{}, Night #{} ({}): {}".format(
+            ss.label, transit_i+1, seq, species_list)
+
+        tplt.plot_in_and_out_of_transit_histograms(
+            ccv_per_spec=None,
+            ccv_combined=ccv_combined,
+            in_transit=in_transit,
+            mean_spec_lambdas=np.mean(waves,axis=1),
+            plot_label="{}_n{}_{}_{}".format(
+                ss.label, transit_i+1, seq, species_label),
+            plot_title=hist_title,
+            plot_folder=plot_folder,)
+
+        #----------------------------------------------------------------------
         # Kp-Vsys map
         #----------------------------------------------------------------------
-        print("Computing Kp-Vsys map...")
-
-        # When creating Kp-Vsys maps, we don't want to combine the phases where
-        # the planet is not transiting, so we need to mask appropriately.
         # TODO: run all this twice, once using out-of-transit phases only, and
         # once using in-transit phases only for comparison purposes.
-        in_transit = transit_info_seq["is_in_transit_mid"].values
+        print("Computing Kp-Vsys map...")
 
         # Create Kp-Vsys map *per spectral segment*
         cc_rvs_subset, Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
@@ -207,7 +234,8 @@ for transit_i in range(n_transit):
                 transit_info=transit_info_seq[in_transit],
                 Kp_lims=ss.Kp_lims,
                 Kp_step=ss.Kp_step,
-                vsys_lims=ss.kp_vsys_x_range,)
+                vsys_lims=ss.kp_vsys_x_range,
+                interpolation_method="linear",)
 
         # Store
         Kp_vsys_map_per_spec_all.append(Kp_vsys_map_per_spec)
