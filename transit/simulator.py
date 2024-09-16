@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from astropy.io import fits
+import astropy.units as u
 import astropy.constants as const
 from scipy.interpolate import interp1d
 from scipy.integrate import simps
@@ -13,6 +14,7 @@ from PyAstronomy.pyasl import instrBroadGaussFast
 from scipy.signal import savgol_filter
 import transit.utils as tu
 import luciferase.utils as lu
+from scipy.interpolate import CubicSpline
 
 # -----------------------------------------------------------------------------
 # Load/save spectra
@@ -527,7 +529,8 @@ def save_planet_spectrum(wave_file, spec_file, wave, spec):
 def interpolate_marcs_spectrum_at_mu(
     fluxes_mu,
     mus,
-    mu_selected,):
+    mu_selected,
+    interpolation_method="cubic",):
     """Interpolate a MARCS spectrum initially in units of ergs/cm^2/s/Å/µ to a
     specific µ value.
 
@@ -541,6 +544,11 @@ def interpolate_marcs_spectrum_at_mu(
     
     mu_selected: float
         New mu value to interpolate fluxes for.
+
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
 
     Returns
     -------
@@ -564,59 +572,199 @@ def interpolate_marcs_spectrum_at_mu(
 
         interp_flux = interp1d(
             x=mus[wave_i][mask],
-            y=fluxes_mu[wave_i][mask],)
+            y=fluxes_mu[wave_i][mask],
+            kind=interpolation_method,)
         
         fluxes_new_mu[wave_i] = interp_flux(mu_selected)
 
     return fluxes_new_mu
 
 
-def integrate_marcs_spectrum(
-    wavelengths,
-    mus,
-    intensities,):
-    """Given F(λ,µ), integrate the flux from the entire stellar disc as
-    representing an observed spectrum of an unresolved star.
+def disk_integration(mus, inten, deltav, vsini_in=0, vrt_in=0, osamp=1):
+    """Performs disk integration using annulus of different limb angles to
+    weight the contibution. Also applies rotational and macroturbulent 
+    broadening to  the different limb angles.
 
-    We formulate this problem as finding the volume of a solid of revolution,
-    where the height is our intensity in units of energy/s/area, and we 
-    integrate this across the stellar disc as:
+    Note that deltav, vsini_in and vrt_in must be provided in the same units.
 
-    F(λ) = ∫ π f(µ)^2 dx
+    Converted from the SME IDL function 'rtint' by Axel Hahlin (UU).
 
     Parameters
     ----------
-    wavelengths: 1D float array
-        Array of wavelengths of shape [n_wave].
-    
-    mus: 2D float array
-        Array of mus of shape [n_wave, n_max_n_mu].
-    
-    intensities: 2D float array
-        Array of intensities of shape [n_wave, n_max_n_mu].
-    
+    mus: 1D float array
+        The cosine angle between the outward normal and line of sight, has 
+        shape [n_mu].
+
+    inten: 2D float array
+        Intensity spectra calculated at each limb angle in mu, of shape
+        [n_wave, n_mu].
+
+    deltav: float
+        Velocity spacing between spectrum points in inten (km/s).
+
+    vsini_in: float, default: 0
+        Max radial velocity from rotation, assumes solid body rotation (km/s).
+
+    vrt_in: float, default: 0
+        Radial-tangential macroturbulence parameter. sqrt(2) times the standard
+        deviation of a Gaussian distribution of turbulent velocities (km/s).
+
+    osamp: int, default: 1
+        Oversampling of spectra, using a cubic spline interpolation.
+
     Returns
     -------
-    integrated_flux: 1D float array
-        Disc integrated flux of the star of shape [n_wave].
+    flux: 1D float array
+        Disk integrated flux profile, of shape [n_wave].
     """
-    # Initialise output flux vector
-    flux_integrated = np.zeros_like(wavelengths)
+    # Local variables
+    vsini = vsini_in
+    vrt = vrt_in
 
-    desc = "Integrating"
+    # Oversampling factor, at least 1
+    try:
+        os = np.round(np.max((osamp,1)))
+    except:
+        print('Overasmpling parameter invalid: {}'.format(osamp))
+        print('Setting oversampling to 1')
+        os = 1
+    
+    # Convert Mu to projected radii, R, of annuli for a star of n unit radius
+    rmu = np.sqrt(1.0-mus**2) #Trig identity
+    
+    # Sort projected radii and intensity spectra into ascending order (from 
+    # center to limb)
+    isort = np.argsort(rmu)
+    rmu = rmu[isort]
+    n_mu = len(mus)
+    if n_mu == 1: vsini=0.0
+    
+    # Calculate projected radii for boundaries of disk integration annuli. 
+    if n_mu > 1 or vsini != 0:
+        r = np.sqrt(0.5*(rmu[0:n_mu-1]**2 + rmu[1:n_mu]**2))
+        r = np.concatenate(([0],r,[1]))
 
-    # For every wavelength
-    for wave_i, wave in enumerate(tqdm(wavelengths, desc=desc, leave=False)):
-        # Invert mus to get x spacing
-        x = np.sqrt(1 - mus[wave_i]**2)
-        mask = ~np.isnan(x)
-        x = x[mask]
+        # Calculate integration weight based on area of each annulus
+        wt = r[1:n_mu+1]**2-r[0:n_mu]**2
+    else:
+        wt = np.array([1])
+        
+    # Generate index vectors for input. 
+    vinfo = inten.shape
+    npts = int(vinfo[0])
+    xpix = np.arange(0,npts,1)
+    nfine = int(os*npts)
+    xfine = (0.5/os)*(2*np.arange(0,nfine,1)-os+1)
+    
+    # Loop through annuli, constructing and convolving with rotation kernels
+    yfine = np.zeros(nfine)
+    flux = np.zeros(nfine)
+    
+    for mu_i in tqdm(range(n_mu), desc="Disk integation", leave=False):
+        # Use cubic spline routine to make an oversampled version of the 
+        # intensity profile
+        ypix = inten[:,isort[mu_i]]
 
-        # Integrate the flux at this wavelength
-        yy = np.pi * intensities[wave_i, mask]**2
-        flux_integrated[wave_i] = simps(y=yy, x=x)
+        # No oversampling, no spline calculation
+        if os == 1: 
+            yfine = ypix
 
-    return flux_integrated
+        # Oversampling, find the cubic spline.
+        else: 
+            secder = CubicSpline(xpix,ypix) # Spline coefficients
+            yfine = secder(xfine)
+
+        if vsini > 0:
+            # inner edge
+            r1 = r[mu_i]
+
+            # outer edge
+            r2 = r[mu_i+1]
+
+            # oversampled velocity spacing
+            dv = deltav/os
+
+            # Maximum velocity
+            maxv = vsini*r2 
+
+            # Oversampled kernel points
+            nrk = 2*int(maxv/dv) + 3
+
+            # Velocity scale for kernel
+            v = dv*(np.arange(0,nrk,1)-((nrk-1)/2))
+            
+            # init rotational kernel
+            rkern = np.zeros(nrk)
+
+            # low velocity points
+            j1 = np.asarray(abs(v) < vsini*r1).nonzero()
+            if len(j1) > 0:
+                rkern[j1] = np.sqrt(
+                    (vsini*r2)**2-v[j1]**2)-np.sqrt((vsini*r1)**2-v[j1]**2)
+                
+            # high velocity points
+            j2 = np.asarray(
+                (abs(v) > vsini*r1) & (abs(v) < vsini*r2)).nonzero()
+            if len(j2) > 0:
+                rkern[j2] = np.sqrt((vsini*r2)**2-v[j2]**2)
+
+            rkern = rkern/np.sum(rkern) 
+
+            if nrk > 3:
+                #lpad=np.ones(nrk)*yfine[0]
+                #rpad=np.ones(nrk)*yfine[-1]
+                #yfine=np.concatenate((lpad,yfine,rpad))
+                yfine=np.convolve(yfine,rkern,'same')
+                #yfine = yfine[nrk:-nrk]
+
+        # Calculate projected sigma for radial and tangential velocity 
+        # distributions.
+        muval = mus[isort[mu_i]]
+        sigma = os*vrt/np.sqrt(2)/deltav
+
+        sigr = sigma*muval
+        sigt = sigma*np.sqrt(1.0-muval**2)
+        
+        #number of points in macroturbulence kernel
+        nmk = int(np.min((int(10*sigma),(nfine-3)/2)))
+        nmk = int(np.max((nmk,3)))
+        
+        #Radial macroturbulence kernel
+        if sigr > 0:
+            xarg = (np.arange(0,2*nmk+1)-nmk)/sigr
+            mrkern = np.exp(-0.5*xarg**2)
+            mrkern = mrkern/np.sum(mrkern)
+        else:
+            mrkern = np.zeros(2*nmk+1)
+            mrkern[nmk] = 1.0
+            
+        #Tangential macroturbulence Kernel 
+        if sigt > 0:
+            xarg = (np.arange(0,2*nmk+1)-nmk)/sigt
+            mtkern = np.exp(-0.5*xarg**2)
+            mtkern = mtkern/np.sum(mtkern)
+        else:
+            mtkern = np.zeros(2*nmk+1)
+            mtkern[nmk] = 1.0
+        
+        #Sum the radial and tangential component, weighted by surface area
+        area_r = 0.5
+        area_t = 0.5 
+        mkern = area_r*mrkern+area_t*mtkern
+        
+        #convolve total flux profiles
+        #lpad=np.ones(nmk)*yfine[0]
+        #rpad=np.ones(nmk)*yfine[-1]
+        #yfine=np.concatenate((lpad,yfine,rpad))
+        yfine = np.convolve(yfine,mkern,'same')
+        #yfine = yfine[nmk:-nmk]
+
+        #Add contribution to total flux
+        flux = flux+wt[mu_i]*yfine
+        
+    flux = np.reshape(flux,npts) * np.pi
+    
+    return flux
 
 
 def physically_scale_stellar_flux(
@@ -740,7 +888,8 @@ def apply_instrumental_transfer_function(
     wave,
     flux,
     throughput_json_path,
-    fill_throughput_value=0,):
+    fill_throughput_value=0,
+    interpolation_method="cubic",):
     """Apply the CRIRES+ instrumental transfer function for the telescope, 
     enslitted fraction, instrument throughput, grating + blaze efficiency, and 
     detector efficiency. Note that we do *not* account for the atmospheric
@@ -758,6 +907,11 @@ def apply_instrumental_transfer_function(
     fill_throughput_value: float, default: 0
         Default througput value to fill undefined wavelength points. Default is
         0, meaning that we assume no transmission for undefined values.
+
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
 
     Returns
     -------
@@ -778,7 +932,8 @@ def apply_instrumental_transfer_function(
     calc_throughput = interp1d(
         x=throughput_df["wavelengths"].values,
         y=total_throughput.values,
-        fill_value=fill_throughput_value,)
+        fill_value=fill_throughput_value,
+        kind=interpolation_method,)
     
     throughput = calc_throughput(wave)
 
@@ -793,7 +948,8 @@ def remove_instrumental_blaze_function(
     flux,
     sigma,
     throughput_json_path,
-    fill_throughput_value=0,):
+    fill_throughput_value=0,
+    interpolation_method="cubic",):
     """Remove the CRIRES+ instrumental blaze transfer function.
 
     Parameters
@@ -808,6 +964,11 @@ def remove_instrumental_blaze_function(
         Default througput value to fill undefined wavelength points. Default is
         0, meaning that we assume no transmission for undefined values.
 
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+    
     Returns
     -------
     flux_scaled, sigma_scaled: 1D float array
@@ -820,7 +981,8 @@ def remove_instrumental_blaze_function(
     calc_blaze = interp1d(
         x=throughput_df["wavelengths"].values,
         y=throughput_df["grating eff. incl. blaze"].values,
-        fill_value=fill_throughput_value,)
+        fill_value=fill_throughput_value,
+        kind=interpolation_method,)
     
     blaze = calc_blaze(wave)
 
@@ -878,7 +1040,8 @@ def interpolate_spectrum(
     wave_new,
     wave_old,
     flux_old,
-    fill_value=np.nan,):
+    fill_value=np.nan,
+    interpolation_method="cubic",):
     """Interpolate spectrum to a new wavelength scale using linear 
     interpolation. This function assumes that wave_old is a single 1D array,
     but wave_new might be multple different wavelength segments (e.g. different
@@ -900,6 +1063,11 @@ def interpolate_spectrum(
     fill value: float, default: np.nan
         Fill value for missing data when interpolating.
 
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+
     Returns
     -------
     flux_new: 1D or 2D float array
@@ -912,7 +1080,8 @@ def interpolate_spectrum(
             x=wave_old,
             y=flux_old,
             bounds_error=False,
-            fill_value=fill_value,)
+            fill_value=fill_value,
+            kind=interpolation_method,)
         
         flux_new = flux_interp(wave_new)
 
@@ -926,7 +1095,8 @@ def interpolate_spectrum(
                 x=wave_old,
                 y=flux_old,
                 bounds_error=False,
-                fill_value=fill_value,)
+                fill_value=fill_value,
+                kind=interpolation_method,)
 
             flux_new[spec_i] = flux_interp(wave_new[spec_i])
     
@@ -1227,7 +1397,22 @@ def simulate_transit_single_epoch(
     # Integrate stellar flux across entire disc so that we have a single 1D
     # spectrum that takes into account the effect of limb darkening (that is we
     # integrate over the μ dimension giving ergs/cm^2/s/Å).
-    fluxes_disk = integrate_marcs_spectrum(wave_marcs, mus_marcs, fluxes_marcs)
+    delta_lambda = np.median(np.diff(wave_marcs))
+    med_lambda = np.median(wave_marcs)
+    delta_v = const.c.to(u.km / u.second).value * delta_lambda / med_lambda
+
+    # Sanity check: we expect an evenly sampled mu grid
+    for mu_i in range(mus_marcs.shape[1]):
+        if len(set(mus_marcs[:,mu_i])) != 1:
+            raise ValueError("Mu values are not evenly sampled for all lambda")
+
+    fluxes_disk = disk_integration(
+        mus=mus_marcs[0],
+        inten=fluxes_marcs,
+        deltav=delta_v,
+        vsini_in=0,
+        vrt_in=0,
+        osamp=1)
 
     # Scale this 1D spectrum to match the light received at Earth (ergs/s/Å)
     fluxes_disk_scaled, flux_total_integrated = physically_scale_stellar_flux(
