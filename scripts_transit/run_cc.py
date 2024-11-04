@@ -1,5 +1,16 @@
 """Script to cross-correlate a set of SYSREM residuals with a template 
-exoplanet spectrum.
+exoplanet spectrum and produce Kp-Vsys maps. Each night can be run as two
+separate time series sequences (once for the A and B nodding frames
+separately), or a single time series (A/B interleaved).
+
+The following plots are generated:
+ 1) Per-sequence cross correlation trace
+ 2) Per-sequence Kp-Vsys maps for all spectral segments separately
+ 3) Per-sequence in- vs out-of-transit residual histograms
+ 4) Per-sequence Kp-Vsys map for all spectral segments
+ 5) Template auto-correlation per spectral segment
+ 6) Combined Kp-Vsys map for all spectral segments
+ 7) Combined Kp-Vsys map for all nights + combined nights
 """
 import os
 import numpy as np
@@ -226,7 +237,7 @@ for transit_i in range(n_transit):
         print("Computing Kp-Vsys map...")
 
         # Create Kp-Vsys map *per spectral segment*
-        cc_rvs_subset, Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
+        vsys_steps, Kp_steps, Kp_vsys_map_per_spec, Kp_vsys_map_combined = \
             sr.compute_Kp_vsys_map(
                 cc_rvs=cc_rvs,
                 ccv_per_spec=ccv_per_spec[:,in_transit],
@@ -244,7 +255,7 @@ for transit_i in range(n_transit):
 
         # Plot overview Kp-Vsys map
         tplt.plot_kp_vsys_map(
-            cc_rvs=cc_rvs_subset,
+            vsys_steps=vsys_steps,
             Kp_steps=Kp_steps,
             Kp_vsys_map_per_spec=Kp_vsys_map_per_spec,
             Kp_vsys_map_combined=Kp_vsys_map_combined,
@@ -256,18 +267,6 @@ for transit_i in range(n_transit):
         # Store so we can plot all the combined maps at the end
         map_title = "Night #{} ({})".format(transit_i+1, seq)
         combined_map_titles.append(map_title)
-
-        # Combined Kp-Vsys map for this seq after merging all spectral segments
-        tplt.plot_combined_kp_vsys_map_as_snr(
-            cc_rvs=cc_rvs_subset,
-            Kp_steps=Kp_steps,
-            Kp_vsys_maps=Kp_vsys_map_combined,
-            plot_title=map_title,
-            plot_suptitle=species_list,
-            plot_label="{}_n{}_{}_{}".format(
-                ss.label, transit_i+1, seq, species_label),
-            kp_vsys_snr_rv_exclude=ss.kp_vsys_snr_rv_exclude,
-            plot_folder=plot_folder,)
 
     # For this night do an autocorrelation with our template spectrum and plot
     # the results. Our objective here is to look for aliases/other cross-
@@ -338,7 +337,7 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
 
     # Plot overview Kp-Vsys map with all spectral segments
     tplt.plot_kp_vsys_map(
-        cc_rvs=cc_rvs_subset,
+        vsys_steps=vsys_steps,
         Kp_steps=Kp_steps,
         Kp_vsys_map_per_spec=map_per_spec_all_nights,
         Kp_vsys_map_combined=map_combined_all_nights,
@@ -346,27 +345,27 @@ for label, title, map_mask in zip(plot_labels, plot_titles, map_masks):
         plot_label=label,
         plot_folder=plot_folder,)
 
-    # Combined Kp-Vsys Map after merging all spectral segments
-    tplt.plot_combined_kp_vsys_map_as_snr(
-        cc_rvs=cc_rvs_subset,
-        Kp_steps=Kp_steps,
-        Kp_vsys_maps=map_combined_all_nights,
-        plot_title=title,
-        plot_suptitle="{}: {}".format(ss.label, species_list),
-        plot_label=label,
-        kp_vsys_snr_rv_exclude=ss.kp_vsys_snr_rv_exclude,
-        plot_folder=plot_folder,)
-    
-# Make a plot of all the sequences/nights together
+# Scale combined Kp-Vsys maps to be in units of SNR
 combined_maps = np.stack(combined_maps)
-tplt.plot_combined_kp_vsys_map_as_snr(
-    cc_rvs=cc_rvs_subset,
+
+snr_maps, max_snr, vsys_at_max_snr, kp_at_max_snr = sr.calc_Kp_vsys_map_snr(
+    vsys_steps=vsys_steps,
     Kp_steps=Kp_steps,
     Kp_vsys_maps=combined_maps,
+    vsys_rv_exclude=ss.kp_vsys_snr_rv_exclude)
+
+# Make a plot of all the sequences/nights together
+tplt.plot_combined_kp_vsys_map_as_snr(
+    vsys_steps=vsys_steps,
+    Kp_steps=Kp_steps,
+    Kp_vsys_maps_snr=snr_maps,
     plot_title=combined_map_titles,
+    Kp_expected=ss.kp_expected,
+    max_snr_values=max_snr,
+    vsys_at_max_snr=vsys_at_max_snr,
+    kp_at_max_snr=kp_at_max_snr,
     plot_suptitle="[{}] {}: {}".format(rv_frame, ss.label, species_list),
     plot_label="{}_all_seq_{}".format(ss.label, species_label),
-    kp_vsys_snr_rv_exclude=ss.kp_vsys_snr_rv_exclude,
     plot_folder=plot_folder,)
 
 #------------------------------------------------------------------------------
@@ -381,12 +380,17 @@ fn = os.path.join(ss.save_path, "{}.pkl".format(fn_label))
 
 tu.dump_cc_results(
     filename=fn,
-    cc_rvs=cc_rvs,
-    ccv_ps=ccv_per_spec_all,
-    ccv_comb=ccv_combined_all,
-    Kp_steps=Kp_steps,
-    Kp_vsys_map_ps=Kp_vsys_map_per_spec_all,
-    Kp_vsys_map_comb=Kp_vsys_map_combined_all,
-    Kp_vsys_map_ps_all_nights=map_per_spec_all_nights,
-    Kp_vsys_map_comb_all_nights=map_combined_all_nights,
-    sysrem_settings=ss,)
+    cc_rvs=cc_rvs,                  # CC RV steps
+    ccv_ps=ccv_per_spec_all,        # Nightly CC maps for all spectral segments
+    ccv_comb=ccv_combined_all,      # Combined CC map for each night
+    vsys_steps=vsys_steps,          # Vsys steps, =/= CC RV steps
+    Kp_steps=Kp_steps,              # Kp steps
+    Kp_vsys_map_ps=Kp_vsys_map_per_spec_all,            # Per seg. Kp-Vsys map
+    Kp_vsys_map_comb=Kp_vsys_map_combined_all,          # Comb seg Kp-Vsys map
+    Kp_vsys_map_ps_all_nights=map_per_spec_all_nights,  # Per seg, comb nights
+    Kp_vsys_map_comb_all_nights=map_combined_all_nights,# Comb seg, comb night
+    nightly_snr_maps=snr_maps,      # SNR scaled, comb seg, nightly + comb
+    max_snr=max_snr,                # Max SNR per map
+    vsys_at_max_snr=vsys_at_max_snr, # Vsys coord of max SNR per map
+    kp_at_max_snr=kp_at_max_snr,    # Kp coord of max SNR per map
+    sysrem_settings=ss,)            # Settings used for this CC

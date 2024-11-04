@@ -906,7 +906,7 @@ def plot_sysrem_cc_2D(
 
 
 def plot_kp_vsys_map(
-    cc_rvs,
+    vsys_steps,
     Kp_steps,
     Kp_vsys_map_per_spec,
     Kp_vsys_map_combined=None,
@@ -922,7 +922,7 @@ def plot_kp_vsys_map(
 
     Parameters
     ----------
-    cc_rvs: 1D float array
+    vsys_steps: 1D float array
         Vector of RV steps of length [n_rv_step]
     
     Kp_steps: 1D float array
@@ -975,7 +975,8 @@ def plot_kp_vsys_map(
 
     # [x_min, x_max, y_min, y_max]
     extent = [
-        np.min(cc_rvs), np.max(cc_rvs), np.min(Kp_steps), np.max(Kp_steps)]
+        np.min(vsys_steps), np.max(vsys_steps),
+        np.min(Kp_steps), np.max(Kp_steps)]
 
     # Loop over all SYSREM iterations
     for sr_iter_i in range(n_sysrem_iter):
@@ -1128,38 +1129,51 @@ def plot_regrid_diagnostics_img(fluxes, detectors, wave_adopt, sigma_upper=4,):
 
 
 def plot_combined_kp_vsys_map_as_snr(
-    cc_rvs,
+    vsys_steps,
     Kp_steps,
-    Kp_vsys_maps,
+    Kp_vsys_maps_snr,
     plot_title,
+    Kp_expected=None,
+    max_snr_values=None,
+    vsys_at_max_snr=None,
+    kp_at_max_snr=None,
     plot_suptitle="",
     fig_size=(5, 10),
     plot_label="",
-    kp_vsys_snr_rv_exclude=(-15,15),
-    plot_noise_box_bounds=False,
     tick_spacing=2.0,
     plot_folder="plots/",):
     """Function to plot a 2D plot of Kp-Vsys plots from the results of cross-
     correlation run on SYSREM residuals. The plot has n_rows = n_sysrem_iter,
     and n_cols = n_maps (e.g. night 1, night 2). By 2D it is meant that the 
-    x axis is the RV value used in the cross correlation, and the y axis is the Kp value, with the SNR value
-    being represented by a colour bar.
+    x axis is the RV value used in the cross correlation, and the y axis is the
+    Kp value, with the SNR value being represented by a colour bar.
+
+    Providing Kp_expected plots a white crosshair at the expected Kp value; and 
+    providing max_snr_values, vsys_at_max_snr, and kp_at_max_snr plots a red
+    crosshair at the observed maximum SNR value.
 
     Parameters
     ----------
-    cc_rvs: 1D float array
+    vsys_steps: 1D float array
         Vector of RV steps of length [n_rv_step]
     
     Kp_steps: 1D float array
         Vector of Kp steps of length [n_Kp_steps]
 
-    Kp_vsys_maps: 3D or 4D float array
+    Kp_vsys_maps_snr: 3D or 4D float array
         Float array of the *combined* Kp-Vsys map/s with shape: 
         [n_sysrem_iter, n_Kp_steps, n_rv_step] 
         or [n_map, n_sysrem_iter, n_Kp_steps, n_rv_step].
-    
+
     plot_title: str or list of str
         Title/s for each Kp-Vsys map.
+
+    Kp_expected: float, default: None
+        Expected Kp value of the planet in km/s from the literature.
+
+    max_snr_values, vsys_at_max_snr, kp_at_max_snr: 2D float array or None
+        Maximum SNR, and corresponding coordinates in velocity space, of shape
+        [n_map, n_sysrem_iter] (as computed from sysrem.calc_Kp_vsys_map_snr).
 
     plot_suptitle: str, default: ""
         Super title for the figure.
@@ -1170,23 +1184,20 @@ def plot_combined_kp_vsys_map_as_snr(
     plot_label: str, default: ""
         Unique identifier label to add to plot filename.
 
-    kp_vsys_snr_rv_exclude: int, default: (-15,15)
-        X bounds in km/s outside of which we compute the noise level.
-
-    plot_noise_box_bounds: boolean, default: False
-        Whether to plot red diagnostic lines corresponding to px_x_noise_lims.
+    tick_spacing: float, default: 2.0
+        Colourbar tick spacing in units of SNR.
 
     plot_folder: str, default: "plots/"
         Folder to save plots to. By default just a subdirectory called plots. 
     """
     # Grab dimensions for convenience (this depends on how many maps we have)
-    if len(Kp_vsys_maps.shape) == 3:
-        (n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps.shape
-        Kp_vsys_maps = Kp_vsys_maps[None,:,:,:]
+    if len(Kp_vsys_maps_snr.shape) == 3:
+        (n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps_snr.shape
+        Kp_vsys_maps_snr = Kp_vsys_maps_snr[None,:,:,:]
         n_maps = 1
         plot_title = [plot_title]
     else:
-        (n_maps, n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps.shape
+        (n_maps, n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps_snr.shape
         fig_size = (fig_size[0]*n_maps, fig_size[1])
 
     plt.close("all")
@@ -1205,27 +1216,15 @@ def plot_combined_kp_vsys_map_as_snr(
 
     # [x_min, x_max, y_min, y_max]
     extent = [
-        np.min(cc_rvs), np.max(cc_rvs), np.min(Kp_steps), np.max(Kp_steps)]
+        np.min(vsys_steps), np.max(vsys_steps),
+        np.min(Kp_steps), np.max(Kp_steps)]
 
     # Loop over all maps
     for map_i in range(n_maps):
         # Loop over all SYSREM iterations
         for sr_iter_i in range(n_sysrem_iter):
-            # Compute the SNR for this SYSREM iteration. To do this we compute
-            # the *noise* from the regions to the left/right of px_x_noise_lims
-            # (i.e. we mask out [px_x_noise_lims:-px_x_noise_lims] in x when 
-            # computing the noise). We then also need to subtract the median 
-            # value of the same region, which we can consider the 'background'.
-            noise_map = Kp_vsys_maps[map_i, sr_iter_i].copy()
-
-            exclude_mask = np.logical_and(
-                cc_rvs > kp_vsys_snr_rv_exclude[0],
-                cc_rvs < kp_vsys_snr_rv_exclude[1])
-
-            noise_map[:,exclude_mask] = np.nan
-            noise_std = np.nanstd(noise_map)
-            noise_med = np.nanmedian(noise_map)
-            snr = (Kp_vsys_maps[map_i, sr_iter_i] - noise_med) / noise_std
+            # Grab SNR for convenience
+            snr = Kp_vsys_maps_snr[map_i, sr_iter_i]
 
             # Grab axis for convenience
             axis = axes[sr_iter_i, map_i]
@@ -1244,7 +1243,8 @@ def plot_combined_kp_vsys_map_as_snr(
             max_snr = np.nanmax(snr)
             delta_snr = max_snr - min_snr
 
-            ticks = np.arange(np.floor(min_snr), np.ceil(max_snr), tick_spacing)
+            ticks = np.arange(
+                np.floor(min_snr), np.ceil(max_snr), tick_spacing)
 
             cb.set_ticks(ticks)
             cb.set_ticklabels(ticks)
@@ -1271,22 +1271,72 @@ def plot_combined_kp_vsys_map_as_snr(
 
             # Only show xticks on the bottom, and title on the top
             if sr_iter_i == 0:
-                axis.set_title(plot_title[map_i], fontdict={'fontsize':"small"})
+                axis.set_title(
+                    plot_title[map_i], fontdict={'fontsize':"small"})
                 axis.set_xticks([])
             if sr_iter_i != n_sysrem_iter-1:
                 axis.set_xticks([])
             else:
                 axis.set_xlabel("RV Shift (km/s)", fontsize="x-small")
 
-            # Whether to plot vertical diagnostic lines indicating our noise bounds
-            if plot_noise_box_bounds:
-                for x_i in [px_x_noise_lims, -px_x_noise_lims]:
-                    axis.vlines(
-                        x=cc_rvs[x_i],
-                        ymin=Kp_steps[0],
-                        ymax=Kp_steps[-1],
-                        linestyles="dashed",
-                        colors="r",)
+            #------------------------------------------------------------------
+            # Plot 'crosshair' for expected and observed Kp/Vsys max SNR
+            #------------------------------------------------------------------
+            # Plot expected Kp (from the literature)
+            if Kp_expected is not None:
+                axis.vlines(
+                    x=0,
+                    ymin=Kp_steps[0],
+                    ymax=Kp_steps[-1],
+                    linestyles="dashed",
+                    colors="w",
+                    linewidth=0.5,)
+                
+                axis.hlines(
+                    y=Kp_expected,
+                    xmin=vsys_steps[0],
+                    xmax=vsys_steps[-1],
+                    linestyles="dashed",
+                    colors="w",
+                    linewidth=0.5,)
+
+            # Plot observed Kp/Vsys max
+            if vsys_at_max_snr is not None and kp_at_max_snr is not None:
+                # Plot *observed* Kp
+                axis.vlines(
+                    x=vsys_at_max_snr[map_i, sr_iter_i],
+                    ymin=Kp_steps[0],
+                    ymax=Kp_steps[-1],
+                    linestyles="dashed",
+                    colors="r",
+                    linewidth=0.5,)
+                
+                axis.hlines(
+                    y=kp_at_max_snr[map_i, sr_iter_i],
+                    xmin=vsys_steps[0],
+                    xmax=vsys_steps[-1],
+                    linestyles="dashed",
+                    colors="r",
+                    linewidth=0.5,)
+                
+                # Add a text box summarising the maximum
+                snr_txt = \
+                    r"SNR~{:0.1f} [${:0.1f}, {:0.1f}$ km$\,$s$^{{-1}}$]"
+                vsys_max = vsys_at_max_snr[map_i, sr_iter_i]
+                kp_max = kp_at_max_snr[map_i, sr_iter_i]
+                snr_max = max_snr_values[map_i, sr_iter_i]
+
+                axis_txt = axis.text(
+                    x=vsys_steps[-1]*0.6,
+                    y=Kp_steps[-1]*0.1,
+                    s=snr_txt.format(
+                        snr_max, vsys_max, kp_max),
+                    fontsize="xx-small",
+                    color="r",
+                    horizontalalignment="center",)
+
+                axis_txt.set_bbox(
+                    dict(facecolor="w", alpha=0.2, edgecolor="w"))
 
     fig.suptitle(plot_suptitle, fontsize="medium")
 

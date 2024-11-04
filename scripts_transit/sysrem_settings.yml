@@ -17,6 +17,7 @@ label: "wasp107_np_corr"
 # SNR~130 sim with all species + slit losses
 # -------------------------------------------
 #label: "simulated_R100000_wasp107_240802_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_130"
+#label: "simulated_R100000_wasp107_240916_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_130"
 
 # SNR~300 sim with all species + slit losses
 # -------------------------------------------
@@ -44,6 +45,7 @@ tau_fill_value: 0
 
 # Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
 planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
+#planet_fits: "templates/WASP107b_maxed_templates_all_R100000.fits"
 #planet_fits: "templates/WASP107b_Welbanks_Aur-Ret_templates_all_R100000.fits"
 
 # The cross-correlation template will have the following species (and an
@@ -92,7 +94,7 @@ continuum_corr_smoothing_resolution: 1000
 # SYSREM Settings
 #------------------------------------------------------------------------------
 # Number of iterations to run SYSREM for
-n_sysrem_iter: 10
+n_sysrem_iter: 15
 
 # Convergence threshold for each SYSREM iteration
 sysrem_convergence_tol: 1.0E-6
@@ -160,25 +162,28 @@ cc_rv_step: 1
 # range should be larger than the actual central range you expect the planet to
 # realistically inhabit as edge effects will be introduced at the edges of the
 # Kp-Vsys plot, which then can just be clipped off when plotting.
-cc_rv_lims: [-120,120]
+cc_rv_lims: [-200,200]
 
 #------------------------------------------------------------------------------
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
+# Expected Kp value (TODO: this should be in the planet data)
+kp_expected: 105.2
+
 # Step size for the Kp-Vsys map in km/s. Same caveats as for cc_rv_step above.
 Kp_step: 1
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
-Kp_lims: [0,250]
+Kp_lims: [0,350]
 
 # This is the RV range of the x axis for our Kp-Vsys plots. This should be a
 # smaller range than cc_rv_lims, as the idea is we CC wider than we need, then
 # clip off the edges to a) remove edge effects, and b) focus on the region the
 # planet is actually in.
-kp_vsys_x_range: [-40,40]
+kp_vsys_x_range: [-120,120]
 
 # We exclude RVs within these bounds when computing the noise for our Kp-Vsys
 # maps. This range should be set to exclude the points around Vsys = 0, and
 # should be sufficiently smaller than kp_vsys_x_range to allow a reasonable
 # region from which to compute noise statistics for.
-kp_vsys_snr_rv_exclude: [-15, 15]
+kp_vsys_snr_rv_exclude: [-30, 30]

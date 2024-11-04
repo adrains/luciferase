@@ -1104,6 +1104,95 @@ def compute_Kp_vsys_map(
         return cc_rvs_subset, Kp_steps, Kp_vsys_map
     
 
+def calc_Kp_vsys_map_snr(
+    vsys_steps,
+    Kp_steps,
+    Kp_vsys_maps,
+    vsys_rv_exclude=(-30,30)):
+    """Scales Kp-Vsys maps to be in units of SNR. Noise is computed from the 
+    standard deviation of the map excluding the central +/-vsys_rv_exclude in 
+    Vsys space (the x axis), as is the background level.
+
+    SNR = (map - background) /  noise
+
+    The function also outputs the maximum SNR value of each map plus the
+    corresponding coordinates in Kp-Vsys.
+
+    Parameters
+    ----------
+    vsys_steps: 1D float array
+        Vector of RV steps of length [n_rv_step]
+    
+    Kp_steps: 1D float array
+        Vector of Kp steps of length [n_Kp_steps]
+
+    Kp_vsys_maps_snr: 3D or 4D float array
+        Float array of the *combined* Kp-Vsys map/s with shape: 
+        [n_sysrem_iter, n_Kp_steps, n_rv_step] 
+        or [n_map, n_sysrem_iter, n_Kp_steps, n_rv_step].
+
+    vsys_rv_exclude: int, default: (-30,30)
+        Vsys (i.e. X axis) bounds in km/s outside of which we compute the noise
+        level.
+
+    Returns
+    -------
+    snr_maps: 3D or 4D float array
+        Kp-Vsys map normalised to be in SNR units, of shape 
+        [n_map, n_sysrem_iter, n_kp_steps, n_rv_steps].
+    
+    max_snr, vsys_at_max_snr, kp_at_max_snr: 2D float array
+        Maximum SNR, and corresponding coordinates in velocity space, of shape
+        [n_map, n_sysrem_iter]
+    """
+    # Grab dimensions for convenience (this depends on how many maps we have)
+    if len(Kp_vsys_maps.shape) == 3:
+        (n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps.shape
+        Kp_vsys_maps = Kp_vsys_maps[None,:,:,:]
+        n_maps = 1
+    else:
+        (n_maps, n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps.shape
+
+    # Initialise return datastructures
+    snr_maps = np.full_like(Kp_vsys_maps, np.nan)
+    max_snr = np.full((n_maps, n_sysrem_iter), np.nan)
+    kp_at_max_snr = np.full((n_maps, n_sysrem_iter), np.nan)
+    vsys_at_max_snr = np.full((n_maps, n_sysrem_iter), np.nan)
+
+    # Loop over all maps
+    for map_i in range(n_maps):
+        # Loop over all SYSREM iterations
+        for sr_iter_i in range(n_sysrem_iter):
+            # Compute the SNR for this SYSREM iteration. To do this we compute
+            # the *noise* from the regions to the left/right of px_x_noise_lims
+            # (i.e. we mask out [px_x_noise_lims:-px_x_noise_lims] in x when 
+            # computing the noise). We then also need to subtract the median 
+            # value of the same region, which we can consider the 'background'.
+            noise_map = Kp_vsys_maps[map_i, sr_iter_i].copy()
+
+            exclude_mask = np.logical_and(
+                vsys_steps > vsys_rv_exclude[0],
+                vsys_steps < vsys_rv_exclude[1])
+
+            noise_map[:,exclude_mask] = np.nan
+            noise_std = np.nanstd(noise_map)
+            noise_med = np.nanmedian(noise_map)
+            snr = (Kp_vsys_maps[map_i, sr_iter_i] - noise_med) / noise_std
+
+            # Store
+            snr_maps[map_i, sr_iter_i] = snr
+
+            #------------------------------------------------------------------
+            # Calculating coordinates of maximum SNR
+            #------------------------------------------------------------------
+            (kp_i, vsys_i) = np.unravel_index(snr.argmax(), snr.shape)
+            max_snr[map_i, sr_iter_i] = snr[kp_i, vsys_i]
+            vsys_at_max_snr[map_i, sr_iter_i] = vsys_steps[vsys_i]
+            kp_at_max_snr[map_i, sr_iter_i] = Kp_steps[kp_i]
+
+    return snr_maps, max_snr, vsys_at_max_snr, kp_at_max_snr
+
+
 def combine_kp_vsys_map(Kp_vsys_map_list):
     """Combines Kp-Vsys maps from adjacent nights. We do this by masking out
     negative values and then adding in quadrature.

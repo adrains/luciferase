@@ -1133,6 +1133,15 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
 
         hel_corr = hel_corr.to(u.km/u.s)
 
+        # Weather info
+        obs_temp = fits_file[0].header["HIERARCH ESO TEL AMBI TEMP"]
+        rel_humidity = fits_file[0].header["HIERARCH ESO TEL AMBI RHUM"]
+        wind_dir = fits_file[0].header["HIERARCH ESO TEL AMBI WINDDIR"]
+        wind_speed = fits_file[0].header["HIERARCH ESO TEL AMBI WINDSP"]
+        seeing_start = fits_file[0].header["HIERARCH ESO TEL AMBI FWHM START"]
+        seeing_end = fits_file[0].header["HIERARCH ESO TEL AMBI FWHM END"]
+
+
     # Now that we've grabbed all the header information, go back to the 
     # redued file for the actual spectra
     with fits.open(reduced_fits) as fits_file:
@@ -1212,6 +1221,12 @@ def extract_single_nodding_frame(reduced_fits, nod_pos, slit_pos_spec_num=1):
         "hcor":hel_corr.value,
         "nod_pos":nod_pos,
         "raw_file":raw_fits_path,
+        "obs_temp":obs_temp,
+        "rel_humidity":rel_humidity,
+        "wind_dir":wind_dir,
+        "wind_speed":wind_speed,
+        "seeing_start":seeing_start,
+        "seeing_end":seeing_end,
     }
 
     return nod_pos_dict
@@ -1288,7 +1303,8 @@ def extract_nodding_time_series(
     # Initialise pandas data frame for time series results
     df_cols = ["mjd_start", "mjd_mid", "mjd_end", "jd_start", "jd_mid", 
         "jd_end", "airmass", "bcor", "hcor", "ra", "dec", "exptime_sec", 
-        "nod_pos", "raw_file"]
+        "nod_pos", "raw_file", "obs_temp", "rel_humidity", "wind_dir",
+        "wind_speed", "seeing_start", "seeing_end",]
 
     transit_df = pd.DataFrame(
         data=np.full((n_files, len(df_cols)), np.nan),
@@ -2169,11 +2185,16 @@ def dump_cc_results(
     cc_rvs,
     ccv_ps,
     ccv_comb,
+    vsys_steps,
     Kp_steps,
     Kp_vsys_map_ps,
     Kp_vsys_map_comb,
     Kp_vsys_map_ps_all_nights,
     Kp_vsys_map_comb_all_nights,
+    nightly_snr_maps,
+    max_snr,
+    vsys_at_max_snr,
+    kp_at_max_snr,
     sysrem_settings,):
     """Used to dump the results of scripts_transit/run_cc.py to disk as a 
     pickle file.
@@ -2213,6 +2234,14 @@ def dump_cc_results(
         Grid of the combined *joint* Kp_vsys map for all nights, of shape: 
         [n_sysrem_iter, n_Kp_steps, n_rv_step]
 
+    nightly_snr_maps: 3D or 4D float array
+        Kp-Vsys map normalised to be in SNR units, of shape 
+        [n_map, n_sysrem_iter, n_kp_steps, n_rv_steps].
+    
+    max_snr, vsys_at_max_snr, kp_at_max_snr: 2D float array
+        Maximum SNR, and corresponding coordinates in velocity space, of shape
+        [n_map, n_sysrem_iter]
+
     sysrem_settings: YAMLSettings object
         Settings object with attributes equivalent to YAML keys.
     """
@@ -2221,11 +2250,16 @@ def dump_cc_results(
         "cc_rvs":cc_rvs,
         "ccv_ps":ccv_ps,
         "ccv_comb":ccv_comb,
+        "vsys_steps":vsys_steps,
         "Kp_steps":Kp_steps,
         "Kp_vsys_map_ps":Kp_vsys_map_ps,
         "Kp_vsys_map_comb":Kp_vsys_map_comb,
         "Kp_vsys_map_ps_all_nights":Kp_vsys_map_ps_all_nights,
         "Kp_vsys_map_comb_all_nights":Kp_vsys_map_comb_all_nights,
+        "nightly_snr_maps":nightly_snr_maps,
+        "max_snr":max_snr, 
+        "vsys_at_max_sn":vsys_at_max_snr,
+        "kp_at_max_snr":kp_at_max_snr,
         "sysrem_settings":sysrem_settings,}
 
     # Dump to disk as a pickle
