@@ -90,6 +90,11 @@ continuum_correction_kind: "per_phase"
 # Spectral resolution to smooth the continuum normalisation to
 continuum_corr_smoothing_resolution: 1000
 
+# Edge pixels to mask. If True, we set the edge pixels on each side of all
+# detectors to nan before doing continuum normalisation and running SYSREM.
+do_mask_detector_edges: True
+edge_px_to_mask: 20
+
 #------------------------------------------------------------------------------
 # SYSREM Settings
 #------------------------------------------------------------------------------

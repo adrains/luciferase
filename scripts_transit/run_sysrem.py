@@ -60,6 +60,17 @@ for transit_i in range(ss.n_transit):
         telluric_mask_2D[None,:,:], (n_phase, n_spec, n_px))
 
     #--------------------------------------------------------------------------
+    # [Optional] Mask out edge pixels
+    #--------------------------------------------------------------------------
+    if ss.do_mask_detector_edges:
+        px_to_mask = np.logical_or(
+            np.arange(n_px) < ss.edge_px_to_mask,
+            np.arange(n_px) > n_px - ss.edge_px_to_mask,)
+        
+        fluxes_list[transit_i][:,:,px_to_mask] = np.nan
+        sigmas_list[transit_i][:,:,px_to_mask] = np.nan
+
+    #--------------------------------------------------------------------------
     # Import and prepare fluxes for this night
     #--------------------------------------------------------------------------
     # Option 1) Load *physically meaningfully* continuum normalised fluxes
@@ -88,7 +99,7 @@ for transit_i in range(ss.n_transit):
             continuum_correction_kind=ss.continuum_correction_kind,
             continuum_ratio_smoothing_resolution=\
                 ss.continuum_corr_smoothing_resolution,
-            do_diagnostic_plotting=False,)
+            do_diagnostic_plotting=True,)
 
     #--------------------------------------------------------------------------
     # [Optional] Regrid the data to be in the stellar rest frame
