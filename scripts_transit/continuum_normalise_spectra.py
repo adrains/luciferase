@@ -41,11 +41,41 @@ for transit_i in range(ss.n_transit):
     # Run continuum normalisation once for each A/B sequence
     if ss.do_split_sequences_continuum_norm:
         # Create arrays
-        fluxes_norm = np.zeros()
-        sigmas_norm = np.zeros()
-        poly_coeff = np.zeros()
+        fluxes_norm = np.zeros_like(fluxes_list[transit_i])
+        sigmas_norm = np.zeros_like(sigmas_list[transit_i])
+        poly_coeff = np.zeros((n_phase, n_spec, 2))
+
+        # Grab sequences
+        nod_pos = transit_info_list[transit_i]["nod_pos"].values
+        sequence_masks = [nod_pos == "A", nod_pos == "B"]
+        sequences = ["A", "B"]
+
+        # Loop over both sequences
+        for seq, sm in zip(sequences, sequence_masks):
+            print("Running on {} sequence".format(seq))
+            fluxes_seq, sigmas_seq, poly_coeff_seq = \
+                lsp.continuum_normalise_all_spectra_with_telluric_model(
+                    waves_sci=waves,
+                    fluxes_sci=fluxes_list[transit_i][sm],
+                    sigmas_sci=sigmas_list[transit_i][sm],
+                    wave_telluric=telluric_wave,
+                    trans_telluric=telluric_trans,
+                    wave_stellar=wave_stellar,
+                    spec_stellar=spec_stellar,
+                    bcors=transit_info_list[transit_i]["bcor"].values[sm],
+                    rv_star=syst_info.loc["rv_star", "value"],
+                    airmasses=\
+                        transit_info_list[transit_i]["airmass"].values[sm],
+                    seq=seq,)
+            
+            # Store
+            fluxes_norm[sm] = fluxes_seq
+            sigmas_norm[sm] = sigmas_seq
+            poly_coeff[sm] = poly_coeff_seq
+
     # Continuum normalise the entire cube at once
     else:
+        print("Running on combined A/B sequence")
         fluxes_norm, sigmas_norm, poly_coeff = \
             lsp.continuum_normalise_all_spectra_with_telluric_model(
                 waves_sci=waves,
@@ -57,7 +87,8 @@ for transit_i in range(ss.n_transit):
                 spec_stellar=spec_stellar,
                 bcors=transit_info_list[transit_i]["bcor"].values,
                 rv_star=syst_info.loc["rv_star", "value"],
-                airmasses=transit_info_list[transit_i]["airmass"].values,)
+                airmasses=transit_info_list[transit_i]["airmass"].values,
+                seq="AB",)
 
     # Construct bad px mask from tellurics
     print("Constructing bad px mask from tellurics...")
