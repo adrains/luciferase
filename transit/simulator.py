@@ -1983,12 +1983,27 @@ def simulate_transit_multiple_epochs(
     rest_frame_epoch["planet_area_frac_mid"] = 1    # Don't zero planet signal!
     rest_frame_epoch["mu_mid"] = np.nanmax(mus_marcs[:,0])  # HACK in case no 1
     rest_frame_epoch["airmass"] = 1
+    
+    # It makes more sense to include the component vectors in the rest frame,
+    # but for compatability reasons with TSD we'll leave as is for now.
     rest_frame_epoch["gamma"] = np.median(transit_info["gamma"].values)
     rest_frame_epoch["beta"] = np.median(transit_info["beta"].values)
     rest_frame_epoch["delta"] = np.median(transit_info["delta"].values)
     
     rest_frame_epoch["v_y_start"] = np.median(transit_info["v_y_start"].values)
     rest_frame_epoch["v_y_end"] = np.median(transit_info["v_y_end"].values)
+
+    # The below code will be used to set the components to be in the rest-frame
+    if False:
+        rest_frame_epoch["gamma"] = 0       # All
+        rest_frame_epoch["beta"] = 0        # velocities
+        rest_frame_epoch["delta"] = 0       # in rest frame
+        
+        delta_v_y = np.median(
+            transit_info["v_y_mid"].values - transit_info["v_y_start"].values)
+
+        rest_frame_epoch["v_y_start"] = -delta_v_y
+        rest_frame_epoch["v_y_end"] = delta_v_y
     
     print("Generating component vectors...")
     _, component_vectors = simulate_transit_single_epoch(

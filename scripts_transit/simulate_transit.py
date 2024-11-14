@@ -11,8 +11,6 @@ import numpy as np
 import transit.simulator as sim
 import transit.utils as tu
 import transit.plotting as tplt
-import luciferase.spectra as lsp
-import luciferase.utils as lu
 import datetime
 
 # -----------------------------------------------------------------------------
