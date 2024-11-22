@@ -3015,7 +3015,8 @@ def continuum_normalise_all_spectra_with_telluric_model(
     spec_stellar,
     bcors,
     rv_star,
-    airmasses,):
+    airmasses,
+    seq="",):
     """Function to continuum normalise spectra via 1D polynomial to each
     spectral segment optimised to a telluric spectrum and stellar mask.
 
@@ -3048,6 +3049,9 @@ def continuum_normalise_all_spectra_with_telluric_model(
     airmasses: float array
         Array of airmasses of shape [n_phase]. These are applied to the
         telluric transmission vector.
+    
+    seq: str, default: ""
+        Sequence, either 'A', 'B', or 'AB'.
 
     Returns
     -------
@@ -3248,7 +3252,7 @@ def continuum_normalise_all_spectra_with_telluric_model(
             ncol=4,)
 
     plt.tight_layout()
-    plt.savefig("plots/sysrem_telluric_norm_n_phase_{}.pdf".format(n_phase))
+    plt.savefig("plots/continuum_norm_n_phase_{}{}.pdf".format(n_phase, seq))
 
     return fluxes_sci_norm, sigmas_sci_norm, poly_coeff_all
 

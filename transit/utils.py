@@ -2257,8 +2257,8 @@ def dump_cc_results(
         "Kp_vsys_map_ps_all_nights":Kp_vsys_map_ps_all_nights,
         "Kp_vsys_map_comb_all_nights":Kp_vsys_map_comb_all_nights,
         "nightly_snr_maps":nightly_snr_maps,
-        "max_snr":max_snr, 
-        "vsys_at_max_sn":vsys_at_max_snr,
+        "max_snr":max_snr,
+        "vsys_at_max_snr":vsys_at_max_snr,
         "kp_at_max_snr":kp_at_max_snr,
         "sysrem_settings":sysrem_settings,}
 

@@ -9,11 +9,12 @@
 # Settings for how to save our simulated datacube. The path is constructed as:
 #   <save_path>/transit_data_<label>_<sim_info>_n<n_transits>.fits
 # where <sim_info> is:
-#   <species>_stellar_<1/0>_telluric_<1/0>_planet_<1/0>_boost_<N>_SNR_<N>
-# where each molecule, boolean, or number corresponds to the values set below.
+#   stellar_<1/0>_telluric_<1/0>_planet_<1/0>_boost_<N>_slit_loss_<1/0>
+#   _vsys_offset_<N>_SNR_<N>
+# where each boolean, or number corresponds to the values set below.
 save_path: "simulations"
 star_name: "wasp107"
-label: "simulated_R100000_wasp107"
+label: "simulated_R100000_wasp107_W24"
 
 # Number of transits to simulate, which *must* correspond to the number of
 # transits of real data in the base fits file of observed data.
@@ -21,7 +22,7 @@ n_transit: 2
 
 # For simulating a transit we currently just swap out the fluxes from an
 # pre-existing datacube made by scripts_transit/prepare_transit_model_fits.py
-base_fits_path: ""
+base_fits_path: "simulations"
 base_fits_label: "wasp107"
 
 # Model stellar spectrum--this should *not* be continuum normalised.
@@ -30,12 +31,18 @@ marcs_fits: "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49.fits"  # mu sampl
 
 # Model planet spectrum fits file containing planet Rp (R_jup) vs lambda (um).
 # This file is made by: scripts_transit/make_planet_transmission_grid_fits.py
-planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
+#planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
+planet_fits: "templates/WASP107b_Welbanks_CHI-Ret_templates_all_R100000.fits"
 
 # Select the molecular species to be modelled. The species selected must have
 # a combined spectrum available in planet_fits, see the HDU labelled
 # "TEMPLATE_INFO" for more information.
-species_to_model: ["H2O", "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
+
+# Welbanks+24 Species
+species_to_model: ["H2O", "CH4", "NH3", "CO", "CO2", "SO2", "H2S"]
+
+# Dyrek+24 Species
+#species_to_model: ["H2O", "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
 
 # Molecfit modelled telluric spectra--one per night to be simulated
 molecfit_fits:
@@ -74,9 +81,14 @@ correct_for_blaze: True
 # generate n_phase random points between 0 and 2, and use a Savitzky–Golay to
 # smooth this using a window size of savgol_window_frac_size * n_phase and a
 # polynomial order of savgol_poly_order.
-scale_vector_method: "constant_unity"
+scale_vector_method: "smoothed_random"
 savgol_window_frac_size: 0.5
 savgol_poly_order: 3
+
+# Vsys offset, used for testing and comparing simulations to injection tests.
+# If zero the system is simulated with the observed Vsys RV value. If set to a
+# non-zero value we instead add an offset to Vsys when simulating.
+vsys_offset: 0 # km/s
 
 # -----------------------------------------------------------------------------
 # Continuum normalisation
@@ -108,4 +120,4 @@ planet_transmission_boost_fac: 1
 # Target SNR for the brightest order before correcting for the blaze. Used to
 # rescale spectra and affects applied noise. Set to None to not add noise and
 # have 'infinite' SNR.
-target_snr: 50
+target_snr: 130

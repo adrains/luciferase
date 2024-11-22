@@ -51,7 +51,8 @@ if ss.base_fits_path == "":
         ss.base_fits_label, ss.n_transit))
 else:
     print("\tBase fits\t\t{}/transit_data_{}_n{}.fits".format(
-        ss.base_fits_path, ss.base_fits_label, ss.n_transit))
+        ss.base_fits_path, ss.base_fits_label, ss.n_transit))   
+print("\tPlanet template\t\t{}".format(ss.planet_fits))
 if ss.target_snr is None:
     print("\tSNR\t\t\tinf")
 else:
@@ -60,9 +61,14 @@ print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_model)))
 print("\tBoost Fac\t\t{:0.0f}x".format(ss.planet_transmission_boost_fac))
 print("\tBlaze Corr\t\t{}".format(ss.correct_for_blaze))
 print("\tScale Vec\t\t{}".format(ss.scale_vector_method))
+print("\tVsys offset\t\t{} km/s".format(ss.vsys_offset))
 print("\tUniform stellar\t\t{}".format(ss.do_use_uniform_stellar_spec))
 print("\tUniform telluric\t{}".format(ss.do_use_uniform_telluric_spec))
 print("\tUniform planet\t\t{}\n".format(ss.do_use_uniform_planet_spec))
+
+# [Optional] Offset Vsys
+if ss.vsys_offset != 0:
+    syst_info.loc["rv_star", "value"] += ss.vsys_offset
 
 # Run separately for each transit
 for transit_i in range(ss.n_transit):
@@ -137,12 +143,12 @@ model_slit_losses = 1 if ss.scale_vector_method == "smoothed_random" else 0
 fn_label = "_".join([
     "{}".format(ss.label),
     date_str,
-    "{}".format(species_str),
     "stellar_{:0.0f}".format(int(not ss.do_use_uniform_stellar_spec)),
     "telluric_{:0.0f}".format(int(not ss.do_use_uniform_telluric_spec)),
     "planet_{:0.0f}".format(int(not ss.do_use_uniform_planet_spec)),
     "boost_{:0.0f}".format(ss.planet_transmission_boost_fac),
     "slit_loss_{:0.0f}".format(model_slit_losses),
+    "vsys_offset_{:0.0f}".format(ss.vsys_offset),
     "SNR_{:0.0f}".format(target_snr),])
 
 # Construct fits table of simulation information
