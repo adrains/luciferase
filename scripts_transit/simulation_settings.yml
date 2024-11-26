@@ -25,6 +25,22 @@ n_transit: 2
 base_fits_path: "simulations"
 base_fits_label: "wasp107"
 
+# If True, we can also simulate transits that we didn't observe  by using 
+# scripts_transit/make_fake_transit_headers.py to generate the equivalent
+# header + timestep info that is associated with the observed transits. These
+# are stored in CSV format, and should be listed below. If True, any
+# uncommented CSVs are used during the simulation, and this number should
+# correspond to the number of fits files listed under molecfit_fits below.
+do_simulate_unobserved_transits: False
+unobserved_transit_dataframes:
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2022-04-03.csv"
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2022-06-27.csv"
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2023-03-18.csv"
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2023-05-20.csv"
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-02-07.csv"
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-05-03.csv"
+- "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-05-26.csv"
+
 # Model stellar spectrum--this should *not* be continuum normalised.
 #marcs_fits: "synth/template_wasp107_230623.fits"                     # non-mu sampled
 marcs_fits: "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49.fits"  # mu sampled
@@ -47,9 +63,15 @@ species_to_model: ["H2O", "CH4", "NH3", "CO", "CO2", "SO2", "H2S"]
 # Molecfit modelled telluric spectra--one per night to be simulated
 molecfit_fits:
 - "data_reduction/WASP107/220310_WASP107/molecfit_results/MODEL/BEST_FIT_MODEL.fits"
-#- "data_reduction/WASP107/230222_WASP107/molecfit_results/BEST_FIT_MODEL.fits"
 - "data_reduction/wasp_107_n2/BEST_FIT_MODEL.fits"
-# HACK--note that I need to run the second night through molecfit again
+- "templates/molecfit_AL/molecfit_BFM_A_220311_GJ1214.fits"
+- "templates/molecfit_AL/molecfit_BFM_A_220330_GJ1214.fits"
+- "templates/molecfit_AL/molecfit_BFM_A_220703_GJ1214.fits"
+- "templates/molecfit_AL/molecfit_BFM_A_220810_GJ1214.fits"
+- "templates/molecfit_AL/molecfit_BFM_A_230622_GJ1214.fits"
+- "templates/molecfit_AL/molecfit_BFM_A_230810_GJ1214.fits"
+- "templates/molecfit_AL/molecfit_BFM_A_240806_GJ1214.fits"
+#- "templates/molecfit_AL/molecfit_BFM_A_220311_GJ1214.fits"
 
 # CRIRES+ throughput data from the ETC
 throughput_json_path: "data/crires_etc_throughput_K2148.json"

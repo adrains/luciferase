@@ -1,13 +1,16 @@
-"""Simulates multiple transits.
+"""Simulates multiple transits as observed by CRIRES+. The starting point for
+any simulation is to load in the fits file produced by scripts_transit/
+prepare_transit_model_fits.py from which we take the wavelength scale, detector
+and order numbering, star/planet system info, and header/timestep info. Using
+this as a base it is also possible to simulate unobserved transits by importing
+the DataFrames saved by scripts_transit/make_fake_transit_headers.py as CSV
+files. 
 
-For simplicity, to begin with we'll just duplicate an already observed transit
-which saves the trouble of having to predict observational factors like
-airmass, barycentric correction, etc. To do this, we require that we've already
-run prepare_transit_model.py and have a fits file. We'll simply load in this
-fits file and swap out the fluxes. Eventually we'll move to simulating an
-arbitrary transit.
+All the settings for running this script can be found in 
+scripts_transit/simulation_settings.yml.
 """
 import numpy as np
+import pandas as pd
 import transit.simulator as sim
 import transit.utils as tu
 import transit.plotting as tplt
@@ -32,6 +35,19 @@ waves, _, _, det, orders, transit_info_list, syst_info = \
         ss.base_fits_label,
         n_transit=ss.n_transit,)
 
+# Add in any extra unobserved transits to be simulated, which increments
+# n_transit as stored in the YAML file. All that is needed to simulate these
+# unobserved transits is to append their transit_info DataFrames onto the end
+# of transit_info_list after those constructed from the observed transits.
+n_transit_observed = ss.n_transit
+n_transit_unobserved = 0
+
+if ss.do_simulate_unobserved_transits:
+    for fn in ss.unobserved_transit_dataframes:
+        transit_info_list.append(pd.read_csv(fn))
+        ss.n_transit += 1
+        n_transit_unobserved += 1
+
 # Initialise arrays for keeping track of simulated spectra
 model_flux_list = []
 model_sigma_list = []
@@ -48,10 +64,13 @@ line = "-"*80
 print(line, "\nSimulation Settings\n", line, sep="")
 if ss.base_fits_path == "":
     print("\tBase fits\t\ttransit_data_{}_n{}.fits".format(
-        ss.base_fits_label, ss.n_transit))
+        ss.base_fits_label, n_transit_observed))
 else:
     print("\tBase fits\t\t{}/transit_data_{}_n{}.fits".format(
-        ss.base_fits_path, ss.base_fits_label, ss.n_transit))   
+        ss.base_fits_path, ss.base_fits_label, n_transit_observed))
+
+print("\tN transits\t\t{} ({}+{})".format(
+    ss.n_transit, n_transit_observed, n_transit_unobserved))
 print("\tPlanet template\t\t{}".format(ss.planet_fits))
 if ss.target_snr is None:
     print("\tSNR\t\t\tinf")
