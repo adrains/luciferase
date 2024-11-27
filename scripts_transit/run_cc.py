@@ -10,15 +10,14 @@ The following plots are generated:
  4) Per-sequence Kp-Vsys map for all spectral segments
  5) Template auto-correlation per spectral segment
  6) Combined Kp-Vsys map for all spectral segments
- 7) Combined Kp-Vsys map for all nights + combined nights
+ 7) Combined CCF plots for all sequences
+ 8) Combined Kp-Vsys map for all nights + combined nights
 """
 import os
 import numpy as np
 import transit.utils as tu
 import transit.sysrem as sr
 import transit.plotting as tplt
-import astropy.units as u
-from astropy import constants as const
 
 #------------------------------------------------------------------------------
 # Settings
@@ -75,7 +74,8 @@ if ss.do_mask_orders_for_analysis:
 else:
     print("\tSpectral segments\tAll")
 print("\tSplit A/B sequences\t{}".format(ss.split_AB_sequences))
-print("\tPer-px resid weighting\t{}".format(ss.normalise_resid_by_per_phase_std))
+print("\tPer-px resid weighting\t{}".format(
+    ss.normalise_resid_by_per_phase_std))
 print("\tRV frame\t\t{}".format(rv_frame))
 print("\tCC RV step\t\t{:0.2f} km/s".format(ss.cc_rv_step))
 print("\tCC RV limits\t\t{:0.0f} - {:0.0f} km/s".format(*ss.cc_rv_lims))
@@ -89,6 +89,9 @@ print("-"*80)
 #------------------------------------------------------------------------------
 ccv_per_spec_all = []
 ccv_combined_all = []
+planet_rvs_per_seq = []
+rv_bcor_median_per_seq = []
+in_transit_mask_per_seq = []
 Kp_vsys_map_per_spec_all = []
 Kp_vsys_map_combined_all = []
 
@@ -123,7 +126,7 @@ for transit_i in range(n_transit):
         sequences = ["AB"]
     
     #--------------------------------------------------------------------------
-    # Loop over each sequence for this night
+    # Loop over each sequence (A, B, or AB) for this night
     #--------------------------------------------------------------------------
     for seq, seq_mask in zip(sequences, sequence_masks):
         print("\nRunning on night {}/{}, seq {}".format(
@@ -147,9 +150,10 @@ for transit_i in range(n_transit):
             resid_all_full = resid_all
             resid_all = resid_all[:,:,ss.selected_segments,:]
 
-        # Grab planet RVs for overplotting on CC plot
-        planet_rvs = transit_info_seq["delta"].values
-        planet_rvs = planet_rvs * const.c.cgs.to(u.km/u.s).value
+        # Grab planet RVs for overplotting on CC plot. Note that we have to use
+        # v_y_mid rather than delta, since delta contains the barycentric and 
+        # systemic velocities that we've already corrected for.
+        planet_rvs = transit_info_seq["v_y_mid"].values
 
         #----------------------------------------------------------------------
         # Cross-correlation
@@ -177,6 +181,9 @@ for transit_i in range(n_transit):
         else: 
             rv_bcors = -1*bcors + rv_star + rv_offset
 
+        # Bookkeeping for CCF plotting later
+        rv_bcor_median_per_seq.append(np.median(-1*bcors) + rv_star)
+
         # Normalise (i.e. weight) residuals by per-px std computed over all
         # phases (within a given night). This downweights time-varying pixels,
         # specifically those associated with tellurics.
@@ -198,14 +205,17 @@ for transit_i in range(n_transit):
         # Store
         ccv_per_spec_all.append(ccv_per_spec)
         ccv_combined_all.append(ccv_combined)
+        planet_rvs_per_seq.append(planet_rvs)
+        in_transit_mask_per_seq.append(in_transit)
 
-        # Plot cross-correlation
-        tplt.plot_sysrem_cc_2D(
+        # Plot *per-segment* cross-correlation
+        tplt.plot_2D_CCF_per_spectral_segment(
             cc_rvs=cc_rvs,
             ccv_per_spec=ccv_per_spec,
             ccv_combined=ccv_combined,
             mean_spec_lambdas=np.mean(waves,axis=1),
             planet_rvs=planet_rvs,
+            in_transit_mask=in_transit,
             plot_label="{}_n{}_{}_{}".format(
                 ss.label, transit_i+1, seq, species_label),
             plot_folder=plot_folder,)
@@ -366,6 +376,18 @@ tplt.plot_combined_kp_vsys_map_as_snr(
     kp_at_max_snr=kp_at_max_snr,
     plot_suptitle="[{}] {}: {}".format(rv_frame, ss.label, species_list),
     plot_label="{}_all_seq_{}".format(ss.label, species_label),
+    plot_folder=plot_folder,)
+
+# Also plot combined CCFs for each sequence separately
+tplt.plot_2D_CCF_per_seq(
+    cc_rvs=cc_rvs,
+    ccv_per_seq=ccv_combined_all,
+    plot_titles=combined_map_titles,
+    planet_rvs_per_seq=planet_rvs_per_seq,
+    rv_bcor_median_per_seq=rv_bcor_median_per_seq,
+    in_transit_mask_per_seq=in_transit_mask_per_seq,
+    plot_label="{}_{}".format(
+        ss.label, species_label),
     plot_folder=plot_folder,)
 
 #------------------------------------------------------------------------------

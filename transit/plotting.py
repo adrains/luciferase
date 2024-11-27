@@ -751,20 +751,28 @@ def plot_sysrem_cc_1D(
         cbar.set_label("Phase")
 
 
-def plot_sysrem_cc_2D(
+def plot_2D_CCF_per_spectral_segment(
     cc_rvs,
     ccv_per_spec,
     ccv_combined=None,
     mean_spec_lambdas=None,
     planet_rvs=None,
+    in_transit_mask=None,
     fig_size=(18, 6),
     plot_label="",
-    plot_folder="plots/",):
+    plot_folder="plots/",
+    xtick_major=40,
+    xtick_minor=20,):
     """Function to plot a 2D plot of the values obtained by cross correlating
     against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
-    and n_cols = 1. By 2D it is meant that the x axis is the RV value used in
+    and n_cols = n_spec (+1 if plotting the combined CCF of all spectral
+    segments). By 2D it is meant that the x axis is the RV value used in
     the cross correlation, and the y axis is the phase, with the cross 
     correlation value being represented by a colour bar.
+
+    This function should be used for visualising the CCF for separate spectral
+    segments *within* a given observational sequence (either night, or night+
+    nodding position).
 
     Parameters
     ----------
@@ -784,6 +792,10 @@ def plot_sysrem_cc_2D(
 
     planet_rvs: 1D float array or None, default: None
         Array of planet RVs of shape [n_phase].
+
+    in_transit_mask: bool array
+        Boolean array of shape [n_phase] indicating when the planet is
+        transiting.
     
     fig_size: float tuple, default: (18, 6)
         Size of the figure.
@@ -793,6 +805,9 @@ def plot_sysrem_cc_2D(
 
     plot_folder: str, default: "plots/"
         Folder to save plots to. By default just a subdirectory called plots.
+
+    xtick_major, xtick_minor: float, default: 20, 10
+        Major and minor ticks for the x axis of the CCF in km/s.
     """
     # If we've been given a set of combined cross-correlation values, 
     # concatenate these to the end of our array so they can be plotted on their
@@ -844,9 +859,11 @@ def plot_sysrem_cc_2D(
                 #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
                 #norm=colors.PowerNorm(gamma=5))
 
-            axis.tick_params(axis='both', which='major', labelsize="x-small")
-            axis.xaxis.set_major_locator(plticker.MultipleLocator(base=10))
-            axis.xaxis.set_minor_locator(plticker.MultipleLocator(base=5))
+            axis.tick_params(axis='both', which='major', labelsize="xx-small")
+            axis.xaxis.set_major_locator(
+                plticker.MultipleLocator(base=xtick_major))
+            axis.xaxis.set_minor_locator(
+                plticker.MultipleLocator(base=xtick_minor))
             axes[sr_iter_i, spec_i].tick_params(axis='x', labelrotation=45)
 
             # Only show titles on the top (and if we've been given them)
@@ -875,9 +892,19 @@ def plot_sysrem_cc_2D(
             else:
                 axis.set_ylabel("Phase (#)", fontsize="x-small")
 
-            # Plot planet trace if we have it
-            if planet_rvs is not None:
-                axis.plot(planet_rvs, np.arange(n_phase), "--", color="white",)
+            # Plot planet trace if we have it. Note that we only want to show
+            # the trace for the phases where the planet is *not* transiting so
+            # as to not cover the trace as visible in the CCF itself.
+            if planet_rvs is not None and in_transit_mask is not None:
+                planet_rvs_masked = planet_rvs.copy()
+                planet_rvs_masked[in_transit_mask] = np.nan
+
+                axis.plot(
+                    planet_rvs_masked,
+                    np.arange(n_phase),
+                    linestyle="-",
+                    color="white",
+                    linewidth=0.5,)
 
         # Highlight the combined axes
         if ccv_combined is not None:
@@ -896,10 +923,173 @@ def plot_sysrem_cc_2D(
         os.mkdir(plot_folder)
 
     if plot_label == "":
-        plot_fn = os.path.join(plot_folder, "crosscorr_2D")
+        plot_fn = os.path.join(plot_folder, "ccf_2D_per_spectral_segment")
     else:
         plot_fn = os.path.join(
-            plot_folder, "crosscorr_2D_{}".format(plot_label))
+            plot_folder, "ccf_2D_per_spectral_segment_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
+
+
+def plot_2D_CCF_per_seq(
+    cc_rvs,
+    ccv_per_seq,
+    plot_titles,
+    planet_rvs_per_seq,
+    in_transit_mask_per_seq,
+    rv_bcor_median_per_seq,
+    fig_size=(18, 10),
+    plot_label="",
+    plot_folder="plots/",
+    xtick_major=40,
+    xtick_minor=20,):
+    """Function to plot a 2D plot of the values obtained by cross correlating
+    against a grid of SYSREM residuals. The plot has n_rows = n_sysrem_iter,
+    and n_cols = n_seq. For each panel the x axis is the RV value used in the
+    cross correlation, and the y axis is the phase, with the cross correlation
+    value being represented by a colour bar. We also overplot the expected
+    velocity trace of the planet and the median telluric rest frame position.
+
+    This function should be used for plotting the conbined CCFs for separate
+    sequences (either separate nights, or night + nod pos combos), e.g. four
+    columns for Night 1 (A), Night 1 (B), Night 2 (A), Night 2 (B).
+
+    Parameters
+    ----------
+    cc_rvs: 1D float array
+        Vector of RV steps of length [n_rv_step]
+    
+    ccv_per_seq: List of 3D float arrays
+        List of 3D float array of cross correlation results for each sequence
+        with shape: [n_seq [n_sysrem_iter, n_phase, n_rv_step]].
+
+    plot_titles: str array
+        Array of labels to be used as per-seq plot titles of shape [n_seq].
+
+    planet_rvs_per_seq: 1D float array
+        Array of planet RVs of shape [n_seq].
+
+    in_transit_mask_per_seq: list of bool arrays
+        List of length [n_seq] bool arrays of length [n_phase] indicating which
+        phases are in transit or not.
+
+    rv_bcor_median_per_seq: 1D float array
+        Array of length [n_seq] containing the median offset between the system
+        frame RV and the telluric rest frame, i.e. Vsys + bcor.
+    
+    fig_size: float tuple, default: (18, 6)
+        Size of the figure.
+
+    plot_label: str, default: ""
+        Unique identifier label to add to plot filename.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
+
+    xtick_major, xtick_minor: float, default: 20, 10
+        Major and minor ticks for the x axis of the CCF in km/s.
+    """
+    # Grab dimensions for convenience
+    n_seq = len(ccv_per_seq)
+    (n_sysrem_iter, n_phase, n_rv_step) = ccv_per_seq[0].shape
+
+    plt.close("all")
+    fig, axes = plt.subplots(
+        nrows=n_sysrem_iter,
+        ncols=n_seq,
+        sharex=True,
+        figsize=fig_size,)
+    
+    # For consistency, ensure we have a 2D array of axes (even if we don't)
+    #if n_spec == 1:
+    #    axes = axes[:,None]
+    
+    plt.subplots_adjust(
+        left=0.05, bottom=0.1, right=0.95, top=0.95, wspace=0.1)
+
+    #--------------------------------------------------------------------------
+    # Plot cross-correlation per spectral segment
+    #--------------------------------------------------------------------------
+    # Loop over all sequences
+    for seq_i in range(n_seq):
+        desc = "Plotting CC values for sequence {}/{}".format(seq_i+1, n_seq)
+        
+        (n_sysrem_iter, n_phase, n_rv_step) = ccv_per_seq[seq_i].shape
+
+        # [x_min, x_max, y_min, y_max]
+        extent = [np.min(cc_rvs), np.max(cc_rvs), n_phase, 0]
+
+        # Loop over all SYSREM iterations
+        for sr_iter_i in tqdm(range(n_sysrem_iter), desc=desc, leave=False):
+            # Grab axis for convenience
+            axis = axes[sr_iter_i, seq_i]
+
+            cmap = axis.imshow(
+                X=ccv_per_seq[seq_i][sr_iter_i],
+                aspect="auto",
+                interpolation="none",
+                extent=extent,)
+
+            axis.tick_params(axis='both', which='major', labelsize="xx-small")
+            axis.xaxis.set_major_locator(
+                plticker.MultipleLocator(base=xtick_major))
+            axis.xaxis.set_minor_locator(
+                plticker.MultipleLocator(base=xtick_minor))
+            axes[sr_iter_i, seq_i].tick_params(axis='x', labelrotation=45)
+
+            # Only show titles on the top (and if we've been given them)
+            if sr_iter_i == 0 and plot_titles is not None:
+                axis.set_title(
+                    label=plot_titles[seq_i],
+                    fontsize="x-small")
+
+            # Only show xticks on the bottom
+            if sr_iter_i != n_sysrem_iter-1:
+                axis.set_xticks([])
+            else:
+                axis.set_xlabel("RV Shift (km/s)", fontsize="x-small")
+
+            # Only show yticks on the left
+            if seq_i != 0:
+                    axes[sr_iter_i, seq_i].set_yticks([])
+            else:
+                axis.set_ylabel("Phase (#)", fontsize="x-small")
+
+            # Plot planet trace if we have it. Note that we only want to show
+            # the trace for the phases where the planet is *not* transiting so
+            # as to not cover the trace as visible in the CCF itself.
+            planet_rvs_masked = planet_rvs_per_seq[seq_i].copy()
+            planet_rvs_masked[in_transit_mask_per_seq[seq_i]] = np.nan
+
+            axis.plot(
+                planet_rvs_masked,
+                np.arange(n_phase),
+                linestyle="-",
+                color="white",
+                linewidth=0.5,)
+            
+            # Also plot where the location of the telluric rest-frame.
+            rv_bcor = np.full(n_phase, rv_bcor_median_per_seq[seq_i])
+            rv_bcor[in_transit_mask_per_seq[seq_i]] = np.nan
+
+            axis.plot(
+                -1*rv_bcor,
+                np.arange(n_phase),
+                linestyle="-",
+                color="white",
+                linewidth=0.5,)
+
+
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    if plot_label == "":
+        plot_fn = os.path.join(plot_folder, "ccf_2D_per_seq")
+    else:
+        plot_fn = os.path.join(
+            plot_folder, "ccf_2D_per_seq_{}".format(plot_label))
 
     plt.savefig("{}.pdf".format(plot_fn))
     plt.savefig("{}.png".format(plot_fn), dpi=300)
