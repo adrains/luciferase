@@ -1891,7 +1891,7 @@ def simulate_transit_multiple_epochs(
     
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
-        print("Simulating epoch {}...".format(epoch_i))
+        print("Simulating epoch {}/{}...".format(epoch_i+1, len(transit_info)))
         flux_counts, _ = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,

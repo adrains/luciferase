@@ -17,14 +17,14 @@ import transit.plotting as tplt
 import datetime
 
 # -----------------------------------------------------------------------------
-# Setup and Options
+# Import settings file
 # -----------------------------------------------------------------------------
 # Import our simulation settings from a separate YAML file
 simulation_settings_file = "scripts_transit/simulation_settings.yml"
 ss = tu.load_yaml_settings(simulation_settings_file)
 
 # -----------------------------------------------------------------------------
-# Running the simualator
+# Simulation setup
 # -----------------------------------------------------------------------------
 # Load in pre-prepared fits file summarising real CRIRES observations. At the
 # moment we simulate real transits using real airmass/phase/velocity info and
@@ -48,6 +48,22 @@ if ss.do_simulate_unobserved_transits:
         ss.n_transit += 1
         n_transit_unobserved += 1
 
+# For running non-literature values of the star-planet system (e.g. orbital
+# parameters), we can overrride the original version of syst_info and recompute
+# the time-step parameters (e.g. positions, velocities) at each time-step.
+if ss.do_update_syst_info:
+    # Reimport syst_info
+    syst_info = tu.load_planet_properties(ss.planet_properties_file)
+
+    for transit_i in range(ss.n_transit):
+        tu.calculate_transit_timestep_info(
+            transit_info=transit_info_list[transit_i],
+            syst_info=syst_info,
+            do_consider_vsini=ss.do_consider_vsini,)
+
+# -----------------------------------------------------------------------------
+# Running the simulator
+# -----------------------------------------------------------------------------
 # Initialise arrays for keeping track of simulated spectra
 model_flux_list = []
 model_sigma_list = []
@@ -62,13 +78,14 @@ line = "-"*80
 
 # Print summary
 print(line, "\nSimulation Settings\n", line, sep="")
+print("\tSimulation Label\t{}.fits".format(ss.label))
 if ss.base_fits_path == "":
     print("\tBase fits\t\ttransit_data_{}_n{}.fits".format(
         ss.base_fits_label, n_transit_observed))
 else:
     print("\tBase fits\t\t{}/transit_data_{}_n{}.fits".format(
         ss.base_fits_path, ss.base_fits_label, n_transit_observed))
-
+print("\tsyst_info updated?\t{}".format(ss.do_update_syst_info))
 print("\tN transits\t\t{} ({}+{})".format(
     ss.n_transit, n_transit_observed, n_transit_unobserved))
 print("\tPlanet template\t\t{}".format(ss.planet_fits))
@@ -91,7 +108,8 @@ if ss.vsys_offset != 0:
 
 # Run separately for each transit
 for transit_i in range(ss.n_transit):
-    print(line, "\nModelling transit #{}\n".format(transit_i+1), line, sep="")
+    iter_txt = "\nModelling transit {}/{}\n".format(transit_i+1, ss.n_transit)
+    print(line, iter_txt, line, sep="")
     model_flux, model_sigma, component_vectors = \
         sim.simulate_transit_multiple_epochs(
             wave_observed=waves*10,                 # Convert to Ångström

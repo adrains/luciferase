@@ -1,0 +1,39 @@
+# -------------------------------------------------------------------------------------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------------------------------------------------------------
+parameter               value                       sigma       reference          bib_ref                      comment
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Star: WASP 107    
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#gaia_dr3_id             3578638842054261248         NaN         Vallenari+2023     vallenari_gaia_2023          "Gaia DR3 source ID"
+#2mass_id                "2MASS J12333284-1008461"   NaN         Skrutskie+2006     skrutskie_two_2006           "2MASS ID"
+ra_deg                  188.3864140135              NaN         Vallenari+2023     vallenari_gaia_2023          "Right Ascension in deg"
+dec_deg                 -10.1462154233              NaN         Vallenari+2023     vallenari_gaia_2023          "Declination in deg"
+plx                     15.5277                     0.0260      Vallenari+2023     vallenari_gaia_2023          "Parallax"
+dist_pc                 64.40                       0.03        Vallenari+2023     vallenari_gaia_2023          "Distance, pc"
+rv_star                 14.06                       0.20        Vallenari+2023     vallenari_gaia_2023          "Systemic RV, km/s"
+K_mag_2mass             8.637                       0.023       Skrutskie+2006     skrutskie_two_2006           "2MASS Ks band magnitude"
+m_star_msun             0.683                       0.017       Piaulet+2021       piaulet_wasp-107bs_2021      "Stellar mass in solar mass units"
+r_star_rsun             0.67                        0.02        Piaulet+2021       piaulet_wasp-107bs_2021      "Stellar radius in solar units"
+teff_k                  4425                        70          Piaulet+2021       piaulet_wasp-107bs_2021      "Stellar effective temperature in K"
+logg                    4.633                       0.012       Piaulet+2021       piaulet_wasp-107bs_2021      "Stellar surface gravity"
+feh                     0.02                        0.09        Piaulet+2021       piaulet_wasp-107bs_2021      "Iron abundance"
+vsini                   2.5                         0.8         Anderson+2017      anderson_discoveries_2017    "Projected rotational velocity, km/s"
+ldc_init_a1             1.5060906                   NaN         NA                 NA                           "Initial value for limb darkening coefficient 1"
+ldc_init_a2             -1.8243528                  NaN         NA                 NA                           "Initial value for limb darkening coefficient 2"
+ldc_init_a3             1.3348740                   NaN         NA                 NA                           "Initial value for limb darkening coefficient 3"
+ldc_init_a4             -0.39044242                 NaN         NA                 NA                           "Initial value for limb darkening coefficient 4"
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Planet: WASP 107b 
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------
+a_planet_au             0.0553                      0.0013      Mocnik+2017        mocnik_starspots_2017        "Semimajor axis in AU"
+e_planet                0.06                        0.04        Piaulet+2021       piaulet_wasp-107bs_2021      "Eccentricity of the orbit"
+i_planet_deg            89.56                       0.078       Mocnik+2017        mocnik_starspots_2017        "Planet orbit inclination in degrees"
+omega_planet_deg        0.0                         NaN         NA                 NA                           "Omega, longitude of the ascending node in degrees"
+w_planet_deg            90.0                        NaN         Piaulet+2021       NA                           "omega, argument of periapsis in degrees"
+k_star_mps              14.1                        0.8         Piaulet+2021       piaulet_wasp-107bs_2021      "Stellar radial velocity amplitude in m/s"
+k_planet_kms            105.2                       2.5         Guilluy+2024       Guilluy_gaps_2024            "Exoplanet radial velocity amplitude in km/s"
+transit_dur_hours       2.73864                     0.00194     Mocnik+2017        mocnik_starspots_2017        "Transit duration in hours"
+jd0_days                2457584.329746              0.000011    Mocnik+2017        mocnik_starspots_2017        "Epoch of mid transit"
+period_planet_days      5.7214742                   NaN         Piaulet+2021       piaulet_wasp-107bs_2021      "Orbital period for planet b in days"
+m_planet_mearth         30.5                        1.7         Piaulet+2021       piaulet_wasp-107bs_2021      "Planet mass in Earth mass units"
+r_planet_rearth         10.04                       0.2         Mocnik+2017        mocnik_starspots_2017        "Planet radius in Earth radii"

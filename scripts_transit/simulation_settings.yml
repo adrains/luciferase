@@ -4,7 +4,7 @@
 # YAML specifications: https://yaml.org/spec/1.2.2/
 #
 #------------------------------------------------------------------------------
-# Model Settings
+# Model Overview
 #------------------------------------------------------------------------------
 # Settings for how to save our simulated datacube. The path is constructed as:
 #   <save_path>/transit_data_<label>_<sim_info>_n<n_transits>.fits
@@ -41,6 +41,25 @@ unobserved_transit_dataframes:
 - "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-05-03.csv"
 - "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-05-26.csv"
 
+# If this is true, then we reimport the syst_info data frame + update all the
+# previously computed values (e.g. positions, velocities) at each time step.
+# This is useful for quickly modifying aspects of the planet's orbit in a way
+# that is inconsistent with the literature values of the planet, obviating the
+# need to re-run scripts_transit/prepare_transit_model_fits.py.
+do_update_syst_info: False
+
+# Properties CSV with star, planet, and system info. Only applicable if 
+# do_update_syst_info is set to True.
+planet_properties_file: "scripts_transit/planet_data_wasp107.csv"
+
+# Whether to take stellar rotation into account when computing the Doppler
+# shift beta, otherwise gamma = beta. Only applicable if do_update_syst_info is
+# set to True.
+do_consider_vsini: False
+
+#------------------------------------------------------------------------------
+# Templates
+#------------------------------------------------------------------------------
 # Model stellar spectrum--this should *not* be continuum normalised.
 #marcs_fits: "synth/template_wasp107_230623.fits"                     # non-mu sampled
 marcs_fits: "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49.fits"  # mu sampled
@@ -73,6 +92,9 @@ molecfit_fits:
 - "templates/molecfit_AL/molecfit_BFM_A_240806_GJ1214.fits"
 #- "templates/molecfit_AL/molecfit_BFM_A_220311_GJ1214.fits"
 
+#------------------------------------------------------------------------------
+# Model specifics
+#------------------------------------------------------------------------------
 # CRIRES+ throughput data from the ETC
 throughput_json_path: "data/crires_etc_throughput_K2148.json"
 
