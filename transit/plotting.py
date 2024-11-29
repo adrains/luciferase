@@ -561,15 +561,25 @@ def plot_sysrem_residuals(
 
     Parameters
     ----------
-    wave: 2D float array
+    waves: 2D float array
         Wavelength vector of shape [n_spec, n_px]
     
     resid: 4D float array
-        3D float array of residuals with shape 
+        4D float array of residuals with shape 
         [n_sysrem_iter, n_phase, n_spec, n_px]
 
     fig_size: float array, default: (18,6)
         Shape of the figure.
+
+    do_sigma_clip: boolean, default: False
+        Whether to sigma clip the residuals prior to plotting to gain
+        additional dynamic range.
+
+    sigma_upper, sigma_lower: float, default: 5
+        Upper and lower sigma values to clip if do_sigma_clip.
+
+    max_iterations: int, default: 5
+        Max iterations to use when sigma clipping.
 
     plot_label: str, default: ""
         Filename label for plot, will be saved as sysrem_resid_<label>.pdf/png.
@@ -593,7 +603,7 @@ def plot_sysrem_residuals(
         figsize=fig_size,)
     
     plt.subplots_adjust(
-        left=0.05, bottom=0.05, right=0.95, top=0.925, wspace=0.1)
+        left=0.025, bottom=0.075, right=0.99, top=0.925, wspace=0.1)
 
     for sr_iter_i in range(n_sysrem_iter):
         desc = "Plotting SYSREM resid for iter #{}".format(sr_iter_i)
@@ -625,13 +635,8 @@ def plot_sysrem_residuals(
                 X=resid_ith,
                 aspect="auto",
                 interpolation="none",
-                #vmin=vmin,
-                #vmax=vmax,
                 extent=extent,
-                #norm=colors.LogNorm(vmin=vmin, vmax=vmax,))
-                #norm=colors.PowerNorm(gamma=2),
                 cmap="plasma",)
-                #cmap="PRGn")
 
             axis.tick_params(axis='both', which='major', labelsize="x-small")
             axis.xaxis.set_major_locator(plticker.MultipleLocator(base=4))
@@ -644,7 +649,9 @@ def plot_sysrem_residuals(
 
             # Only show Y labels on the left
             if spec_i == 0:
-                axis.set_ylabel("Iter #{}".format(sr_iter_i))
+                axis.set_ylabel(
+                    ylabel="Iter #{}".format(sr_iter_i),
+                    fontsize="x-small")
             
             # Only show yticks on the left
             else:
@@ -655,19 +662,6 @@ def plot_sysrem_residuals(
                 axis.set_title(
                     label=r"${:0.0f}\,\mu$m".format(np.median(waves[spec_i])),
                     fontsize="x-small")
-            
-            # Show just one colour bar per iteration
-            #ticks_norm = np.arange(0,1.25,0.25)
-            #ticks_rescaled = (ticks_norm * (vmax-vmin) + vmin).astype(int)
-
-            #fig.subplots_adjust(right=0.8)
-            divider = make_axes_locatable(axis)
-            cb_ax = divider.append_axes("right", size="5%", pad="1%")
-
-            #cb_ax = fig.add_axes([0.9, 0.05, 0.025, 0.9])  # [L, B, W, H]
-            cbar = fig.colorbar(cmap, cax=cb_ax, aspect=5)
-            #cbar.ax.set_yticklabels(ticks_rescaled)
-            #cbar.set_label("Mean Wavelength of Spectral Segment")
     
     plt.suptitle(plot_title, fontsize="small")
 
@@ -680,6 +674,91 @@ def plot_sysrem_residuals(
     else:
         plot_fn = os.path.join(
             plot_folder, "sysrem_resid_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
+
+
+def plot_sysrem_std(
+    waves,
+    resid_all,
+    plot_label="",
+    plot_folder="plots/",
+    plot_title="",):
+    """Function to plot the per-segment, per-phase (computed over all px)
+    standard deviation as a function of SYSREM iteration. The idea is to
+    inspect the *result* of the detrending (rather than the PCA components
+    themselves), and see if all phases/spectral segments are similarly being
+    affected by the detrending.
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Wavelength vector of shape [n_spec, n_px]
+    
+    resid_all: 4D float array
+        4D float array of residuals with shape 
+        [n_sysrem_iter, n_phase, n_spec, n_px]
+
+    plot_label: str, default: ""
+        Filename label for plot, will be saved as sysrem_resid_<label>.pdf/png.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
+
+    plot_title: str, default: ""
+        Suptitle for the plot.
+    """
+    (n_sr, n_phase, n_spec, n_px) = resid_all.shape
+
+    mean_spec_lambdas = np.mean(waves,axis=1)
+    
+    # Setup our x-values--we skip plotting the first two iterations for dynamic
+    # range reasons.
+    sysrem_iterations = np.arange(2, n_sr)
+
+    # Plot one panel per spectral segment, with one line per phase, showing
+    # the standard deviation as a function of SYSREM iteration.
+    plt.close("all")
+    fig, axes = plt.subplots(ncols=n_spec, figsize=(25,10), sharey=True)
+    plt.subplots_adjust(
+            left=0.05, bottom=0.075, right=0.99, top=0.95, wspace=0.1)
+
+    for spec_i in range(n_spec):
+        for phase_i in range(n_phase):
+            cmap = cm.get_cmap("magma")
+            colour = cmap(phase_i/n_phase)
+            axes[spec_i].plot(
+                sysrem_iterations,
+                np.nanstd(resid_all[2:,phase_i,spec_i,:], axis=-1),
+                c=colour,
+                label=phase_i)
+        axes[spec_i].set_xlabel("SYSREM iter", fontsize="small")
+        axes[spec_i].set_title(
+            label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
+            fontsize="x-small")
+        
+        axes[spec_i].xaxis.set_major_locator(plticker.MultipleLocator(base=4))
+        axes[spec_i].xaxis.set_minor_locator(plticker.MultipleLocator(base=1))
+
+    axes[0].set_ylabel("Per-segment std")
+
+    axes[-1].legend(
+        ncol=n_phase//2+1,
+        fontsize="small",
+        loc="upper right",)
+    
+    plt.suptitle(plot_title, fontsize="small")
+
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    if plot_label == "":
+        plot_fn = os.path.join(plot_folder, "sysrem_per_seg_per_phase_std")
+    else:
+        plot_fn = os.path.join(
+            plot_folder, "sysrem_per_seg_per_phase_std_{}".format(plot_label))
 
     plt.savefig("{}.pdf".format(plot_fn))
     plt.savefig("{}.png".format(plot_fn), dpi=300)

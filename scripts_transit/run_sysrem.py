@@ -243,13 +243,22 @@ for transit_i in range(ss.n_transit):
             sequence=seq,
             rv_frame=rv_frame,)
 
-        # Plotting
+        # Plot titles
         plot_title = "Night {} ({}): {} [{}]".format(
             transit_i+1, seq, ss.label, rv_frame)
         plot_label = "{}_n{}_{}_{}".format(
             rv_frame, transit_i+1, seq, ss.label)
 
+        # Plot the residuals themselves (n_sr_iter x n_spec panels)
         tplt.plot_sysrem_residuals(
+            waves,
+            resid_all[:,seq_mask],
+            plot_label=plot_label,
+            plot_title=plot_title,)
+        
+        # Plot standard deviation of each segment/phase as a function of SYSREM
+        # iteration (n_spec panels)
+        tplt.plot_sysrem_std(
             waves,
             resid_all[:,seq_mask],
             plot_label=plot_label,
