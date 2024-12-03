@@ -42,6 +42,13 @@ telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
 (n_spec, n_px) = waves.shape
 telluric_trans_2D = telluric_trans.reshape(n_spec, n_px)
 
+# Initialise lists for storing SYSREM coefficient arrays (and associated phases
+# + labels) for plotting later
+labels_per_seq = []
+phases_per_seq = []
+coeff_phase_all_seq = []
+coeff_wave_all_seq = []
+
 #------------------------------------------------------------------------------
 # Main Operation
 #------------------------------------------------------------------------------
@@ -181,8 +188,16 @@ for transit_i in range(ss.n_transit):
         #----------------------------------------------------------------------
         if ss.run_sysrem_order_by_order and ss.detrending_algorithm != "PISKUNOV":
             print("Running detrending order-by-order:")
+            # Initialise output arrays to hold residuals and fitted SYSREM
+            # coefficients in phase and wavelength
             resid_all = np.full(
                 (ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
+            
+            coeff_phase_all = np.full(
+                (ss.n_sysrem_iter, n_spec, n_phase), np.nan)
+            
+            coeff_wave_all = np.full(
+                (ss.n_sysrem_iter, n_spec, n_px), np.nan)
 
             # Run SYSREM on one spectral segment at a time
             for spec_i in range(n_spec):
@@ -199,7 +214,7 @@ for transit_i in range(ss.n_transit):
                     resid_init_masked = resid_init[:,spec_i]
                     e_flux_masked = e_flux_init[:,spec_i]
 
-                resid = sr.detrend_spectra(
+                resid, coeff_phase, coeff_wave = sr.detrend_spectra(
                     resid_init=resid_init_masked,
                     e_resid=e_flux_masked,
                     detrending_algorithm=ss.detrending_algorithm,
@@ -209,17 +224,25 @@ for transit_i in range(ss.n_transit):
                     diff_method=ss.sysrem_diff_method,
                     sigma_threshold=ss.sigma_threshold_sysrem_piskunov,)
                 
+                # If we've masked strong tellurics in SYSREM, then we need to
+                # update the residual + coeff arrays using our adopted px mask.
                 if ss.do_mask_strong_tellurics_in_sysrem:
-                    resid_all[:, :,spec_i, unmasked_px] = resid
+                    resid_all[:, :, spec_i, unmasked_px] = resid
+                    coeff_wave_all[:, spec_i, unmasked_px] = coeff_wave
                 else:
-                    resid_all[:, :,spec_i] = resid
+                    resid_all[:, :, spec_i] = resid
+                    coeff_wave_all[:, spec_i] = coeff_wave
+
+                # Phase coefficients are updated independent of masking
+                coeff_phase_all[:, spec_i] = coeff_phase
+
         #----------------------------------------------------------------------
         # Option 2: Simultaneous detrending
         #----------------------------------------------------------------------
         else:
             print("Running detrending on all orders:")
 
-            resid = sr.detrend_spectra(
+            resid, coeff_phase, coeff_wave = sr.detrend_spectra(
                 resid_init=resid_init,
                 e_resid=e_flux_init,
                 detrending_algorithm=ss.detrending_algorithm,
@@ -231,6 +254,18 @@ for transit_i in range(ss.n_transit):
 
             resid_all = resid.reshape(
                 (ss.n_sysrem_iter+1, n_phase, n_spec, n_px))
+            
+            # TODO: store coefficients
+            pass
+
+        #----------------------------------------------------------------------
+        # Storing results
+        #----------------------------------------------------------------------
+        # Store coefficients
+        labels_per_seq.append("{}{}".format(transit_i+1, seq))
+        phases_per_seq.append(np.arange(0, n_phase)[seq_mask])
+        coeff_phase_all_seq.append(coeff_phase_all[:,:,seq_mask])
+        coeff_wave_all_seq.append(coeff_wave_all)
 
         # Save residuals
         rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
@@ -243,6 +278,9 @@ for transit_i in range(ss.n_transit):
             sequence=seq,
             rv_frame=rv_frame,)
 
+        #----------------------------------------------------------------------
+        # Plots and diagnostics
+        #----------------------------------------------------------------------
         # Plot titles
         plot_title = "Night {} ({}): {} [{}]".format(
             transit_i+1, seq, ss.label, rv_frame)
@@ -263,3 +301,18 @@ for transit_i in range(ss.n_transit):
             resid_all[:,seq_mask],
             plot_label=plot_label,
             plot_title=plot_title,)
+
+# TODO Plot comparison of fluxes from each sequence
+pass
+
+# Plot comparison figures of the SYSREM phase and wavelength coefficients for
+# all sequences.
+plot_label = "{}_{}".format(rv_frame, ss.label)
+
+tplt.plot_sysrem_coefficients(
+    waves=waves,
+    phases_list=phases_per_seq,
+    labels_per_seq_list=labels_per_seq,
+    coeff_phase_all_list=coeff_phase_all_seq,
+    coeff_wave_all_list=coeff_wave_all_seq,
+    plot_label=plot_label,)

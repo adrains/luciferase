@@ -764,6 +764,151 @@ def plot_sysrem_std(
     plt.savefig("{}.png".format(plot_fn), dpi=300)
 
 
+def plot_sysrem_coefficients(
+    waves,
+    phases_list,
+    labels_per_seq_list,
+    coeff_phase_all_list,
+    coeff_wave_all_list,
+    plot_label="",
+    plot_folder="plots/",):
+    """Function to plot the per-segment fitted SYSREM coefficients (both phase
+    and wavelength) for each detrending iteration for a set of observational
+    sequences, e.g. multiple nights or just an A and B sequence from within a
+    single night. Two plots are created, with [n_spec x n_sysrem_iter] panels,
+    and lines for each plotted sequence.
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Wavelength vector of shape [n_spec, n_px]
+    
+    phases_list: list of 1D float arrays
+        List of 1D arrays containing the phases for each plotted sequence, of
+        lengths [n_seq] and [n_phase]
+
+    labels_per_seq_list: str list
+        List of string labels to use as legend entries for each sequence, of
+        length [n_seq].
+
+    coeff_phase_all_list: list of 3D float arrays
+        List of phase coefficients output from SYSREM, list length [n_seq] and
+        arrays of shape [n_sysrem_iter, n_spec, n_phase].
+
+    coeff_wave_all_list: list of 3D float arrays
+        List of wavelength coefficients output from SYSREM, list length [n_seq]
+        and arrays of shape [n_sysrem_iter, n_spec, n_px].
+
+    plot_label: str, default: ""
+        Filename label for plot, will be saved as 
+        sysrem_coeff_[phase/wave]<label>.pdf/png.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
+    """
+    # Grab dimensions for convenience
+    n_seq = len(coeff_phase_all_list)
+    (n_sr, n_spec, _) = coeff_phase_all_list[0].shape
+
+    mean_spec_lambdas = np.mean(waves,axis=1)
+
+    # Plot n_spec x n_sysrem_iter panels
+    plt.close("all")
+    fig_phase, axes_phase = plt.subplots(
+        nrows=n_sr, ncols=n_spec, figsize=(25,10),)
+    fig_wave, axes_wave = plt.subplots(
+        nrows=n_sr, ncols=n_spec, figsize=(25,10),)
+    
+    for fig in (fig_phase, fig_wave):
+        fig.subplots_adjust(
+            left=0.03, bottom=0.05, right=0.995, top=0.925, wspace=0.2)
+
+    # Loop over all sequences, spectral seqments, and SYSREM iterations
+    for seq_i in range(n_seq):
+        for spec_i in range(n_spec):
+            for sr_i in range(n_sr):
+                # Plot coefficients for this seq/spec/iteration
+                axes_phase[sr_i, spec_i].plot(
+                    phases_list[seq_i],
+                    coeff_phase_all_list[seq_i][sr_i, spec_i],
+                    linewidth=0.25,
+                    label=labels_per_seq_list[seq_i])
+                
+                axes_wave[sr_i, spec_i].plot(
+                    waves[spec_i],
+                    coeff_wave_all_list[seq_i][sr_i, spec_i],
+                    linewidth=0.25,
+                    label=labels_per_seq_list[seq_i],)
+                
+                # Adjust axis ticks
+                axes_wave[sr_i, spec_i].tick_params(
+                    axis='both', which='major', labelsize="xx-small")
+                axes_wave[sr_i, spec_i].yaxis.get_offset_text().set_fontsize(
+                    "xx-small")
+                
+                axes_phase[sr_i, spec_i].tick_params(
+                    axis='both', which='major', labelsize="xx-small")
+                axes_phase[sr_i, spec_i].yaxis.get_offset_text().set_fontsize(
+                    "xx-small")
+
+            # Set title for each spectral segment panel of mean wavelength
+            axes_wave[0, spec_i].set_title(
+                label=r"${:0.0f}\,\mu$m".format(mean_spec_lambdas[spec_i]),
+                fontsize="x-small")
+
+    # Plot single legend for each plot
+    leg_phase = axes_phase[0, 0].legend(
+        loc="upper left",
+        bbox_to_anchor=(0, 2.25),
+        ncol=n_seq,
+        fancybox=True,
+        shadow=True,
+        fontsize="small",)
+    leg_wave = axes_wave[0, 0].legend(
+        loc="upper left",
+        bbox_to_anchor=(0, 2.25),
+        ncol=n_seq,
+        fancybox=True,
+        shadow=True,
+        fontsize="small",)
+
+    # Increase the linewidth in the legend box
+    for legobj in leg_phase.legendHandles:
+        legobj.set_linewidth(1.5)
+
+    for legobj in leg_wave.legendHandles:
+        legobj.set_linewidth(1.5)
+
+    # Set x/y labels for each axis + titles
+    fig_phase.text(0.5, 0.01, "Phase", ha='center')
+    fig_phase.text(0.01, 0.5, "Coefficient", va='center', rotation='vertical')
+
+    fig_wave.text(0.5, 0.01, "Wave", ha='center')
+    fig_wave.text(0.005, 0.5, "Coefficient", va='center', rotation='vertical')
+
+    fig_phase.suptitle("Phase Coefficients")
+    fig_wave.suptitle("Wavelength Coefficients")
+
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    if plot_label == "":
+        plot_fn_1 = os.path.join(plot_folder, "sysrem_coeff_phase")
+        plot_fn_2 = os.path.join(plot_folder, "sysrem_coeff_wave")
+    else:
+        plot_fn_1 = os.path.join(
+            plot_folder, "sysrem_coeff_phase_{}".format(plot_label))
+        plot_fn_2 = os.path.join(
+            plot_folder, "sysrem_coeff_wave_{}".format(plot_label))
+
+    fig_phase.savefig("{}.pdf".format(plot_fn_1))
+    fig_phase.savefig("{}.png".format(plot_fn_1), dpi=300)
+
+    fig_wave.savefig("{}.pdf".format(plot_fn_2))
+    fig_wave.savefig("{}.png".format(plot_fn_2), dpi=300)
+
+
 def plot_sysrem_cc_1D(
     cc_rvs,
     cc_values,):

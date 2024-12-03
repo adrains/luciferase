@@ -502,7 +502,7 @@ def detrend_spectra(
 
     if detrending_algorithm.upper() == "SYSREM":
         print("Using SYSREM for detrending.")
-        resid = _sysrem_default(
+        resid, coeff_phase, coeff_wave = _sysrem_default(
             resid_init=resid_init,
             e_resid=e_resid,
             n_iter=n_iter,
@@ -516,8 +516,12 @@ def detrend_spectra(
             spectra=resid_init,
             n_iter=n_iter,
             sigma_threshold=sigma_threshold,)
+        
+        # HACK: dummy return values for compatability
+        coeff_phase = None
+        coeff_wave = None
 
-    return resid
+    return resid, coeff_phase, coeff_wave
 
 
 def _sysrem_default(
@@ -549,7 +553,7 @@ def _sysrem_default(
      3: Fit residuals for trend magnitude.
      4: Fit for gradient that best minimises residuals when combined with trend
         magnitudes.
-     5: Subtract linear trend, repeat 3-5 for as many iterations as required.
+     5: Subtract trend, repeat 3-5 for as many iterations as required.
 
     Adapted from:
     www.github.com/AWehrhahn/ChEATS/blob/master/exoplanet_transit_snr/sysrem.py
@@ -581,6 +585,14 @@ def _sysrem_default(
     resid_all: 3D float array
        Residual array of shape [n_iter+1, n_phase, n_px] where the +1 is so we
        store the starting array of residuals.
+
+    coeff_phase: list of 3D float arrays
+        Array of phase coefficients output from SYSREM, of shape 
+        [n_sysrem_iter, n_spec, n_phase].
+
+    coeff_wave: list of 3D float arrays
+        Array of wavelength coefficients output from SYSREM, of shape
+        [n_sysrem_iter, n_spec, n_px].
     """
     VALID_DIFF_FUNCS = {
         "MEAN":np.nanmean,
@@ -605,6 +617,10 @@ def _sysrem_default(
     # Store median subtracted residuals
     resid_all[0] = resid_init
     e_resid_sq = e_resid.copy().T**2
+
+    # Also store converged coefficients for this segment
+    coeff_phase = np.zeros((n_iter, n_phase))
+    coeff_wave = np.zeros((n_iter, n_px))
 
     # Run SYSREM
     for sr_iter_i in range(n_iter):
@@ -656,7 +672,11 @@ def _sysrem_default(
         systematic = cc[:, None] * aa[None, :]
         resid_all[sr_iter_i+1] = (resid - systematic).T
 
-    return resid_all
+        # Store converged coefficients
+        coeff_phase[sr_iter_i] = aa
+        coeff_wave[sr_iter_i] = cc
+
+    return resid_all, coeff_phase, coeff_wave
 
 
 def _sysrem_piskunov(
