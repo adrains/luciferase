@@ -2,6 +2,7 @@
 transits from model stellar, telluric, and planetary spectra.
 """
 import json
+import warnings
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -558,8 +559,11 @@ def interpolate_marcs_spectrum_at_mu(
     # Basic error checking
     if mu_selected > 1 or mu_selected < 0:
         raise ValueError("Invalid mu value, must be 0 <= mu <= 1")
-    elif mu_selected == 0:
-        raise Warning("mu=0. May encounter edge-effects.")
+    elif mu_selected < np.min(mus):
+        warnings.warn(
+            "mu={:0.3f} is below grid bounds, settting to mu={:0.3f}".format(
+                mu_selected, np.min(mus)))
+        mu_selected = np.min(mus)
     
     fluxes_new_mu = np.zeros(fluxes_mu.shape[0])
 
