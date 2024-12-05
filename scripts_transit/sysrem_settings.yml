@@ -13,11 +13,14 @@ n_transit: 2
 # Real data
 # ---------
 label: "wasp107_np_corr"
+#label: "wasp107"
 
-# SNR~130 sim with all species + slit losses
+# SNR~130 Welbanks+24 sims with all species + slit losses
 # -------------------------------------------
-#label: "simulated_R100000_wasp107_240802_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_130"
-#label: "simulated_R100000_wasp107_240916_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_130"
+#label: "simulated_R100000_wasp107_W24_e0d4_241129_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
+#label: simulated_R100000_wasp107_W24_circ_241126_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130
+#label: "simulated_R100000_wasp107_W24_241121_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
+#label: "simulated_R100000_wasp107_W24_241121_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_20_SNR_130"
 
 # SNR~300 sim with all species + slit losses
 # -------------------------------------------
@@ -44,9 +47,9 @@ molecfit_fits:
 tau_fill_value: 0
 
 # Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
-planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R100000.fits"
+#planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R150000.fits"
 #planet_fits: "templates/WASP107b_maxed_templates_all_R100000.fits"
-#planet_fits: "templates/WASP107b_Welbanks_Aur-Ret_templates_all_R100000.fits"
+planet_fits: "templates/WASP107b_Welbanks_CHI-Ret_templates_all_R100000.fits"
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
@@ -57,17 +60,49 @@ species_to_cc: ["H2O"]
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 
 #------------------------------------------------------------------------------
-# Data Preparation Settings
+# Continuum Normalisation Settings
 #------------------------------------------------------------------------------
-# Sigma thresholds for sigma clipping
-sigma_threshold_phase: 5.0
-sigma_threshold_spectral: 5.0
+# Various settings for running scripts_transit/continuum_normalise_spectra.py
 
+# Sigma thresholds for sigma clipping and masking pixels (or entire columns).
+
+# For sigma clipping individual pixels, we compare the a given pixel, the
+# standard deviation of the pixel in time for the sequence (A or B) in question
+# and use as reference the mean spectrum of the *opposite* sequence (e.g. A vs
+# B), clipping the pixel if it is more than sigma_threshold_phase sigma away
+# from the reference.
+sigma_threshold_phase: 4.0
+
+# We also sigma clip entire columns by comparing the mean A and B sequence
+# spectra to each other, clipping the whole column if they deviate by
+# sigma_threshold_column sigma from each other, where sigma refers to the
+# standard deviation of the spectral order-detector segment as a whole. The
+# assumption here is that systematic differences should only occur in cases
+# of detector artefacts present in only one nodding position, in which case we
+# must discard the entire column since ~50% of the data is now consisdered
+# systematically aberrant.
+sigma_threshold_column: 4.0
+
+# If True, we extrapolate edge px (with cannot be interpolated). If False, we
+# end up masking the entire column. Preliminary testing indicated that 
+# extrapolation introduces a bunch of spurious artefacts, so recommended to
+# keep set to False.
+do_bad_px_corr_via_extrapolation: False
+
+# If using continuum normalised spectra, how should they be normalised? If True
+# we continuum normalise the A and B sequences separately, if False we
+# normalise them as a single sequence in time. They are then stored back in a
+# single array in the fits file.
+do_split_sequences_continuum_norm: True
+
+#------------------------------------------------------------------------------
+# SYSREM Data Preparation Settings
+#------------------------------------------------------------------------------
 # Used to select how the data is normalised prior to running SYSREM:
 #   True: data is continuum normalised to the 'true' continuum value using 
 #         a molecfit telluric model, MARCS spectrum, and airmasses.
 #   False: each spectral segment is simply normalised by its median flux
-do_use_continuum_normalised_data: False
+do_use_continuum_normalised_data: True
 
 # Threshold value for what we consider strong telluric absorption. This value
 # is the *lowest* level we allow a telluric line to absorb to in a continuum
@@ -85,7 +120,7 @@ telluric_trans_bad_px_threshold: 0.25
 # continuum of A spectra, or 'per_phase' where we assume that there is a *time
 # varying* continuum and correct each phase to a reference spectrum. Setting to
 # any other value will run with only a median normalisation.
-continuum_correction_kind: "per_phase"
+continuum_correction_kind: ""
 
 # Spectral resolution to smooth the continuum normalisation to
 continuum_corr_smoothing_resolution: 1000
@@ -122,7 +157,7 @@ sigma_threshold_sysrem_piskunov: 3.0
 # Whether to split A and B frames into two separate sequences. If True, SYSREM
 # will be run 2x per night (with each set of residuals having their own fits
 # HDU). This then results in two sets of cross-correlations per night.
-split_AB_sequences: False
+split_AB_sequences: True
 
 # Whether to mask out strong tellurics when running SYSREM. See
 # telluric_trans_bad_px_threshold for more details on how this works.
@@ -179,7 +214,7 @@ kp_expected: 105.2
 Kp_step: 1
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
-Kp_lims: [0,350]
+Kp_lims: [0,400]
 
 # This is the RV range of the x axis for our Kp-Vsys plots. This should be a
 # smaller range than cc_rv_lims, as the idea is we CC wider than we need, then

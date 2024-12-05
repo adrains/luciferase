@@ -2,6 +2,7 @@
 Plotting functions associated with our transit modelling.
 """
 import os
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -542,7 +543,134 @@ def plot_epoch_model_comp(
 
         plt.tight_layout()
 
-        # Save
+
+def plot_cleaned_continuum_normalised_spectra(
+    waves,
+    spectra_init,
+    spectra_clean,
+    sequences,
+    sequence_masks,
+    figsize=(200,5),
+    linewidths=(0.2,0.5),
+    plot_label="",
+    plot_folder="plots/",
+    plot_title="",):
+    """Function to plot a comparison when running clean_and_interpolate_spectra
+    from transit.utils. Plots the A/B spectra before and after, plus their
+    respective means.
+
+    Parameters
+    ----------
+    waves: 2D float array
+        Wavelength vector of shape [n_spec, n_px]
+
+    spectra_init, spectra_clean: 3D float arrays
+        3D float arrays of shape [n_phase, n_spec, n_px] of the spectra before
+        and after cleaning respectively.
+
+    sequences: str list
+        Sequence IDs, typically ["A", "B"] for nodding positions.
+    
+    sequence_masks: list of 1D boolean arrays
+        List of boolean masks of length [n_phase] indicating which sequence
+        each phase belongs to.
+        
+    fig_size: float array, default: (200,5)
+        Shape of the figure.
+
+    linewidths: float tuple, default: (0.1,0.5)
+        Linewidths for the per-phase and mean sequence spectra respectively.
+
+    plot_label: str, default: ""
+        Filename label for plot, will be saved as sysrem_resid_<label>.pdf/png.
+
+    plot_folder: str, default: "plots/"
+        Folder to save plots to. By default just a subdirectory called plots.
+
+    plot_title: str, default: ""
+        Suptitle for the plot.
+    """
+    (n_phase, n_spec, n_px) = spectra_init.shape
+
+    fig, axes = plt.subplots(
+        nrows=2,
+        ncols=n_spec,
+        figsize=figsize,
+        sharex="col",
+        sharey=True)
+    
+    fig.subplots_adjust(
+        left=0.02, bottom=0.1, right=0.995, top=0.95, wspace=0.05, hspace=0.05)
+    
+    for seq_i, (seq, seq_mask) in enumerate(zip(sequences, sequence_masks)):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ff1 = spectra_init[seq_mask]
+            ff1_mn = np.nanmean(ff1, axis=0)
+            ff2 = spectra_clean[seq_mask]
+            ff2_mn = np.nanmean(ff2, axis=0)
+        n_phase = ff1.shape[0]
+        for spec_i in range(n_spec):
+            for phase_i in range(n_phase):
+                # Plot A/B for each phase
+                axes[0, spec_i].plot(
+                    waves[spec_i],
+                    ff1[phase_i, spec_i],
+                    linewidth=linewidths[0],
+                    alpha=0.5,
+                    c="r" if seq=="A" else "b",
+                    label=seq if (spec_i==0 and phase_i==0) else None,)
+                axes[1, spec_i].plot(
+                    waves[spec_i],
+                    ff2[phase_i, spec_i],
+                    linewidth=linewidths[0],
+                    alpha=0.5,
+                    c="r" if seq=="A" else "b",)
+            # Plot mean A/B for each spectral segment
+            axes[0, spec_i].plot(
+                waves[spec_i],
+                ff1_mn[spec_i],
+                linewidth=linewidths[1],
+                c="darkred" if seq=="A" else "navy",
+                zorder=100,
+                label="{} (Mean)".format(seq) if spec_i==0 else None,)
+            axes[1, spec_i].plot(
+                waves[spec_i],
+                ff2_mn[spec_i],
+                linewidth=linewidths[1],
+                c="darkred" if seq=="A" else "navy",
+                zorder=100,
+                label="{} (Mean)".format(seq) if spec_i==0 else None,)
+            
+            axes[1, spec_i].set_xlim(
+                waves[spec_i,0]-0.5, waves[spec_i,-1]+0.5)
+            axes[1, spec_i].tick_params(axis='x', labelrotation=45)
+            axes[1, spec_i].xaxis.set_major_locator(
+                plticker.MultipleLocator(base=5))
+            axes[1, spec_i].xaxis.set_minor_locator(
+                plticker.MultipleLocator(base=1))
+
+    leg = axes[0, 0].legend(
+        loc="upper left",
+        ncol=4,
+        bbox_to_anchor=(0, 1.15),)
+    for legobj in leg.legendHandles:
+        legobj.set_linewidth(1.5)
+
+    plt.suptitle(plot_title, fontsize="small")
+
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    if plot_label == "":
+        plot_fn = os.path.join(plot_folder, "cleaned_spectra_comparison")
+    else:
+        plot_fn = os.path.join(
+            plot_folder, "cleaned_spectra_comparison_{}".format(plot_label))
+
+    plt.savefig("{}.pdf".format(plot_fn))
+    plt.savefig("{}.png".format(plot_fn), dpi=300)
 
 
 def plot_sysrem_residuals(

@@ -2892,6 +2892,208 @@ def sigma_clip_observations(
     return obs_spec_clipped, bad_px_mask
 
 
+def clean_and_interpolate_spectra(
+    spectra,
+    e_spectra,
+    mjds,
+    is_A,
+    n_bad_px_per_phase_threshold=5,
+    sigma_threshold_phase=4.0,
+    sigma_threshold_column=4.0,
+    interpolation_method="cubic",
+    do_extrapolation=False,):
+    """Function to clean a spectral data cube prior to running SYSREM. We sigma
+    clip along the phase dimension (i.e. the time series of each pixel) as well
+    as along the spectral dimension. 
+
+    Note that this function expects only spectra from a single spectral
+    segment (or a flattened set of many segments.
+    
+    Parameters
+    ----------
+    spectra, e_spectra: 3D float array
+        Unnormalised spectra and spectroscopic uncertainties of shape 
+        [n_phase, n_spec, n_px].
+
+    mjds: 1D float array
+        MJDs associated with each phase, of shape [n_phase]. We use this for
+        interpolating along the phase axis.
+    
+    is_A: 1D boolean array
+        Mask of length [n_phase] indicating which phase belongs to which
+        nodding sequence.
+
+    n_bad_px_per_phase_threshold: int, default: 5
+        Threshold for the number of bad/clipped phases per spectral pixel, 
+        above which we mask out the entire column (i.e. all phases).
+
+
+    sigma_threshold_phase: float, default: 4.0
+        The sigma clipping threshold for when sigma clipping along the *phase*
+        dimension. The sigma here refers to the characteristic sigma (over all
+        phases) for a given spectral pixel, and how aberrant a particular phase
+        is of one sequence (e.g. A) is compared to the mean of the other
+        (e.g. B).
+
+    sigma_threshold_column: float, default: 4.0
+        The sigma clipping threshold for when determining whether to mask out
+        an entire column (i.e. all phases for a given spectral pixel). The
+        sigma refers to the characteristic sigma for that spectral segment, and
+        we are comparing whether the mean A and B frames are sufficiently
+        different from each other, which we take to mean reduction artefacts
+        necessitating the masking of an entire column.
+
+    interpolation_method: str, default: "cubic"
+        Default interpolation method to use with scipy.interp1d. Can be one of: 
+        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
+        'cubic', 'previous', or 'next'].
+
+    do_extrapolation: boolean, default: False
+        Whether to extrapolate edge pixels in phase (e.g. the first or last
+        exposure), or whether to just mask out the entire column. Warning:
+        this can cause extra artefacts.
+
+    Returns
+    -------
+    spectra_clean, e_spectra_clean: 3D float array
+        Cleaned and interpolated spectra + uncertainties of shape 
+        [n_phase, n_spec, n_px]. Each pixel time series should either have:
+        a) zero nans in the case of successful interpolation, or b) all nans,
+        in the case we've masked the entire time-series.
+
+    px_to_interp_all: 3D boolean array
+        Mask indicating interpolated pixels.
+    """
+    # Grab shape for convenience
+    (n_phase, n_spec, n_px) = spectra.shape
+
+    if do_extrapolation:
+        fill_value = "extrapolate"
+    else:
+        fill_value = np.nan
+
+    # Duplicate arrays to use for output
+    spectra_clean = spectra.copy()
+    e_spectra_clean = e_spectra.copy()
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        # Create mean A/B spectra to use as references
+        spectra_mean_A = np.nanmean(spectra[is_A], axis=0)  # [n_spec, n_px]
+        spectra_mean_B = np.nanmean(spectra[~is_A], axis=0) # [n_spec, n_px]
+
+        # We'll be comparing A to B, and B to A, so the reference spectrum
+        # corresponds to the 'opposite' sequence here. These two lists will be
+        # looped over below (but are defined here for clarity).
+        refs_AB = [spectra_mean_B, spectra_mean_A]
+        masks_AB = [is_A, ~is_A]
+
+        # Initialise individual pixel mask
+        px_to_interp_all = np.full_like(spectra, False)
+
+        #----------------------------------------------------------------------
+        # Compute which *individual* pixels require interpolation
+        #----------------------------------------------------------------------
+        # Loop over both A/B sequences
+        for ref_spec, seq_mask in zip(refs_AB, masks_AB):
+            # Grab the number of phases present in this sequence.
+            n_phase_seq = np.sum(seq_mask)
+            
+            # Tile our reference spectrum to 3D [n_phase_seq, n_spec, n_px].
+            ref_spec_3D = np.broadcast_to(
+                array=ref_spec[None,:,:],
+                shape=(n_phase_seq, n_spec, n_px),)
+
+            # Compute standard deviation per spectral px. We'll then use this
+            # to assess whether a given pixel at a given phase is considered
+            # an outlier to be clipped+interpolated.
+            px_std_2D = np.nanstd(spectra[seq_mask], axis=0)
+            px_std_3D = np.broadcast_to(
+                array=px_std_2D[None,:,:],
+                shape=(n_phase_seq, n_spec, n_px),)
+        
+            # Compute how many std deviations each pixel is from its reference.
+            spectrum_n_sigma = (spectra[seq_mask] - ref_spec_3D) / px_std_3D
+
+            # Assign all pixels beyond this threshold to be 'bad'.
+            px_to_interp_all[seq_mask] = \
+                np.abs(spectrum_n_sigma) > sigma_threshold_phase
+
+        # Combine with any existing nan pixels
+        px_to_interp_all = np.logical_or(px_to_interp_all, np.isnan(spectra))
+
+        #----------------------------------------------------------------------
+        # Compute which *entire* columns of pixels get masked
+        #----------------------------------------------------------------------
+        # In this section we are masking out entire columns (i.e. all phases)
+        # of pixels. Our condition for doing this is when the mean A and B
+        # spectra are sufficiently different to each other, which we take as an
+
+        diff_AB = spectra_mean_A - spectra_mean_B
+        diff_AB_std = np.nanstd(diff_AB, axis=1)
+        diff_AB_std_2D = np.broadcast_to(
+            array=diff_AB_std[:,None],
+            shape=(n_spec, n_px),)
+        
+        column_n_sigma = diff_AB / diff_AB_std_2D
+
+        do_mask_column = np.abs(column_n_sigma) > sigma_threshold_column
+
+    #--------------------------------------------------------------------------
+    # Interpolatate individual pixels flagged as aberrant
+    #--------------------------------------------------------------------------
+    # Loop over all spectral segments and pixels, and decide whether to
+    # interpolate a given pixel, or mask out the entire column.
+    for spec_i in range(n_spec):
+        desc = "Cleaning spectrum {}/{}".format(spec_i+1, n_spec)
+        for px_i in tqdm(range(n_px), desc=desc, leave=False):
+            # For convenience, grab pixel mask for this segment/px
+            px_to_interp = px_to_interp_all[:, spec_i, px_i]
+
+            # Conditions for masking entire column:
+            # a) Mean A and B px values are sufficiently different.
+            # b) The column has more than the threshold level of bad px.
+            # c) [If not extrapolating] The first or last px values are nan.
+            nan_edges = px_to_interp[0] or px_to_interp[-1]
+
+            if (do_mask_column[spec_i, px_i] 
+                or np.sum(px_to_interp) > n_bad_px_per_phase_threshold
+                or (fill_value != "extrapolate" and nan_edges)):
+                # Mask out the entire column and skip the rest of the loop
+                spectra_clean[:, spec_i, px_i] = np.nan
+                e_spectra_clean[:, spec_i, px_i] = np.nan
+                continue
+
+            # Continue if there are no pixels needing interpolation
+            if np.sum(px_to_interp) == 0:
+                continue
+            
+            # Flux interpolator (interpolating over only non-nan px)
+            interp_spectra = interp1d(
+                x=mjds[~px_to_interp],
+                y=spectra[:,spec_i,px_i][~px_to_interp],
+                kind=interpolation_method,
+                bounds_error=False,
+                fill_value=fill_value,)
+
+            # Sigma interpolator (interpolating over only non-nan px)
+            interp_sigma = interp1d(
+                x=mjds[~px_to_interp],
+                y=e_spectra[:,spec_i,px_i][~px_to_interp],
+                kind=interpolation_method,
+                bounds_error=False,
+                fill_value=fill_value,)
+
+            # Interpolate fluxes and sigmas, and store
+            spectra_clean[:,spec_i,px_i][px_to_interp] = \
+                interp_spectra(mjds[px_to_interp])
+            
+            e_spectra_clean[:,spec_i,px_i][px_to_interp] = \
+                interp_sigma(mjds[px_to_interp])
+    
+    return spectra_clean, e_spectra_clean, px_to_interp_all
+
+
 def limb_darken_spectrum(spec, a_limb, mu):
     """Limb darken a given spectrum using the non-linear limb darkening law
     from Claret 2000.
