@@ -156,12 +156,9 @@ for transit_i in range(ss.n_transit):
     # Clean and prepare our fluxes for input to SYSREM. This involves:
     # - sigma clipping along phase and spectral dimension
     # - interpolate along the phase dimension
-    resid_init_full, flux, e_flux_init = sr.clean_and_compute_initial_resid(
+    resid_init_full, flux, e_flux_init = sr.compute_initial_resid(
         spectra=fluxes_norm,
         e_spectra=sigmas_norm,
-        mjds=transit_info_list[transit_i]["mjd_mid"].values,
-        sigma_threshold_phase=ss.sigma_threshold_phase,
-        sigma_threshold_spectral=ss.sigma_threshold_spectral,
         do_normalise=do_normalise,)
 
     #--------------------------------------------------------------------------

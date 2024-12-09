@@ -267,19 +267,12 @@ def continuum_normalise_datacube(
     return fluxes_norm, sigmas_norm
 
 
-def clean_and_compute_initial_resid(
+def compute_initial_resid(
     spectra,
     e_spectra,
-    mjds,
-    sigma_threshold_phase=6.0,
-    sigma_threshold_spectral=6.0,
-    n_max_phase_bad_px=5,
-    do_clip_spectral_dimension=False,
-    interpolation_method="cubic",
     do_normalise=True,):
-    """Function to clean a spectral data cube prior to running SYSREM. We sigma
-    clip along the phase dimension (i.e. the time series of each pixel) as well
-    as along the spectral dimension. 
+    """Function to prepare the initial residuals for running SYSREM. NaN pixels
+    are set to suitable defaults.
 
     Note that this function expects only spectra from a single spectral
     segment (or a flattened set of many segments.
@@ -289,31 +282,6 @@ def clean_and_compute_initial_resid(
     spectra, e_spectra: 3D float array
         Unnormalised spectra and spectroscopic uncertainties of shape 
         [n_phase, n_spec, n_px].
-
-    mjds: 1D float array
-        MJDs associated with each phase, of shape [n_phase]. We use this for
-        interpolating along the phase axis.
-    
-    sigma_threshold_phase: float, default: 6.0
-        The sigma clipping threshold for when sigma clipping along the *phase*
-        dimension. Note that this used for both lower and upper bound clipping.
-
-    sigma_threshold_spectral: float, default: 6.0
-        The sigma clipping threshold for when sigma clipping along the 
-        *spectral* dimension. Note that we only sigma clip on the upper bound
-        so as to not remove deep spectral features.
-
-    n_max_phase_bad_px: int, default: 5.0
-        Threshold for the number of bad/clipped phases per spectral pixel, 
-        above which we mask out the entire spectral pixel.
-
-    do_clip_spectral_dimension: boolean, default: False
-        Whether to do *upper* sigma clip along the spectral dimension.
-
-    interpolation_method: str, default: "cubic"
-        Default interpolation method to use with scipy.interp1d. Can be one of: 
-        ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
-        'cubic', 'previous', or 'next'].
 
     do_normalise: boolean, default: True
         Whether to normalise the cleaned + interpolated fluxes or not. This
@@ -333,88 +301,11 @@ def clean_and_compute_initial_resid(
     # Grab shape
     (n_phase, n_spec, n_px) = spectra.shape
 
-    # Duplicate arrays
-    flux = spectra.copy()
-    e_flux = e_spectra.copy()
+    spectra_norm = spectra.copy()
+    e_spectra_norm = e_spectra.copy()
 
-    #--------------------------------------------------------------------------
-    # Clean + interpolate along phase dimension
-    #--------------------------------------------------------------------------
-    # Initialise mask for sigma clipping along phase dimension. Note that here
-    # we're doing both upper *and* lower bound clipping.
-    sc_mask_phase = np.full_like(spectra, False)
-
-    # Loop over all spectral segments and spectral pixels
-    for spec_i in range(n_spec):
-        desc = "Cleaning spectrum {}/{}".format(spec_i+1, n_spec)
-        for px_i in tqdm(range(n_px), desc=desc, leave=False):
-            # Sigma clip along the phase dimension to compute the bad pixel
-            # mask for px_i
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                bad_phase_mask = sigma_clip(
-                    data=flux[:,spec_i,px_i],
-                    sigma=sigma_threshold_phase,).mask
-            
-            # If we have more than the threshold number of bad px, mask out the
-            # entire column (i.e. mask out px_i)
-            if np.sum(bad_phase_mask) > n_max_phase_bad_px:
-                sc_mask_phase[:,spec_i,px_i] = True
-
-            # If the first or last phase is a bad px, then mask out the entire
-            # column since we can't interpolate them.
-            elif bad_phase_mask[0] or bad_phase_mask[-1]:
-                sc_mask_phase[:,spec_i,px_i] = True
-
-            # Otherwise interpolate the missing values using the times as X
-            # values instead of simply the pixel number
-            else:
-                # Flux interpolator (interpolating only good px)
-                interp_px_time_series_flux = interp1d(
-                    x=mjds[~bad_phase_mask],
-                    y=flux[:,spec_i,px_i][~bad_phase_mask],
-                    kind=interpolation_method,
-                    bounds_error=True,)
-                
-                # Sigma interpolator (interpolating only good px)
-                interp_px_time_series_err = interp1d(
-                    x=mjds[~bad_phase_mask],
-                    y=e_spectra[:,spec_i,px_i][~bad_phase_mask],
-                    kind=interpolation_method,
-                    bounds_error=True,)
-                
-                # Interpolate and update
-                flux[:,spec_i,px_i][bad_phase_mask] = \
-                    interp_px_time_series_flux(mjds[bad_phase_mask])
-                
-                e_spectra[:,spec_i,px_i][bad_phase_mask] = \
-                    interp_px_time_series_err(mjds[bad_phase_mask])
-                
-                # Update the bad px mask to just have nan values (i.e. filled)
-                sc_mask_phase[:,spec_i,px_i] = np.isnan(flux[:,spec_i,px_i])
-
-                # HACK: this should always be 0 right?
-                assert np.sum(np.isnan(flux[:,spec_i,px_i])) == 0
-    
-    #--------------------------------------------------------------------------
-    # Clip along spectral dimension
-    #--------------------------------------------------------------------------
-    # Sigma clip along the spectral dimension. Note that since we're clipping
-    # along the spectral dimension, we only clip the *upper* bounds so as to
-    # not remove absorption features.
-    sc_mask_spec = np.full_like(flux, False)
-
-    if do_clip_spectral_dimension:
-        for spec_i in range(n_spec):
-            for phase_i in range(n_phase):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    sc_mask_spec[phase_i,spec_i,:] = sigma_clip(
-                        data=flux[phase_i,spec_i,:],
-                        sigma_upper=sigma_threshold_spectral,).mask
-        
-    # Combine bad px masks
-    bad_px_mask = np.logical_or(sc_mask_phase, sc_mask_spec)
+    # Combine bad px mask
+    bad_px_mask = np.logical_or(np.isnan(spectra), np.isnan(e_spectra),)
 
     #--------------------------------------------------------------------------
     # Normalisation + wrapping up
@@ -423,31 +314,31 @@ def clean_and_compute_initial_resid(
     #   1) Dividing each individual *spectrum* by its mean value
     #   2) Subtracting unity
     if do_normalise:
-        mean_2D = np.nanmean(flux, axis=2)  # [n_phase, n_spec]
-        mean_3D = np.broadcast_to(
-            mean_2D[:,:,None], flux.shape)  # [n_phase, n_spec, n_px]
-        resid_init = flux / mean_3D - 1
+        spec_mean_2D = np.nanmean(spectra, axis=2)  # [n_phase, n_spec]
+        spec_mean_3D = np.broadcast_to(
+            spec_mean_2D[:,:,None], spectra.shape)  # [n_phase, n_spec, n_px]
+        resid_init = spectra / spec_mean_3D - 1
         
         # Also rescale uncertainties
-        e_flux /= mean_3D
+        e_spectra_norm /= spec_mean_3D
 
         # Finally, for any remaining non-interpolated bad px, set the fluxes
         # and uncertainties to default values
         resid_init[bad_px_mask] = 0.0
-        flux[bad_px_mask] = 1.0
-        e_flux[bad_px_mask] = 1E20
+        spectra_norm[bad_px_mask] = 1.0
+        e_spectra_norm[bad_px_mask] = 1E20
 
-        # No normalisation
+    # No normalisation
     else:
-        resid_init = flux.copy()
+        resid_init = spectra.copy()
 
         # Finally, for any remaining non-interpolated bad px, set the fluxes
         # and uncertainties to default values
         resid_init[bad_px_mask] = np.median(resid_init[~bad_px_mask])
-        flux[bad_px_mask] = np.median(flux[~bad_px_mask])
-        e_flux[bad_px_mask] = 1E20
+        spectra_norm[bad_px_mask] = np.median(spectra_norm[~bad_px_mask])
+        e_spectra_norm[bad_px_mask] = 1E20
 
-    return resid_init, flux, e_flux
+    return resid_init, spectra_norm, e_spectra_norm
 
 
 def detrend_spectra(

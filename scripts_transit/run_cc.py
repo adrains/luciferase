@@ -14,6 +14,7 @@ The following plots are generated:
  8) Combined Kp-Vsys map for all nights + combined nights
 """
 import os
+import warnings
 import numpy as np
 import transit.utils as tu
 import transit.sysrem as sr
@@ -188,9 +189,11 @@ for transit_i in range(n_transit):
         # phases (within a given night). This downweights time-varying pixels,
         # specifically those associated with tellurics.
         if ss.normalise_resid_by_per_phase_std:
-            std_3D = np.nanstd(resid_all, axis=1)
-            std_4D = np.broadcast_to(std_3D[:,None,:,:], resid_all.shape)
-            resid_all /= std_4D
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                std_3D = np.nanstd(resid_all, axis=1)
+                std_4D = np.broadcast_to(std_3D[:,None,:,:], resid_all.shape)
+                resid_all /= std_4D
 
         cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
             waves=waves,
