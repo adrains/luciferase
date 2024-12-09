@@ -71,7 +71,7 @@ stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 # and use as reference the mean spectrum of the *opposite* sequence (e.g. A vs
 # B), clipping the pixel if it is more than sigma_threshold_phase sigma away
 # from the reference.
-sigma_threshold_phase: 4.0
+sigma_threshold_phase: 3.0
 
 # We also sigma clip entire columns by comparing the mean A and B sequence
 # spectra to each other, clipping the whole column if they deviate by
@@ -81,7 +81,7 @@ sigma_threshold_phase: 4.0
 # of detector artefacts present in only one nodding position, in which case we
 # must discard the entire column since ~50% of the data is now consisdered
 # systematically aberrant.
-sigma_threshold_column: 4.0
+sigma_threshold_column: 3.0
 
 # If True, we extrapolate edge px (with cannot be interpolated). If False, we
 # end up masking the entire column. Preliminary testing indicated that 
@@ -158,10 +158,6 @@ sigma_threshold_sysrem_piskunov: 3.0
 # will be run 2x per night (with each set of residuals having their own fits
 # HDU). This then results in two sets of cross-correlations per night.
 split_AB_sequences: True
-
-# Whether to mask out strong tellurics when running SYSREM. See
-# telluric_trans_bad_px_threshold for more details on how this works.
-do_mask_strong_tellurics_in_sysrem: True
 
 # Whether to run SYSREM in the telluric frame (False, default) or the stellar
 # frame (True). Note that changing this setting will require re-running SYSREM.

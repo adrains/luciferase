@@ -25,12 +25,6 @@ wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
 waves, fluxes_list, sigmas_list, det, orders, transit_info_list, syst_info = \
     tu.load_transit_info_from_fits(ss.save_path, ss.label, ss.n_transit)
 
-# Currently both detrending algorithms do not require normalisation (note: not
-# in a continuum normalisation way, but in a SYSREM residual prep way) to work
-# TODO: this should be revisted and relates to whether we are treating the
-# removed SYSREM components as additive or multiplicative. 
-do_normalise = False
-
 # Load molecfit telluric model for masking of deep tellurics in SYSREM.
 telluric_wave, _, _, telluric_trans = tu.load_telluric_spectrum(
     molecfit_fits=ss.molecfit_fits[0],
@@ -150,35 +144,32 @@ for transit_i in range(ss.n_transit):
         sequences = ["AB"]
 
     #--------------------------------------------------------------------------
-    # Clean
-    #--------------------------------------------------------------------------
-    # TODO WHY FIRST
-    # Clean and prepare our fluxes for input to SYSREM. This involves:
-    # - sigma clipping along phase and spectral dimension
-    # - interpolate along the phase dimension
-    resid_init_full, flux, e_flux_init = sr.compute_initial_resid(
-        spectra=fluxes_norm,
-        e_spectra=sigmas_norm,
-        do_normalise=do_normalise,)
-
-    #--------------------------------------------------------------------------
     # Run SYSREM for this night
     #--------------------------------------------------------------------------
     for seq, seq_mask in zip(sequences, sequence_masks):
-        # Now that we've cleaned the full sequence, select subsequences as req
-        resid_init = resid_init_full.copy()
+        # Compute initial residuals (without normalisation, this is just the
+        # spectra as is) for the sequence in question.
+        # TODO: reintroduce potential for pre-normalisation
+        resid_init = fluxes_norm[seq_mask].copy()
+        e_resid = sigmas_norm[seq_mask].copy()
 
-        # Now set all values from the opposite sequence to nan
-        resid_init[~seq_mask,:,:] = np.nan
+        # Grab number of phases in this sequence
+        (n_phase_seq, _, _) = resid_init.shape
 
         #----------------------------------------------------------------------
-        # [Optional] Mask out strong tellurics
+        # Mask out NaNs and strong tellurics
         #----------------------------------------------------------------------
-        # Mask out strong tellurics by setting these pixels to nans
-        # Note: telluric_mask_3D will be all False if not doing masking.
-        if ss.do_mask_strong_tellurics_in_sysrem:
-            #telluric_mask_seq = telluric_mask_3D[seq_mask]
-            resid_init[telluric_mask_3D] = np.nan
+        # Mask out any columns with NaNs
+        is_nan_3D = np.isnan(fluxes_norm)         # [n_phase_seq, n_spec, n_px]
+        is_nan_column = np.any(is_nan_3D, axis=0) # [n_spec, n_px]
+
+        # Combine telluric and bad column masks, tile to 3D
+        bad_px_mask_2D = np.logical_or(telluric_mask_2D, is_nan_column)
+        bad_px_3D = np.broadcast_to(
+            bad_px_mask_2D[None,:,:], (n_phase_seq, n_spec, n_px))
+        
+        # Set any masked px to nans
+        resid_init[bad_px_3D] = np.nan
 
         #----------------------------------------------------------------------
         # Option 1: Order-by-order detrending
@@ -188,10 +179,10 @@ for transit_i in range(ss.n_transit):
             # Initialise output arrays to hold residuals and fitted SYSREM
             # coefficients in phase and wavelength
             resid_all = np.full(
-                (ss.n_sysrem_iter+1, n_phase, n_spec, n_px), np.nan)
+                (ss.n_sysrem_iter+1, n_phase_seq, n_spec, n_px), np.nan)
             
             coeff_phase_all = np.full(
-                (ss.n_sysrem_iter, n_spec, n_phase), np.nan)
+                (ss.n_sysrem_iter, n_spec, n_phase_seq), np.nan)
             
             coeff_wave_all = np.full(
                 (ss.n_sysrem_iter, n_spec, n_px), np.nan)
@@ -203,14 +194,11 @@ for transit_i in range(ss.n_transit):
                 print("-"*80, fmt_txt, "-"*80,sep="")
 
                 # Only run SYSREM on unmasked regions
-                if ss.do_mask_strong_tellurics_in_sysrem: 
-                    unmasked_px = ~telluric_mask_2D[spec_i,:]
-                    resid_init_masked = resid_init[:,spec_i,unmasked_px]
-                    e_flux_masked = e_flux_init[:,spec_i,unmasked_px]
-                else:
-                    resid_init_masked = resid_init[:,spec_i]
-                    e_flux_masked = e_flux_init[:,spec_i]
+                unmasked_px = ~telluric_mask_2D[spec_i,:]
+                resid_init_masked = resid_init[:,spec_i,unmasked_px]
+                e_flux_masked = e_resid[:,spec_i,unmasked_px]
 
+                # Run SYSREM
                 resid, coeff_phase, coeff_wave = sr.detrend_spectra(
                     resid_init=resid_init_masked,
                     e_resid=e_flux_masked,
@@ -221,16 +209,11 @@ for transit_i in range(ss.n_transit):
                     diff_method=ss.sysrem_diff_method,
                     sigma_threshold=ss.sigma_threshold_sysrem_piskunov,)
                 
-                # If we've masked strong tellurics in SYSREM, then we need to
-                # update the residual + coeff arrays using our adopted px mask.
-                if ss.do_mask_strong_tellurics_in_sysrem:
-                    resid_all[:, :, spec_i, unmasked_px] = resid
-                    coeff_wave_all[:, spec_i, unmasked_px] = coeff_wave
-                else:
-                    resid_all[:, :, spec_i] = resid
-                    coeff_wave_all[:, spec_i] = coeff_wave
-
-                # Phase coefficients are updated independent of masking
+                # Update the residual + coeff arrays using our adopted px mask
+                # for only those pixels that we ran SYSREM on--everything else
+                # will be NaN.
+                resid_all[:, :, spec_i, unmasked_px] = resid
+                coeff_wave_all[:, spec_i, unmasked_px] = coeff_wave
                 coeff_phase_all[:, spec_i] = coeff_phase
 
         #----------------------------------------------------------------------
@@ -241,7 +224,7 @@ for transit_i in range(ss.n_transit):
 
             resid, coeff_phase, coeff_wave = sr.detrend_spectra(
                 resid_init=resid_init,
-                e_resid=e_flux_init,
+                e_resid=e_resid,
                 detrending_algorithm=ss.detrending_algorithm,
                 n_iter=ss.n_sysrem_iter,
                 tolerance=ss.sysrem_convergence_tol,
@@ -261,16 +244,17 @@ for transit_i in range(ss.n_transit):
         # Store coefficients
         labels_per_seq.append("{}{}".format(transit_i+1, seq))
         phases_per_seq.append(np.arange(0, n_phase)[seq_mask])
-        coeff_phase_all_seq.append(coeff_phase_all[:,:,seq_mask])
+        coeff_phase_all_seq.append(coeff_phase_all)
         coeff_wave_all_seq.append(coeff_wave_all)
 
         # Save residuals
+        # TODO: save coefficients as well
         rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
         tu.save_sysrem_residuals_to_fits(
             fits_load_dir=ss.save_path,
             label=ss.label,
             n_transit=ss.n_transit,
-            sysrem_resid=resid_all[:,seq_mask],    # Only save correct seq
+            sysrem_resid=resid_all,
             transit_i=transit_i,
             sequence=seq,
             rv_frame=rv_frame,)
@@ -287,7 +271,7 @@ for transit_i in range(ss.n_transit):
         # Plot the residuals themselves (n_sr_iter x n_spec panels)
         tplt.plot_sysrem_residuals(
             waves,
-            resid_all[:,seq_mask],
+            resid_all,
             plot_label=plot_label,
             plot_title=plot_title,)
         
@@ -295,12 +279,9 @@ for transit_i in range(ss.n_transit):
         # iteration (n_spec panels)
         tplt.plot_sysrem_std(
             waves,
-            resid_all[:,seq_mask],
+            resid_all,
             plot_label=plot_label,
             plot_title=plot_title,)
-
-# TODO Plot comparison of fluxes from each sequence
-pass
 
 # Plot comparison figures of the SYSREM phase and wavelength coefficients for
 # all sequences.
