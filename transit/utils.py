@@ -3370,6 +3370,7 @@ def load_telluric_spectrum(
 def prepare_cc_template(
     cc_settings,
     syst_info,
+    planet_fits_i,
     templ_wl_nm_bounds=(16000,30000),
     continuum_resolving_power=300,):
     """Function to import and setup the cross-correlation template to use with
@@ -3384,6 +3385,10 @@ def prepare_cc_template(
 
     syst_info: pandas DataFrame
         Pandas dataframe containing the planet properties.
+
+    planet_fits_i: int, default: 0
+        Which planet fits from the list in the YAML file to load, where the
+        number corresponds to the transit number.
 
     templ_wl_nm_bounds: float tuple, default: (16000,30000)
         Wavelength limits in nm when importing planet template.
@@ -3401,7 +3406,6 @@ def prepare_cc_template(
     #--------------------------------------------------------------------------
     # [Optional] For testing, use the telluric vector for cross correlation
     if cc_settings.cc_with_telluric:
-        print("Cross correlating with telluric template.")
         telluric_wave, _, _, telluric_trans = load_telluric_spectrum(
             molecfit_fits=cc_settings.molecfit_fits[0],
             tau_fill_value=cc_settings.tau_fill_value,
@@ -3414,7 +3418,6 @@ def prepare_cc_template(
 
     # [Optional] Or we can use a stellar spectrum
     elif cc_settings.cc_with_stellar:
-        print("Cross correlating with stellar template.")
         wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
             template_fits=cc_settings.stellar_template_fits,
             do_convert_air_to_vacuum_wl=True,
@@ -3427,15 +3430,13 @@ def prepare_cc_template(
     # Otherwise use planet spectrum
     #--------------------------------------------------------------------------
     else:
-        print("Cross correlating with planet template with species: {}".format(
-            cc_settings.species_to_cc))
         #----------------------------------------------------------------------
         # Setup and template selection
         #----------------------------------------------------------------------
         # Load in petitRADRTRANS datacube of templates. These templates will be
         # in units of R_earth as a function of wavelength.
         wave_p, spec_p_all, templ_info = load_transmission_templates_from_fits(
-            fits_file=cc_settings.planet_fits,
+            fits_file=cc_settings.planet_fits[planet_fits_i],
             min_wl_nm=templ_wl_nm_bounds[0],
             max_wl_nm=templ_wl_nm_bounds[1],)
 

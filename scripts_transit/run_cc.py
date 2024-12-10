@@ -43,13 +43,44 @@ if ss.do_mask_orders_for_analysis:
 # Grab the number of nights
 n_transit = len(fluxes_list)
 
-# Import template for CC
-wave_template, spectrum_template = tu.prepare_cc_template(
-    cc_settings=ss,
-    syst_info=syst_info,
-    templ_wl_nm_bounds=(16000,30000),
-    continuum_resolving_power=300,)
+# Import template/s for CC. We have the option to have different templates for
+# each night (e.g. in case each night has super-resolution), so we can provide
+# multiple planet templates. However, if only a single template is provided, we
+# use it for all transits.
+wave_templates = []
+spectra_templates = []
 
+# If there is only a single template given in the settings file, then use that
+# for all nights.
+if len(ss.planet_fits) == 1:
+    wave_template, spectrum_template = tu.prepare_cc_template(
+        cc_settings=ss,
+        syst_info=syst_info,
+        planet_fits_i=0,
+        templ_wl_nm_bounds=(16000,30000),
+        continuum_resolving_power=300,)
+    
+    wave_templates = [wave_template] * n_transit
+    spectra_templates = [spectrum_template] * n_transit
+
+# 1:1 match between templates and transits
+elif len(ss.planet_fits) == n_transit:
+    for transit_i in range(n_transit):
+        wave_template, spectrum_template = tu.prepare_cc_template(
+            cc_settings=ss,
+            syst_info=syst_info,
+            planet_fits_i=transit_i,
+            templ_wl_nm_bounds=(16000,30000),
+            continuum_resolving_power=300,)
+        
+        wave_templates.append(wave_template)
+        spectra_templates.append(spectrum_template)
+
+# Otherwise throw an exception just to be safe
+else:
+    raise ValueError("# planet templates =/= n_transit")
+
+# Set the RV frame that we'll be running in
 rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
 
 #------------------------------------------------------------------------------
@@ -198,8 +229,8 @@ for transit_i in range(n_transit):
         cc_rvs, ccv_per_spec, ccv_combined = sr.cross_correlate_sysrem_resid(
             waves=waves,
             sysrem_resid=resid_all,
-            template_wave=wave_template,
-            template_spec=spectrum_template,
+            template_wave=wave_templates[transit_i],
+            template_spec=spectra_templates[transit_i],
             bcors=rv_bcors,
             cc_rv_step=ss.cc_rv_step,
             cc_rv_lims=ss.cc_rv_lims,
@@ -287,8 +318,8 @@ for transit_i in range(n_transit):
     # map space.
     ac_rvs, ac_2D, ac_comb = sr.compute_template_autocorrelation(
         wave_obs=waves,
-        wave_template=wave_template,
-        flux_template=spectrum_template,
+        wave_template=wave_templates[transit_i],
+        flux_template=spectra_templates[transit_i],
         rv_syst=np.median(rv_bcors),
         rv_lims=ss.kp_vsys_x_range,
         rv_step=ss.Kp_step,)

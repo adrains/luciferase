@@ -15,22 +15,28 @@ from PyAstronomy.pyasl import instrBroadGaussFast
 # Settings
 #------------------------------------------------------------------------------
 # Molecules to look for. These will be extracted from the file names.
-MOLECULES = ["CH4", "CO", "CO2", "H2O", "H2S", "NH3"]
+MOLECULES = \
+    ["CH4", "CO", "CO2", "H2O", "H2S", "NH3", "C2H2", "HCN", "PH3", "SiO"]
 
 # Folder to look for templates. Templates are assumed to already be in the
-# formate of transmission spectra.
-folder = "templates/WASP107b_prt_lbc"
+# format of transmission spectra.
+folder = "templates/Welbanks_CHI/"
+
+# Wildcarded filename segment, set to "" for everything in the folder.
+filename_label = "CHIMERA-Ret_yesCloud"
 
 # Any files in this folder with extension as ext are considered templates
 ext = "txt"
 
 # New resolving power to convolve to
-new_resolving_power = 100000
+new_resolving_power = 120000
 
 # Since we've dropped the resolution, we drop the wavelength sampling too.
 wl_downsample_fac = 10
 
-fits_save_name = "WASP107b_templates_all_R{}.fits".format(new_resolving_power)
+fits_save_name = \
+    "WASP107b_Welbanks_CHIMERA-Ret_noCloud_templates_all_R{}.fits".format(
+        new_resolving_power)
 
 # Whether we need to transpose our input planet spectrum or not
 do_transpose_input = True
@@ -39,7 +45,8 @@ do_transpose_input = True
 # Spectra extraction, convolution, and resampling
 #------------------------------------------------------------------------------
 # Import files
-all_model_paths = glob.glob(os.path.join(folder, "*.{}".format(ext)))
+all_model_paths = glob.glob(
+    os.path.join(folder, "*{}*.{}".format(filename_label, ext)))
 all_model_paths.sort()
 
 has_molecules_all = []

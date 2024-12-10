@@ -39,17 +39,19 @@ nightly_rv_offsets: [0, 0]
 # Molecfit transmission spectra--one for each night
 molecfit_fits:
 - "data_reduction/WASP107/220310_WASP107/molecfit_results/MODEL/BEST_FIT_MODEL.fits"
-#- "data_reduction/WASP107/230222_WASP107/molecfit_results/BEST_FIT_MODEL.fits"
 - "data_reduction/wasp_107_n2/BEST_FIT_MODEL.fits"
-# HACK--note that I need to run the second night through molecfit again
 
 # Fill value for missing telluric tau values
 tau_fill_value: 0
 
-# Grid of petitRADTRANS planet spectra, units of R_jup as a function of lambda
-#planet_fits: "templates/WASP107b_Dyrek_pRT-Ret_templates_all_R150000.fits"
-#planet_fits: "templates/WASP107b_maxed_templates_all_R100000.fits"
-planet_fits: "templates/WASP107b_Welbanks_CHI-Ret_templates_all_R100000.fits"
+# List of grids of petitRADTRANS planet spectra, units of R_jup as a function
+# of lambda. This should either just be a single template, or n_transit
+# templates where a different template (e.g. with a different resolution) will
+# be used on each night. If only a single template is given, but there are
+# multiple transits, then that template will be used for all nights.
+planet_fits:
+- "templates/WASP107b_Welbanks_CHIMERA-Ret_noCloud_templates_all_R150000.fits"
+- "templates/WASP107b_Welbanks_CHIMERA-Ret_noCloud_templates_all_R120000.fits"
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
