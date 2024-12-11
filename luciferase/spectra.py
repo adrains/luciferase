@@ -3016,7 +3016,8 @@ def continuum_normalise_all_spectra_with_telluric_model(
     bcors,
     rv_star,
     airmasses,
-    seq="",):
+    seq="",
+    plot_folder="plots/",):
     """Function to continuum normalise spectra via 1D polynomial to each
     spectral segment optimised to a telluric spectrum and stellar mask.
 
@@ -3052,6 +3053,9 @@ def continuum_normalise_all_spectra_with_telluric_model(
     
     seq: str, default: ""
         Sequence, either 'A', 'B', or 'AB'.
+
+    plot_folder: str, default: "plots/
+        Subfolder to save diagnostic plots to.
 
     Returns
     -------
@@ -3251,8 +3255,15 @@ def continuum_normalise_all_spectra_with_telluric_model(
             loc="lower center",
             ncol=4,)
 
+    # Check save folder and save
+    if not os.path.isdir(plot_folder):
+        os.mkdir(plot_folder)
+
+    plot_fn = os.path.join(
+        plot_folder, "continuum_norm_n_phase_{}{}.pdf".format(n_phase, seq))
+
     plt.tight_layout()
-    plt.savefig("plots/continuum_norm_n_phase_{}{}.pdf".format(n_phase, seq))
+    plt.savefig(plot_fn)
 
     return fluxes_sci_norm, sigmas_sci_norm, poly_coeff_all
 

@@ -32,15 +32,36 @@ wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
     do_convert_air_to_vacuum_wl=True,)
 
 # -----------------------------------------------------------------------------
+# Info print
+# -----------------------------------------------------------------------------
+print("-"*80, "\nContinuum Normalisation Settings\n", "-"*80, sep="")
+if ss.save_path == "":
+    print("\tSpectra fits\t\t\ttransit_data_{}_n{}.fits".format(
+        ss.label, ss.n_transit))
+else:
+    print("\tSpectra fits\t\t\t{}/transit_data_{}_n{}.fits".format(
+        ss.save_path, ss.label, ss.n_transit))
+
+print("\tSigma Threshold Phase\t\t{}".format(ss.sigma_threshold_phase))
+print("\tSigma Threshold Column\t\t{}".format(ss.sigma_threshold_column))
+print("\tBad px extrapolation?\t\t{}".format(
+    ss.do_bad_px_corr_via_extrapolation))
+print("\tSplit A/B seq during norm?\t{}".format(
+    ss.do_split_sequences_continuum_norm))
+print("-"*80)
+
+# -----------------------------------------------------------------------------
 # Continuum normalise data + save
 # -----------------------------------------------------------------------------
 for transit_i in range(ss.n_transit):
-    print("Continuum normalising transit {}/{}...".format(
+    print("\nContinuum normalising transit {}/{}...".format(
         transit_i+1, ss.n_transit))
     
     # Grab shape for this night
     (n_phase, n_spec, n_px) = fluxes_list[transit_i].shape
     
+    plot_folder = "plots/{}/".format(ss.label)
+
     # Run continuum normalisation once for each A/B sequence
     if ss.do_split_sequences_continuum_norm:
         # Create arrays
@@ -69,7 +90,8 @@ for transit_i in range(ss.n_transit):
                     rv_star=syst_info.loc["rv_star", "value"],
                     airmasses=\
                         transit_info_list[transit_i]["airmass"].values[sm],
-                    seq=seq,)
+                    seq=seq,
+                    plot_folder=plot_folder,)
             
             # Store
             fluxes_norm[sm] = fluxes_seq
@@ -91,7 +113,8 @@ for transit_i in range(ss.n_transit):
                 bcors=transit_info_list[transit_i]["bcor"].values,
                 rv_star=syst_info.loc["rv_star", "value"],
                 airmasses=transit_info_list[transit_i]["airmass"].values,
-                seq="AB",)
+                seq="AB",
+                plot_folder=plot_folder,)
 
     # -------------------------------------------------------------------------
     # Clean continuum normalised spectra
@@ -109,7 +132,7 @@ for transit_i in range(ss.n_transit):
             is_A=is_A,
             sigma_threshold_phase=ss.sigma_threshold_phase,
             sigma_threshold_column=ss.sigma_threshold_column,
-            do_extrapolation=ss.do_bad_px_corr_via_extrapolation)
+            do_extrapolation=ss.do_bad_px_corr_via_extrapolation,)
 
     plot_label = "{}_N{}".format(ss.label, transit_i+1)
 
@@ -120,7 +143,8 @@ for transit_i in range(ss.n_transit):
         sequences=["A","B"],
         sequence_masks=[is_A, ~is_A],
         plot_label=plot_label,
-        plot_title=plot_label,)
+        plot_title=plot_label,
+        plot_folder=plot_folder,)
 
     # -------------------------------------------------------------------------
     # Save cleaned spectra

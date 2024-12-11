@@ -268,12 +268,15 @@ for transit_i in range(ss.n_transit):
         plot_label = "{}_n{}_{}_{}".format(
             rv_frame, transit_i+1, seq, ss.label)
 
+        plot_folder = "plots/{}/".format(ss.label)
+
         # Plot the residuals themselves (n_sr_iter x n_spec panels)
         tplt.plot_sysrem_residuals(
             waves,
             resid_all,
             plot_label=plot_label,
-            plot_title=plot_title,)
+            plot_title=plot_title,
+            plot_folder=plot_folder,)
         
         # Plot standard deviation of each segment/phase as a function of SYSREM
         # iteration (n_spec panels)
@@ -281,7 +284,8 @@ for transit_i in range(ss.n_transit):
             waves,
             resid_all,
             plot_label=plot_label,
-            plot_title=plot_title,)
+            plot_title=plot_title,
+            plot_folder=plot_folder,)
 
 # Plot comparison figures of the SYSREM phase and wavelength coefficients for
 # all sequences.
@@ -293,4 +297,5 @@ tplt.plot_sysrem_coefficients(
     labels_per_seq_list=labels_per_seq,
     coeff_phase_all_list=coeff_phase_all_seq,
     coeff_wave_all_list=coeff_wave_all_seq,
-    plot_label=plot_label,)
+    plot_label=plot_label,
+    plot_folder=plot_folder,)

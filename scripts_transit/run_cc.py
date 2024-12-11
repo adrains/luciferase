@@ -133,7 +133,7 @@ species_label = "_".join(ss.species_to_cc)
 species_list = ", ".join(ss.species_to_cc)
 
 # Setup plotting subfolder
-plot_folder = "plots/{}_{}_{}/".format(rv_frame, ss.label, species_label)
+plot_folder = "plots/{}/{}_{}/".format(ss.label, rv_frame, species_label)
 
 # This holds the combined map for each seq/night, plus the final combined map
 combined_maps = []
