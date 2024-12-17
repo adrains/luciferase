@@ -1,7 +1,33 @@
-"""Script to run SYSREM on a datacube (either real or simulated) of
-exoplanet transmission spectra. The resulting residuals (along with the 
-continuum normalised spectra used to generate them) are then saved back to the
-same fits file as extra extensions.
+"""Script to run SYSREM on a datacube (either real or simulated) of exoplanet
+transmission spectra. The resulting residuals are then saved back to the same
+fits file as extra extensions.
+
+The following plots are generated:
+ - [n_spec, n_sysrem_iter] panel plot of residuals (per night & A/B sequence).
+ - [n_spec] panel plot showing the standard deviation of the residuals over
+   successive SYSREM iterations, one line per phase (per night & A/B sequence).
+ - [n_spec, n_sysrem_iter] panel plot of the *phase* coefficients fitted by
+   SYSREM at each iteration, with one line per night-A/B sequence.
+ - [n_spec, n_sysrem_iter] panel plot of the *wavelength* coefficients fitted
+   by SYSREM at each iteration, with one line per night-A/B sequence.
+
+These plots should be inspected to assess the quality of the SYSREM detrending,
+which is highly dependent on the initial cleaning & continuum normalisation of
+the data. Things to look out for:
+ - 'Barcoding' of residuals --> typically occurs when running SYSREM on the
+   combined/interleaved A/B sequences, and occurs due to these sequences having
+   inconsistent continuum normalisations. Unclear how much this affects
+   recovery of the planet signal, but treating the A/B sequences separately
+   does resolve the issue.
+ - Phases detrended at different rates (e.g. some phases plateau) --> likely
+   indicates a time-dependent change on the night distinct from telluric 
+   variability--the most likely (but at this time unverified) culprit is
+   superresolution.
+ - Inconsistency in coefficients for A/B sequences within the same night -->
+   likely a data cleaning issue where systematics are present in one nodding
+   position but not the other. Can be improved by lowering the phase and column
+   sigma thresholds when cleaning, but going too far in this direction can
+   destroy the planet signal.
 """
 import numpy as np
 import transit.utils as tu

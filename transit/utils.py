@@ -3370,7 +3370,7 @@ def load_telluric_spectrum(
 def prepare_cc_template(
     cc_settings,
     syst_info,
-    planet_fits_i,
+    planet_fits_i=0,
     templ_wl_nm_bounds=(16000,30000),
     continuum_resolving_power=300,):
     """Function to import and setup the cross-correlation template to use with

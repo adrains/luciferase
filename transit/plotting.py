@@ -1947,6 +1947,7 @@ def visualise_templates(
         wave_template, spectrum_template = tu.prepare_cc_template(
             cc_settings=sr_settings,
             syst_info=syst_info,
+            planet_fits_i=0,
             templ_wl_nm_bounds=(19000,25000),
             continuum_resolving_power=300,)
         

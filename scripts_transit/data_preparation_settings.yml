@@ -7,9 +7,16 @@
 #------------------------------------------------------------------------------
 # Raw data
 #------------------------------------------------------------------------------
+# Reference fits file for pre-computed continuum coefficients.
+# TODO: Currently this is circular, since you need to have already continuum
+# normalised the data in question by the time at which you regrid it. Leaving
+# for now, but this needs to be removed in future versions.
+ref_path: ""
+ref_label: "wasp107"
+
 # Save path
-save_path: ""
-star_name: "wasp107"
+save_path: "simulations"
+star_label: "wasp107_no_morphing"
 
 # Properties CSV with star, planet, and system info
 planet_properties_file: "scripts_transit/planet_data_wasp107.csv"
@@ -37,8 +44,8 @@ cc_step_kms: 0.1
 
 # Sigma clipping settings for the cross-correlation
 do_sigma_clipping: True
-sigma_clip_level_upper: 3
-sigma_clip_level_lower: 3
+sigma_clip_level_upper: 4
+sigma_clip_level_lower: 4
 
 # Whether to plot diagnostic plots of CC value as a function of RV shift
 make_debug_plots: False

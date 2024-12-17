@@ -12,11 +12,12 @@ n_transit: 2
 
 # Real data
 # ---------
-label: "wasp107_np_corr"
+#label: "wasp107_np_corr"
 #label: "wasp107"
 
 # SNR~130 Welbanks+24 sims with all species + slit losses
 # -------------------------------------------
+label: "simulated_R100000_wasp107_W24_cloudy_241211_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
 #label: "simulated_R100000_wasp107_W24_e0d4_241129_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
 #label: simulated_R100000_wasp107_W24_circ_241126_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130
 #label: "simulated_R100000_wasp107_W24_241121_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
@@ -50,8 +51,11 @@ tau_fill_value: 0
 # be used on each night. If only a single template is given, but there are
 # multiple transits, then that template will be used for all nights.
 planet_fits:
-- "templates/WASP107b_Welbanks_CHIMERA-Ret_noCloud_templates_all_R150000.fits"
-- "templates/WASP107b_Welbanks_CHIMERA-Ret_noCloud_templates_all_R120000.fits"
+- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R100000.fits"
+#- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
+#- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R120000.fits"
+
+# Per NP, had WASP-107 had 150-160k on firs night, and 120-130k on second.
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
@@ -73,7 +77,7 @@ stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 # and use as reference the mean spectrum of the *opposite* sequence (e.g. A vs
 # B), clipping the pixel if it is more than sigma_threshold_phase sigma away
 # from the reference.
-sigma_threshold_phase: 3.0
+sigma_threshold_phase: 4.0
 
 # We also sigma clip entire columns by comparing the mean A and B sequence
 # spectra to each other, clipping the whole column if they deviate by
@@ -83,7 +87,7 @@ sigma_threshold_phase: 3.0
 # of detector artefacts present in only one nodding position, in which case we
 # must discard the entire column since ~50% of the data is now consisdered
 # systematically aberrant.
-sigma_threshold_column: 3.0
+sigma_threshold_column: 4.0
 
 # If True, we extrapolate edge px (with cannot be interpolated). If False, we
 # end up masking the entire column. Preliminary testing indicated that 
