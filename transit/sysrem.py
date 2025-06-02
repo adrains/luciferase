@@ -6,7 +6,6 @@ SYSREM:
 """
 import warnings
 import numpy as np
-from astropy.stats import sigma_clip
 from tqdm import tqdm
 from scipy.interpolate import interp1d
 import astropy.constants as const
@@ -667,11 +666,21 @@ def cross_correlate_sysrem_resid(
     bcors,
     cc_rv_step=1,
     cc_rv_lims=(-200,200),
-    interpolation_method="cubic",):
+    interpolation_method="cubic",
+    in_ingress_mask=None,
+    in_egress_mask=None,
+    template_wave_ingress=None,
+    template_spec_ingress=None,
+    template_wave_egress=None,
+    template_spec_egress=None,):
     """Function to cross correlate a template spectrum against all spectral
     segments, for all phases, and for all SYSREM iterations. This cross
     correlation implementation does not use weight by uncertainties, but rather
     normalises by the two arrays being cross correlated.
+
+    Can accept 1 or 3 sets of temnplates, with the latter case being for if we
+    want to use separate templates for cross-correlation during ingress and
+    egress.
 
     Parameters
     ----------
@@ -699,6 +708,16 @@ def cross_correlate_sysrem_resid(
         Default interpolation method to use with scipy.interp1d. Can be one of: 
         ['linear', 'nearest', 'nearest-up', 'zero', 'slinear', 'quadratic',
         'cubic', 'previous', or 'next'].
+
+    in_ingress_mask, in_egress_mask: 1D bool array, default: None
+        Boolean mask indidcating which phases are during ingress, of length 
+        [n_phase].
+
+    template_wave_ingress, template_spec_ingress: 1D float array, default: None
+        Wavelength and spectrum arrays to be used during *ingress* phases.
+
+    template_wave_egress, template_spec_egress: 1D float array, default: None
+        Wavelength and spectrum arrays to be used during *egress* phases.
 
     Returns
     -------
@@ -741,6 +760,35 @@ def cross_correlate_sysrem_resid(
         kind=interpolation_method,
         bounds_error=False,
         fill_value=np.nan,)
+    
+    # Check if we're using separate templates for the ingress and egress, and
+    # if so construct their respective interpolators
+    if (in_ingress_mask is not None and in_egress_mask is not None
+        and template_wave_ingress is not None
+        and template_spec_ingress is not None
+        and template_wave_egress is not None
+        and template_spec_egress is not None):
+        use_ingress_egress_templates = True
+        
+        #import pdb; pdb.set_trace()
+        temp_interp_ingress = interp1d(
+            x=template_wave_ingress,
+            y=template_spec_ingress,
+            kind=interpolation_method,
+            bounds_error=False,
+            fill_value=np.nan,)
+        
+        temp_interp_egress = interp1d(
+            x=template_wave_egress,
+            y=template_spec_egress,
+            kind=interpolation_method,
+            bounds_error=False,
+            fill_value=np.nan,)
+        
+        print("Ingress phases: {:0.0f}, egress phases: {:0.0f}".format(
+            np.sum(in_ingress_mask), np.sum(in_egress_mask)))
+    else:
+        use_ingress_egress_templates = False
 
     for spec_i in range(n_spec):
         desc = "Creating spectral template grid {}/{} for all RVs".format(
@@ -753,8 +801,18 @@ def cross_correlate_sysrem_resid(
                 wave_rv_shift = \
                     waves[spec_i] * (1-(rv+bcor)/(const.c.si.value/1000))
 
-                # Interpolate to wavelength scale
-                spec_1D = temp_interp(wave_rv_shift)
+                # If in ingress, interpolate ingress template spectrum
+                if use_ingress_egress_templates and in_ingress_mask[phase_i]:
+                    spec_1D = temp_interp_ingress(wave_rv_shift)
+
+                # If in egress, interpolate ingress template spectrum
+                elif use_ingress_egress_templates and in_egress_mask[phase_i]:
+                    spec_1D = temp_interp_egress(wave_rv_shift)
+                    
+                # Otherwise we the planet is not in ingress/egress, or we have
+                # only been given a single template, use the standard template.
+                else:
+                    spec_1D = temp_interp(wave_rv_shift)
 
                 # If this is ever true, our template is insufficiently long
                 # in wavelength.

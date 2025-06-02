@@ -3368,27 +3368,25 @@ def load_telluric_spectrum(
 
 
 def prepare_cc_template(
-    cc_settings,
+    planet_fits_fn,
+    species_to_cc,
     syst_info,
-    planet_fits_i=0,
     templ_wl_nm_bounds=(16000,30000),
     continuum_resolving_power=300,):
-    """Function to import and setup the cross-correlation template to use with
-    scripts_transit/run_cc.py. This can either return a planet, telluric, or
-    stellar spectrum depending on the settings in cc_settings.
+    """Function to import and setup an exoplanet cross-correlation template to
+    use with scripts_transit/run_cc.py. The fits file format is as output by
+    scripts_transit/make_planet_transmission_grid_fits.py.
 
     Parameters
     ----------
-    cc_settings: YAMLSettings object
-        Settings object with attributes equivalent to YAML keys in 
-        simulations_settings.yml.
+    planet_fits_fn: str
+        Filename/path to the template fits file
+    
+    species_to_cc: str list
+        List of molecular species model in the transit, e.g. ['H2O', 'CO'].
 
     syst_info: pandas DataFrame
         Pandas dataframe containing the planet properties.
-
-    planet_fits_i: int, default: 0
-        Which planet fits from the list in the YAML file to load, where the
-        number corresponds to the transit number.
 
     templ_wl_nm_bounds: float tuple, default: (16000,30000)
         Wavelength limits in nm when importing planet template.
@@ -3401,89 +3399,60 @@ def prepare_cc_template(
     wave_template, spectrum_template: 1D float array
         Template wavelength and spectrum vectors of length [n_wave].
     """
-    #--------------------------------------------------------------------------
-    # [Optional] - Run on stellar or telluric spectrum for testing
-    #--------------------------------------------------------------------------
-    # [Optional] For testing, use the telluric vector for cross correlation
-    if cc_settings.cc_with_telluric:
-        telluric_wave, _, _, telluric_trans = load_telluric_spectrum(
-            molecfit_fits=cc_settings.molecfit_fits[0],
-            tau_fill_value=cc_settings.tau_fill_value,
-            convert_to_angstrom=False,
-            convert_to_nm=True,
-            output_transmission=True,)
+    #----------------------------------------------------------------------
+    # Setup and template selection
+    #----------------------------------------------------------------------
+    # Load in petitRADRTRANS datacube of templates. These templates will be
+    # in units of R_earth as a function of wavelength.
+    wave_p, spec_p_all, templ_info = load_transmission_templates_from_fits(
+        fits_file=planet_fits_fn,
+        min_wl_nm=templ_wl_nm_bounds[0],
+        max_wl_nm=templ_wl_nm_bounds[1],)
 
-        wave_template = telluric_wave
-        spectrum_template = telluric_trans
+    # Clip edges to avoid edge effects introduced by interpolation
+    spec_p_all = spec_p_all[:,10:-10]
+    wave_p = wave_p[10:-10] / 10
 
-    # [Optional] Or we can use a stellar spectrum
-    elif cc_settings.cc_with_stellar:
-        wave_stellar, spec_stellar = lu.load_plumage_template_spectrum(
-            template_fits=cc_settings.stellar_template_fits,
-            do_convert_air_to_vacuum_wl=True,
-            do_convert_angstroms_to_nm=False,)
-        
-        wave_template = wave_stellar
-        spectrum_template = spec_stellar
+    # Now select the appropriate template from trans_planet_all simulating
+    # the appropriate set of molecules. Raise an exception if we don't have
+    # a template with that combination of molecules.
+    molecule_cols = templ_info.columns.values
+    has_molecule = np.full_like(molecule_cols, False)
 
-    #--------------------------------------------------------------------------
-    # Otherwise use planet spectrum
-    #--------------------------------------------------------------------------
+    for mol_i, molecule in enumerate(molecule_cols):
+        if molecule in species_to_cc:
+            has_molecule[mol_i] = True
+
+    match_i = np.argwhere(np.all(has_molecule==templ_info.values, axis=1))
+
+    if len(match_i) == 0:
+        raise ValueError("Invalid molecule combination!")
     else:
-        #----------------------------------------------------------------------
-        # Setup and template selection
-        #----------------------------------------------------------------------
-        # Load in petitRADRTRANS datacube of templates. These templates will be
-        # in units of R_earth as a function of wavelength.
-        wave_p, spec_p_all, templ_info = load_transmission_templates_from_fits(
-            fits_file=cc_settings.planet_fits[planet_fits_i],
-            min_wl_nm=templ_wl_nm_bounds[0],
-            max_wl_nm=templ_wl_nm_bounds[1],)
+        Rp_Re_vs_lambda_planet = spec_p_all[int(match_i)]
 
-        # Clip edges to avoid edge effects introduced by interpolation
-        spec_p_all = spec_p_all[:,10:-10]
-        wave_p = wave_p[10:-10] / 10
+    # Convert to a transmission spectrum
+    r_e = const.R_earth.si.value
+    r_odot = const.R_sun.si.value
 
-        # Now select the appropriate template from trans_planet_all simulating
-        # the appropriate set of molecules. Raise an exception if we don't have
-        # a template with that combination of molecules.
-        molecule_cols = templ_info.columns.values
-        has_molecule = np.full_like(molecule_cols, False)
+    rp = syst_info.loc["r_planet_rearth", "value"] 
+    rs = syst_info.loc["r_star_rsun", "value"] * r_odot / r_e
 
-        for mol_i, molecule in enumerate(molecule_cols):
-            if molecule in cc_settings.species_to_cc:
-                has_molecule[mol_i] = True
+    trans_planet = 1 - ((Rp_Re_vs_lambda_planet + rp)**2  / rs**2)
 
-        match_i = np.argwhere(np.all(has_molecule==templ_info.values, axis=1))
+    #----------------------------------------------------------------------
+    # Continuum normalisation
+    #----------------------------------------------------------------------
+    # Compute planet 'continuum' to normalise by
+    planet_cont = instrBroadGaussFast(
+        wvl=wave_p,
+        flux=trans_planet,
+        resolution=continuum_resolving_power,
+        equid=True,
+        edgeHandling="firstlast",)
 
-        if len(match_i) == 0:
-            raise ValueError("Invalid molecule combination!")
-        else:
-            Rp_Re_vs_lambda_planet = spec_p_all[int(match_i)]
-
-        # Convert to a transmission spectrum
-        r_e = const.R_earth.si.value
-        r_odot = const.R_sun.si.value
-
-        rp = syst_info.loc["r_planet_rearth", "value"] 
-        rs = syst_info.loc["r_star_rsun", "value"] * r_odot / r_e
-
-        trans_planet = 1 - ((Rp_Re_vs_lambda_planet + rp)**2  / rs**2)
-
-        #----------------------------------------------------------------------
-        # Continuum normalisation
-        #----------------------------------------------------------------------
-        # Compute planet 'continuum' to normalise by
-        planet_cont = instrBroadGaussFast(
-            wvl=wave_p,
-            flux=trans_planet,
-            resolution=continuum_resolving_power,
-            equid=True,
-            edgeHandling="firstlast",)
-
-        # Final continuum normalised planet spectrum with edges clipped again
-        wave_template = wave_p[10:-10]
-        spectrum_template = trans_planet[10:-10] / planet_cont[10:-10]
+    # Final continuum normalised planet spectrum with edges clipped again
+    wave_template = wave_p[10:-10]
+    spectrum_template = trans_planet[10:-10] / planet_cont[10:-10]
 
     # All done, return
     return wave_template, spectrum_template

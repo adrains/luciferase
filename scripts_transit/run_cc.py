@@ -19,6 +19,7 @@ import numpy as np
 import transit.utils as tu
 import transit.sysrem as sr
 import transit.plotting as tplt
+import luciferase.utils as lu
 
 #------------------------------------------------------------------------------
 # Settings
@@ -50,35 +51,99 @@ n_transit = len(fluxes_list)
 wave_templates = []
 spectra_templates = []
 
-# If there is only a single template given in the settings file, then use that
-# for all nights.
-if len(ss.planet_fits) == 1:
-    wave_template, spectrum_template = tu.prepare_cc_template(
-        cc_settings=ss,
-        syst_info=syst_info,
-        planet_fits_i=0,
-        templ_wl_nm_bounds=(16000,30000),
-        continuum_resolving_power=300,)
-    
-    wave_templates = [wave_template] * n_transit
-    spectra_templates = [spectrum_template] * n_transit
+# As above, but for the optional ingress and egress template spectra. If we
+# aren't using ingress and egress spectra, these lists will be full of None.
+wave_templates_ingress = []
+spectra_templates_ingress = []
+wave_templates_egress = []
+spectra_templates_egress = []
 
-# 1:1 match between templates and transits
+# Check to see whether we have a unique template for each night
+# 1) Common template for all nights
+if len(ss.planet_fits) == 1:
+    n_templates = 1
+# 2) Unique template for each night
 elif len(ss.planet_fits) == n_transit:
-    for transit_i in range(n_transit):
+    n_templates = n_transit
+# 3) Something else: throw an exception just to be safe
+else:
+    raise ValueError("# planet templates =/= n_transit")
+
+# [Optional] Use telluric template for CC instead of exoplanet template
+if ss.cc_with_telluric:
+    wave_template, _, _, spectrum_template = tu.load_telluric_spectrum(
+        molecfit_fits=ss.molecfit_fits[0],
+        tau_fill_value=ss.tau_fill_value,
+        convert_to_angstrom=False,
+        convert_to_nm=True,
+        output_transmission=True,)
+
+# [Optional] Use stellar template for CC instead of exoplanet template
+elif ss.cc_with_stellar:
+    wave_template, spectrum_template = lu.load_plumage_template_spectrum(
+        template_fits=ss.stellar_template_fits,
+        do_convert_air_to_vacuum_wl=True,
+        do_convert_angstroms_to_nm=False,)
+
+# Planet templates, optionally with ingress/egress models
+else:
+    # Loop over how many unique templates we've been given for each of the
+    # standard, ingress, and egress templates.
+    for transit_i in range(n_templates):
+        # Standard planet template
         wave_template, spectrum_template = tu.prepare_cc_template(
-            cc_settings=ss,
+            planet_fits_fn=ss.planet_fits[transit_i],
+            species_to_cc=ss.species_to_cc,
             syst_info=syst_info,
-            planet_fits_i=transit_i,
             templ_wl_nm_bounds=(16000,30000),
             continuum_resolving_power=300,)
         
         wave_templates.append(wave_template)
         spectra_templates.append(spectrum_template)
 
-# Otherwise throw an exception just to be safe
-else:
-    raise ValueError("# planet templates =/= n_transit")
+        # [Optional] Ingress/egress templates
+        if ss.do_use_ingress_egress_templates:
+            wave_template_ingress, spectrum_template_ingress = \
+                tu.prepare_cc_template(
+                    planet_fits_fn=ss.planet_fits_ingress[transit_i],
+                    species_to_cc=ss.species_to_cc,
+                    syst_info=syst_info,
+                    templ_wl_nm_bounds=(16000,30000),
+                    continuum_resolving_power=300,)
+        
+            wave_template_egress, spectrum_template_egress = \
+                tu.prepare_cc_template(
+                    planet_fits_fn=ss.planet_fits_egress[transit_i],
+                    species_to_cc=ss.species_to_cc,
+                    syst_info=syst_info,
+                    templ_wl_nm_bounds=(16000,30000),
+                    continuum_resolving_power=300,)
+            
+            wave_templates_ingress.append(wave_template_ingress)
+            spectra_templates_ingress.append(spectrum_template_ingress)
+
+            wave_templates_egress.append(wave_template_egress)
+            spectra_templates_egress.append(spectrum_template_egress)
+        
+        # No ingress/egress templates, fill with default None values.
+        else:
+            wave_templates_ingress.append(None)
+            spectra_templates_ingress.append(None)
+
+            wave_templates_egress.append(None)
+            spectra_templates_egress.append(None)
+
+# Even if we have a single common template we expect arrays of length
+# n_transit, so we need to extend these lists.
+if len(wave_templates) != n_transit:
+    wave_templates = [wave_template] * n_transit
+    spectra_templates = [spectrum_template] * n_transit
+
+    wave_templates_ingress = wave_templates_ingress * n_transit
+    spectra_templates_ingress = spectra_templates_ingress * n_transit
+
+    wave_templates_egress = wave_templates_egress * n_transit
+    spectra_templates_egress = spectra_templates_egress * n_transit
 
 # Set the RV frame that we'll be running in
 rv_frame = "stellar" if ss.run_sysrem_in_stellar_frame else "telluric"
@@ -106,6 +171,8 @@ if ss.do_mask_orders_for_analysis:
 else:
     print("\tSpectral segments\tAll")
 print("\tSplit A/B sequences\t{}".format(ss.split_AB_sequences))
+print("\tIngress/Egress models\t{}".format(
+    ss.do_use_ingress_egress_templates))
 print("\tPer-px resid weighting\t{}".format(
     ss.normalise_resid_by_per_phase_std))
 print("\tRV frame\t\t{}".format(rv_frame))
@@ -169,6 +236,23 @@ for transit_i in range(n_transit):
 
         # Grab a mask to discriminate in/out of transit phases
         in_transit = transit_info_seq["is_in_transit_mid"].values
+
+        # Grab masks for phases in ingress and egress. This is defined as those
+        # phases where the planet is partially on the star at any point during
+        # the exposure, which we determine based on the scl parameter < 1
+        # which is the case during ingress or egress, then split into positive
+        # or negative phase cases.
+        partial_transit_mask = np.logical_or(
+            transit_info_seq["scl_start"].values < 1,
+            transit_info_seq["scl_end"].values < 1,)
+        
+        in_ingress = np.logical_and(
+            partial_transit_mask,
+            transit_info_seq["phase_mid"].values < 0,)  # Negative phaases
+        
+        in_egress = np.logical_and(
+            partial_transit_mask,
+            transit_info_seq["phase_mid"].values > 0,)  # Positive phases
 
         # Import SYSREM residuals
         resid_all = tu.load_sysrem_residuals_from_fits(
@@ -234,7 +318,13 @@ for transit_i in range(n_transit):
             bcors=rv_bcors,
             cc_rv_step=ss.cc_rv_step,
             cc_rv_lims=ss.cc_rv_lims,
-            interpolation_method="linear",)
+            interpolation_method="cubic",
+            in_ingress_mask=in_ingress,
+            in_egress_mask=in_egress,
+            template_wave_ingress=wave_templates_ingress[transit_i],
+            template_spec_ingress=spectra_templates_ingress[transit_i],
+            template_wave_egress=wave_templates_egress[transit_i],
+            template_spec_egress=spectra_templates_egress[transit_i],)
 
         # Store
         ccv_per_spec_all.append(ccv_per_spec)

@@ -12,20 +12,11 @@ n_transit: 2
 
 # Real data
 # ---------
-#label: "wasp107_np_corr"
-#label: "wasp107"
+label: "wasp107_np_corr_jun25"
 
-# SNR~130 Welbanks+24 sims with all species + slit losses
-# -------------------------------------------
-label: "simulated_R100000_wasp107_W24_cloudy_241211_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
-#label: "simulated_R100000_wasp107_W24_e0d4_241129_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
-#label: simulated_R100000_wasp107_W24_circ_241126_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130
-#label: "simulated_R100000_wasp107_W24_241121_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
-#label: "simulated_R100000_wasp107_W24_241121_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_20_SNR_130"
-
-# SNR~300 sim with all species + slit losses
-# -------------------------------------------
-#label: "simulated_R100000_wasp107_240802_C2H2_CH4_CO_CO2_H2O_H2S_HCN_NH3_PH3_SiO_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_SNR_300"
+# Simulated Data: SNR~130 Welbanks+24 sims with all species + slit losses
+# -----------------------------------------------------------------------
+#label: "simulated_R100000_wasp107_W24_cloudy_241211_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
 
 # Nightly velocity offsets in km/s. This array should have the same length as
 # the number of transits and is used to account for observed RV offsets between 
@@ -46,16 +37,29 @@ molecfit_fits:
 tau_fill_value: 0
 
 # List of grids of petitRADTRANS planet spectra, units of R_jup as a function
-# of lambda. This should either just be a single template, or n_transit
-# templates where a different template (e.g. with a different resolution) will
-# be used on each night. If only a single template is given, but there are
-# multiple transits, then that template will be used for all nights.
+# of lambda. There are three lists (planet_fits, planet_fits_ingress,
+# planet_fits_egress), with the latter two being optional for the case where we
+# want to use separate templates for planet ingress and egress (controlled by
+# the boolean do_use_ingress_egress_templates). These lists should either just
+# be a single template each, or n_transit templates where a different template
+# (e.g. with a different resolution) will be used on each night. If only a
+# single template is given, but there are  multiple transits, then that
+# template will be used for all nights.
 planet_fits:
-- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R100000.fits"
-#- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
-#- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R120000.fits"
+- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
 
-# Per NP, had WASP-107 had 150-160k on firs night, and 120-130k on second.
+# Set this to True to use separate ingress and egress templates, where ingress
+# and egress are defined as exposures where the planet was not fully on the
+# star for at least part of the exposure.
+do_use_ingress_egress_templates: False
+
+# Planet templates to use during ingress phases.
+planet_fits_ingress:
+- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
+
+# Planet templates to use during egress phases.
+planet_fits_egress:
+- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
@@ -140,7 +144,7 @@ edge_px_to_mask: 20
 # SYSREM Settings
 #------------------------------------------------------------------------------
 # Number of iterations to run SYSREM for
-n_sysrem_iter: 15
+n_sysrem_iter: 10
 
 # Convergence threshold for each SYSREM iteration
 sysrem_convergence_tol: 1.0E-6
@@ -191,7 +195,7 @@ cc_with_stellar: False
 # meaningfully contribute to the CC, e.g. for CO which only has absorption
 # features in 6/18 segments of the CRIRES K2148 grating.
 do_mask_orders_for_analysis: False
-selected_segments: [12,13,14,15,16,17]
+selected_segments: [12,13,14,15,16,17] # CO
 
 # Step size for the cross-correlation in km/s. Finer sampling might give a
 # higher detection SNR depending on where the best fitting velocity sits, but

@@ -642,8 +642,12 @@ def plot_cleaned_continuum_normalised_spectra(
                 zorder=100,
                 label="{} (Mean)".format(seq) if spec_i==0 else None,)
             
-            axes[1, spec_i].set_xlim(
-                waves[spec_i,0]-0.5, waves[spec_i,-1]+0.5)
+            # Grab min and max wavelengths this way in case wavelength scale
+            # has nans at the start and end.
+            wl_min = np.nanmin(waves[spec_i]) - 0.5
+            wl_max = np.nanmax(waves[spec_i]) + 0.5
+
+            axes[1, spec_i].set_xlim(wl_min, wl_max)
             axes[1, spec_i].tick_params(axis='x', labelrotation=45)
             axes[1, spec_i].xaxis.set_major_locator(
                 plticker.MultipleLocator(base=5))
@@ -754,7 +758,11 @@ def plot_sysrem_residuals(
                 resid_ith = resid[sr_iter_i, :, spec_i]
             
             # [x_min, x_max, y_min, y_max]
-            extent = [np.min(waves[spec_i]), np.max(waves[spec_i]), n_phase, 0]
+            extent = [
+                np.nanmin(waves[spec_i]),
+                np.nanmax(waves[spec_i]),
+                n_phase,
+                0]
             
             # Grab axis handle for convenience
             axis = axes[sr_iter_i, spec_i]
@@ -788,7 +796,7 @@ def plot_sysrem_residuals(
             # Only show titles on the top
             if sr_iter_i == 0:
                 axis.set_title(
-                    label=r"${:0.0f}\,\mu$m".format(np.median(waves[spec_i])),
+                    label=r"${:0.0f}\,\mu$m".format(np.nanmedian(waves[spec_i])),
                     fontsize="x-small")
     
     plt.suptitle(plot_title, fontsize="small")
@@ -987,14 +995,14 @@ def plot_sysrem_coefficients(
     # Plot single legend for each plot
     leg_phase = axes_phase[0, 0].legend(
         loc="upper left",
-        bbox_to_anchor=(0, 2.25),
+        bbox_to_anchor=(0, 2),
         ncol=n_seq,
         fancybox=True,
         shadow=True,
         fontsize="small",)
     leg_wave = axes_wave[0, 0].legend(
         loc="upper left",
-        bbox_to_anchor=(0, 2.25),
+        bbox_to_anchor=(0, 2),
         ncol=n_seq,
         fancybox=True,
         shadow=True,
