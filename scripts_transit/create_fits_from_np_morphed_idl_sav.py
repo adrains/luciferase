@@ -16,7 +16,7 @@ n_transit = 2
 label = "wasp107_np_corr"
 
 # New label for the file to avoid overwriting our existing file.
-new_label = "wasp107_np_corr_mar25"
+new_label = "wasp107_np_corr_jun25"
 
 # If false, we always aim to have n_px = 2048 per what comes out of the CRIRES+
 # pipeline, regardless of any clipping that has happened in IDL. We accomplish
@@ -53,8 +53,8 @@ spec_list_new = []
 sigmas_list_new = []
 
 nightly_idl_sav_files = [
-    "simulations/wasp107_wave_corr_n1.sav",
-    "simulations/wasp107_wave_corr_n2.sav",]
+    "simulations/wasp107_wave_corr_nn1_250604.sav",
+    "simulations/wasp107_wave_corr_nn2_250604.sav",]
 
 # Loop over nights
 for night_i in range(n_transit):
@@ -120,22 +120,29 @@ if n_px_idl <= n_px_full and not accept_npx_difference:
     # a dummy wavelength scale for the edge pixels. While we can probably
     # do this in a nice vectorised way, we're just going to use a loop for
     # (conceptual) simplicity.
-    for n_spec in range(waves_new.shape[0]):
-        wave = waves_new[n_spec]
+    for spec_i in range(waves_new.shape[0]):
+        wave = waves_new[spec_i]
 
         # Start of spectral segment
         delta_lambda = np.median(np.diff(wave[n_edge:n_edge*2+1]))
         lambda_edge = wave[n_edge] - n_edge*delta_lambda
 
-        waves_new[n_spec, :n_edge] = \
+        waves_new[spec_i, :n_edge] = \
             np.arange(lambda_edge, wave[n_edge], delta_lambda)
 
-        # End of spectral segment
-        delta_lambda = np.median(np.diff(wave[-2*n_edge:-n_edge]))
-        lambda_edge = wave[-n_edge-1] + n_edge*delta_lambda
+        # End of spectral segment. For the end section, we can't simply assume
+        # that we have n_edge px missing, as there might be an odd number of px
+        # clipped, and this is where it will manifest. As such, we reference
+        # from the front of the array, rather than backwards.
+        last_idl_px = n_edge + n_px_idl - 1
+        remaining_px = len(wave[last_idl_px+1:])
+        delta_lambda = np.median(np.diff(wave[-2*n_edge:last_idl_px]))
+        lambda_edge = wave[last_idl_px] + (remaining_px+1)*delta_lambda
 
-        waves_new[n_spec, -n_edge:] = \
-            np.arange(wave[-n_edge-1], lambda_edge, delta_lambda)
+        waves_new[spec_i, last_idl_px+1:] = \
+            np.arange(wave[last_idl_px], lambda_edge, delta_lambda)[1:]
+
+        assert np.sum(np.isnan(waves_new[spec_i])) == 0
 
 # Save to new fits file. Note that we assume that by ordering things in
 # wavelength order as was done originally, the 'det' and 'ord' arrays loaded in
