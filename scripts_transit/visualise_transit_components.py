@@ -164,7 +164,7 @@ planet_spectra = np.stack(planet_spectra)
 # -----------------------------------------------------------------------------
 plt.close("all")
 
-fig, axis = plt.subplots(nrows=1, figsize=(20,6), sharex=True)
+fig, axis = plt.subplots(nrows=1, figsize=(20,10), sharex=True)
 
 night_colours = ["forestgreen", "darkorange"]
 planet_colours = ["b", "r"]
@@ -187,7 +187,7 @@ for phase_i in range(2):
         axis.plot(
             waves[spec_i],
             10 * p_spec / np.nanmedian(p_spec) - 10,
-            linewidth=0.5,
+            linewidth=1.0,
             color=planet_colours[phase_i],
             alpha=0.9,
             label=planet_labels[phase_i])
@@ -198,7 +198,7 @@ for phase_i in range(2):
             axis.plot(
                 waves[spec_i],
                 s_spec / np.nanmedian(s_spec),
-                linewidth=0.5,
+                linewidth=1.0,
                 color="cadetblue",
                 label="Stellar")
             
@@ -206,7 +206,7 @@ for phase_i in range(2):
             axis.plot(
                 waves[spec_i],
                 1 + t_spec,
-                linewidth=0.5,
+                linewidth=1.0,
                 color="darkmagenta",
                 label="Telluric",)
             
@@ -214,7 +214,7 @@ for phase_i in range(2):
         axis.plot(
             waves[spec_i],
             2 + o_spec / np.nanmedian(o_spec),
-            linewidth=0.5,
+            linewidth=1.0,
             color=night_colours[phase_i],
             alpha=0.9,
             label="Observed (Night {})".format(phase_i+1))
@@ -240,7 +240,7 @@ leg = plt.legend(
     [labels[idx] for idx in order],
     ncol=6,
     loc="upper center",
-    fontsize="large",)
+    fontsize="x-large",)
 
 for legobj in leg.legendHandles:
     legobj.set_linewidth(1.5)
@@ -249,4 +249,4 @@ axis.set_ylim(-0.25,3.5)
 axis.set_xlim(waves[spec_i_selected][0], waves[spec_i_selected][-1])
 
 plt.tight_layout()
-plt.savefig("plots/sim_component_overview.pdf")
+plt.savefig("plots/sim_component_overview_pptx.pdf")

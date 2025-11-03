@@ -198,10 +198,10 @@ def make_table_system_summary(syst_info,):
     id_2mass = syst_info.loc["2mass_id", "value"]
     ref_2mass = syst_info.loc["2mass_id", "bib_ref"]
 
-    table_rows.append(r"Gaia DR3 ID & - & {} & \citet{{{}}} \\".format(
-        id_gaia, ref_gaia))
-    table_rows.append(r"2MASS ID & - & {} & \citet{{{}}} \\".format(
-        id_2mass, ref_2mass))
+    #table_rows.append(r"Gaia DR3 ID & - & {} & \citet{{{}}} \\".format(
+    #    id_gaia, ref_gaia))
+    #table_rows.append(r"2MASS ID & - & {} & \citet{{{}}} \\".format(
+    #    id_2mass, ref_2mass))
     
     # RA
     ra = float(syst_info.loc["ra_deg", "value"])

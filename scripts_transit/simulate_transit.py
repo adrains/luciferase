@@ -88,7 +88,12 @@ else:
 print("\tsyst_info updated?\t{}".format(ss.do_update_syst_info))
 print("\tN transits\t\t{} ({}+{})".format(
     ss.n_transit, n_transit_observed, n_transit_unobserved))
-print("\tPlanet template\t\t{}".format(ss.planet_fits))
+if ss.do_use_ingress_egress_templates:
+    print("\tPlanet (ingress)\t{}".format(ss.planet_fits_ingress))
+    print("\tPlanet (transit)\t{}".format(ss.planet_fits))
+    print("\tPlanet (egress)\t\t{}".format(ss.planet_fits_egress))
+else:
+    print("\tPlanet template\t{}".format(ss.planet_fits))
 if ss.target_snr is None:
     print("\tSNR\t\t\tinf")
 else:
@@ -136,7 +141,10 @@ for transit_i in range(ss.n_transit):
             correct_for_blaze=ss.correct_for_blaze,
             scale_vector_method=ss.scale_vector_method,
             savgol_window_frac_size=ss.savgol_window_frac_size,
-            savgol_poly_order=ss.savgol_poly_order,)
+            savgol_poly_order=ss.savgol_poly_order,
+            do_use_ingress_egress_templates=ss.do_use_ingress_egress_templates,
+            planet_fits_ingress=ss.planet_fits_ingress,
+            planet_fits_egress=ss.planet_fits_egress,)
     
     model_flux_list.append(model_flux)
     model_sigma_list.append(model_sigma)

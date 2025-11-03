@@ -164,7 +164,12 @@ if ss.cc_with_telluric:
 elif ss.cc_with_stellar:
     print("\tStellar template\t{}".format(ss.stellar_template_fits))
 else:
-    print("\tPlanet template\t\t{}".format(ss.planet_fits))
+    if ss.do_use_ingress_egress_templates:
+        print("\tPlanet (ingress)\t{}".format(ss.planet_fits_ingress))
+        print("\tPlanet (transit)\t{}".format(ss.planet_fits))
+        print("\tPlanet (egress)\t\t{}".format(ss.planet_fits_egress))
+    else:
+        print("\tPlanet template\t\t{}".format(ss.planet_fits))
     print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_cc)))
 if ss.do_mask_orders_for_analysis:
     print("\tSpectral segments\t{}".format(ss.selected_segments))
@@ -200,7 +205,13 @@ species_label = "_".join(ss.species_to_cc)
 species_list = ", ".join(ss.species_to_cc)
 
 # Setup plotting subfolder
-plot_folder = "plots/{}/{}_{}/".format(ss.label, rv_frame, species_label)
+if ss.do_use_ingress_egress_templates:
+    cc_kind = "ingress_egress"
+else:
+    cc_kind = "single_template"
+
+plot_folder = "plots/{}/{}_{}_{}/".format(
+    ss.label, cc_kind, rv_frame, species_label)
 
 # This holds the combined map for each seq/night, plus the final combined map
 combined_maps = []

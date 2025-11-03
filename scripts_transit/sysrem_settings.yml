@@ -12,11 +12,11 @@ n_transit: 2
 
 # Real data
 # ---------
-label: "wasp107_np_corr_jun25"
+label: "wasp107_np_corr_250616"
 
 # Simulated Data: SNR~130 Welbanks+24 sims with all species + slit losses
 # -----------------------------------------------------------------------
-#label: "simulated_R100000_wasp107_W24_cloudy_241211_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
+#label: "simulated_R100000_wasp107_W24_ingress_egress_250605_stellar_1_telluric_1_planet_1_boost_1_slit_loss_1_vsys_offset_0_SNR_130"
 
 # Nightly velocity offsets in km/s. This array should have the same length as
 # the number of transits and is used to account for observed RV offsets between 
@@ -55,16 +55,16 @@ do_use_ingress_egress_templates: False
 
 # Planet templates to use during ingress phases.
 planet_fits_ingress:
-- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
+- "templates/welbanksW107b_cloudy_templates_all_R100000.fits"
 
 # Planet templates to use during egress phases.
 planet_fits_egress:
-- "templates/WASP107b_Welbanks_CHIMERA-Ret_yesCloud_templates_all_R150000.fits"
+- "templates/welbanksW107b_clear_templates_all_R100000.fits"
 
 # The cross-correlation template will have the following species (and an
 # exception will be raised if this isn't the case)
 # Species: H2O, H2S, NH3, CO, PH3, SiO, CH4, CO2, C2H2, HCN
-species_to_cc: ["H2O"]
+species_to_cc: ["CO", "H2O"]
 
 # Continuum normalised stellar spectrum
 stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
@@ -81,7 +81,7 @@ stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 # and use as reference the mean spectrum of the *opposite* sequence (e.g. A vs
 # B), clipping the pixel if it is more than sigma_threshold_phase sigma away
 # from the reference.
-sigma_threshold_phase: 4.0
+sigma_threshold_phase: 5
 
 # We also sigma clip entire columns by comparing the mean A and B sequence
 # spectra to each other, clipping the whole column if they deviate by
@@ -91,7 +91,7 @@ sigma_threshold_phase: 4.0
 # of detector artefacts present in only one nodding position, in which case we
 # must discard the entire column since ~50% of the data is now consisdered
 # systematically aberrant.
-sigma_threshold_column: 4.0
+sigma_threshold_column: 5
 
 # If True, we extrapolate edge px (with cannot be interpolated). If False, we
 # end up masking the entire column. Preliminary testing indicated that 
@@ -217,7 +217,7 @@ cc_rv_lims: [-200,200]
 kp_expected: 105.2
 
 # Step size for the Kp-Vsys map in km/s. Same caveats as for cc_rv_step above.
-Kp_step: 1
+Kp_step: 1.0
 
 # Minimum and maximum extents of the Kp-Vsys map in km/s
 Kp_lims: [0,400]

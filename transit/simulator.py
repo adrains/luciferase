@@ -1665,7 +1665,10 @@ def simulate_transit_multiple_epochs(
     correct_for_blaze,
     scale_vector_method,
     savgol_window_frac_size,
-    savgol_poly_order,):
+    savgol_poly_order,
+    do_use_ingress_egress_templates=False,
+    planet_fits_ingress="",
+    planet_fits_egress="",):
     """Simulates an entire transit with many epochs using multiple calls to
     simulate_transit_single_epoch. See docstrings of calc_model_flux and
     simulate_transit_single_epoch for more detail.
@@ -1784,6 +1787,12 @@ def simulate_transit_multiple_epochs(
     savgol_poly_order: int
         Polynomial order to use for the Savitzky–Golay filter.
 
+    do_use_ingress_egress_templates: bool, default: False
+        Whether to use separate ingress, in-transit, and egress templates.
+
+    planet_fits_ingress, planet_fits_egress: str, default: ""
+        File paths to ingress and egress templates.
+
     Returns
     -------
     fluxes_model, sigma_model: float array
@@ -1811,6 +1820,9 @@ def simulate_transit_multiple_epochs(
     if wl_min > np.min(wave_observed) or wl_max < np.max(wave_observed):
         raise ValueError("MARCS wl bounds do not cover observed wl scale.")
     
+    # -------------------------------------------------------------------------
+    # Star
+    # -------------------------------------------------------------------------
     # Import MARCS fluxes (ergs/cm^2/s/Å/μ)
     # TODO: this preparation is a HACK for until we have mu sampled spectra at
     # arbitrary resolutions.
@@ -1832,35 +1844,83 @@ def simulate_transit_multiple_epochs(
     if do_use_uniform_stellar_spec:
         fluxes_marcs = np.ones_like(fluxes_marcs) * np.nanmedian(fluxes_marcs)
     
-    # Import planet wavelengths, fluxes, and template (i.e. species) info
-    wave_planet, Rp_Re_vs_lambda_planet_all, templ_info = \
-        tu.load_transmission_templates_from_fits(
-            fits_file=planet_fits,
-            convert_rp_rj_to_re=True,)
+    # -------------------------------------------------------------------------
+    # Planet
+    # -------------------------------------------------------------------------
+    # We might need to import up to three planet templates, so create lists
+    wave_planet_all = []
+    spec_planet_all = []
 
-    # Now select the appropriate template from trans_planet_all simulating the
-    # appropriate set of molecules. Raise an exception if we don't have a
-    # template with that combination of molecules.
-    molecule_cols = templ_info.columns.values
-    has_molecule = np.full_like(molecule_cols, False)
-
-    for mol_i, molecule in enumerate(molecule_cols):
-        if molecule in planet_species_to_model:
-            has_molecule[mol_i] = True
-
-    match_i = np.argwhere(np.all(has_molecule == templ_info.values, axis=1))
-
-    if len(match_i) == 0:
-        raise ValueError("Invalid molecule combination!")
+    # Import all planet spectra
+    if do_use_ingress_egress_templates:
+        p_fits_all = [planet_fits_ingress, planet_fits, planet_fits_egress]
     else:
-        Rp_Re_vs_lambda_planet = Rp_Re_vs_lambda_planet_all[int(match_i)]
+        p_fits_all = [planet_fits]
 
-    # The planet should have constant planet radii with wavelength if we're
-    # simulating the transit of a planet without an atmosphere.
-    if do_use_uniform_planet_spec:
-        Rp_Re_vs_lambda_planet = np.full_like(
-            Rp_Re_vs_lambda_planet, syst_info.loc["r_planet_rearth", "value"])
-    
+    # Loop over all templates
+    for p_fits in p_fits_all:
+        # Import planet wavelengths, fluxes, and template (i.e. species) info
+        wave_planet, Rp_Re_vs_lambda_planet_all, templ_info = \
+            tu.load_transmission_templates_from_fits(
+                fits_file=p_fits,
+                convert_rp_rj_to_re=True,)
+
+        # Now select the appropriate template from trans_planet_all simulating
+        # the appropriate set of molecules. Raise an exception if we don't have
+        # a template with that combination of molecules.
+        molecule_cols = templ_info.columns.values
+        has_molecule = np.full_like(molecule_cols, False)
+
+        for mol_i, molecule in enumerate(molecule_cols):
+            if molecule in planet_species_to_model:
+                has_molecule[mol_i] = True
+
+        match_i = \
+            np.argwhere(np.all(has_molecule == templ_info.values, axis=1))
+
+        if len(match_i) == 0:
+            raise ValueError("Invalid molecule combination!")
+        else:
+            Rp_Re_vs_lambda_planet = Rp_Re_vs_lambda_planet_all[int(match_i)]
+
+        # The planet should have constant planet radii with wavelength if we're
+        # simulating the transit of a planet without an atmosphere.
+        if do_use_uniform_planet_spec:
+            Rp_Re_vs_lambda_planet = np.full_like(
+                Rp_Re_vs_lambda_planet,
+                syst_info.loc["r_planet_rearth", "value"])
+
+        # Store this extracted template
+        wave_planet_all.append(wave_planet)
+        spec_planet_all.append(Rp_Re_vs_lambda_planet)
+
+    # Sanity checking
+    planet_spec_sums = [np.sum(ps) for ps in spec_planet_all]
+    if do_use_ingress_egress_templates and len(set(planet_spec_sums)) == 1:
+        print("WARNING! All planet spectra are the same!")
+
+    # Finally, create masks for ingress/egress
+    if do_use_ingress_egress_templates:
+        # Grab masks for phases in ingress and egress. This is defined as those
+        # phases where the planet is partially on the star at any point during
+        # the exposure, which we determine based on the scl parameter < 1
+        # which is the case during ingress or egress, then split into positive
+        # or negative phase cases.
+        partial_transit_mask = np.logical_or(
+            transit_info["scl_start"].values < 1,
+            transit_info["scl_end"].values < 1,)
+        
+        in_ingress = np.logical_and(
+            partial_transit_mask,
+            transit_info["phase_mid"].values < 0,)  # Negative phaases
+        
+        in_egress = np.logical_and(
+            partial_transit_mask,
+            transit_info["phase_mid"].values > 0,)  # Positive phases
+
+    # -------------------------------------------------------------------------
+    # Tellurics + scale vector
+    # -------------------------------------------------------------------------
     # Load telluric spectrum
     telluric_wave, telluric_tau, _ = tu.load_telluric_spectrum(
         molecfit_fits=molecfit_fits,
@@ -1888,6 +1948,9 @@ def simulate_transit_multiple_epochs(
         raise ValueError("scale_vector_method must be in {}".format(
             scale_vector_methods))
 
+    # -------------------------------------------------------------------------
+    # Simulations
+    # -------------------------------------------------------------------------
     # Initialise output flux array
     shape = (len(transit_info), wave_observed.shape[0], wave_observed.shape[1])
     fluxes_model_all = np.zeros(shape)
@@ -1896,13 +1959,26 @@ def simulate_transit_multiple_epochs(
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}/{}...".format(epoch_i+1, len(transit_info)))
+
+        # If we're using ingress/egress templates, check which template to use
+        if do_use_ingress_egress_templates:
+            if in_ingress[epoch_i]:
+                p_template_i = 0
+            elif in_egress[epoch_i]:
+                p_template_i = 2
+            else:
+                p_template_i = 1
+        else:
+            p_template_i = 0
+
+        # Simulate this epoch
         flux_counts, _ = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
             mus_marcs=mus_marcs,
-            wave_planet=wave_planet,
-            Rp_Re_vs_lambda_planet=Rp_Re_vs_lambda_planet,
+            wave_planet=wave_planet_all[p_template_i],
+            Rp_Re_vs_lambda_planet=spec_planet_all[p_template_i],
             telluric_wave=telluric_wave,
             telluric_tau=telluric_tau,
             scale_val=scale_vector[epoch_i],
