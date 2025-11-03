@@ -47,7 +47,7 @@ master dark frame since the process of nodding obviates the need.
     ...
     file/path/[nAB]_[nod_set_i]/sci_frame_a_n.fits    OBS_NODDING_OTHER
     file/path/[nAB]_[nod_set_i]/sci_frame_b_n.fits    OBS_NODDING_OTHER
-    file/path/trace_wave.fits                         CAL_FLAT_TW_MERGED
+    file/path/trace_wave.fits                         CAL_WAVE_TW
     static/detlin_coeffs.fits                         CAL_DETLIN_COEFFS
     file/path/dark_bpm.fits                           CAL_FLAT_BPM
     file/path/master_flat.fits                        CAL_FLAT_MASTER

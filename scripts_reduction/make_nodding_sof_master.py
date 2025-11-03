@@ -46,7 +46,7 @@ file/path/[setting]/[setting].sof
     file/path/sci_frame_1.fits    OBS_NODDING_OTHER
     ...
     file/path/sci_frame_n.fits    OBS_NODDING_OTHER
-    file/path/trace_wave.fits     CAL_FLAT_TW_MERGED
+    file/path/trace_wave.fits     CAL_WAVE_TW
     static/detlin_coeffs.fits     CAL_DETLIN_COEFFS
     file/path/dark_bpm.fits       CAL_FLAT_BPM
     file/path/master_flat.fits    CAL_FLAT_MASTER
@@ -76,7 +76,7 @@ cwd = os.getcwd()
 DETLIN_COEFF = "/home/tom/pCOMM/cr2res_cal_detlin_coeffs.fits"
 MASTER_FLAT = os.path.join(cwd, "cr2res_cal_flat_Open_master_flat.fits")
 FLAT_BPM = os.path.join(cwd, "cr2res_cal_flat_Open_bpm.fits")
-TRACE_WAVE = os.path.join(cwd, "cr2res_cal_flat_tw_merged.fits")
+TRACE_WAVE = os.path.join(cwd, "cr2res_cal_wave_tw_fpet.fits")
 
 # No point continuing if our calibration files don't exist
 if not os.path.isfile(MASTER_FLAT):
@@ -117,7 +117,7 @@ DO_COSMIC_CORR = True
 # absorption features rather than their locations (i.e. an abundance analysis
 # would suffer more than a simply cross correlation). The use of detlin is
 # *not* recommended for calibration frames.
-use_detlin = True
+use_detlin = False
 
 # -----------------------------------------------------------------------------
 # Read in files
@@ -189,7 +189,7 @@ with open(obs_sof, 'w') as sof:
         sof.writelines("{}\tOBS_NODDING_OTHER\n".format(obs_fn_path))
 
     # Then write trace wave, detlin, bpm, and master flat
-    sof.writelines("{}\tCAL_FLAT_TW_MERGED\n".format(TRACE_WAVE))
+    sof.writelines("{}\tCAL_WAVE_TW\n".format(TRACE_WAVE))
 
     if use_detlin:
         sof.writelines("{}\tCAL_DETLIN_COEFFS\n".format(DETLIN_COEFF))
