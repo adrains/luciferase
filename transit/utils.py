@@ -22,7 +22,6 @@ from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 from numpy.polynomial.polynomial import Polynomial
 from PyAstronomy.pyasl import instrBroadGaussFast
-import luciferase.utils as lu
 
 # -----------------------------------------------------------------------------
 # Kepler's laws
@@ -3365,6 +3364,97 @@ def load_telluric_spectrum(
         return telluric_wave, telluric_tau, calc_telluric_tau, telluric_trans
     else:
         return telluric_wave, telluric_tau, calc_telluric_tau
+
+
+def create_viper_telluric_spectrum(
+    viper_fits="data/viper_stdAtmos_K.fits",
+    include_H2O=True,
+    tau_scale_H2O=1.0,
+    tau_scale_non_H2O=1.0,
+    do_broaden=True,
+    resolving_power=100000,
+    convert_to_um=False,):
+    """Function to create a telluric spectrum from component telluric species
+    transmission spectra and broaden to instrumental resolution. To account for
+    the variability of tellurics, we include two optical depth scaling terms,
+    one for H2O and one for non-H2O species, that are applied as multiplicative
+    terms to the optical depth.
+
+    Telluric transmission spectra are sourced from:
+     - https://github.com/mzechmeister/viper/tree/master/lib/atmos
+
+    Parameters
+    ----------
+    viper_fits: str, default: 'data/viper_stdAtmos_K.fits'
+        Path to fits file containing model per-species transmission spectra.
+    
+    include_H2O: bool, default: True
+        Whether to include H2O in the combined transmission spectrum, or
+        exclude to apply later.
+
+    tau_scale_H2O, tau_scale_non_H2O: float, default: 1.0
+        Optical depth scaling terms for H2O and the non-H2O species
+        respectfully.
+
+    do_broaden: bool, default: True
+        Whether to broaden our spectra to some instrumental resolution.
+
+    resolving_power: int, default: 100000
+        Resolving power to broaden the final transmission spectrum to.
+
+    convert_to_um: bool, default: False
+        Whether to convert from Ångström (default) to um.
+        
+    Returns
+    -------
+    wave, trans: float array
+        Telluric wavelength scale and transmission spectra arrays.
+    """
+    # Molecular species to consider. Note this will fail if the given viper
+    # fits file does not have these species (e.g. in the optical).
+    K_BAND_SPECIES = ["H2O", "CH4", "CO", "CO2", "N2O"]
+
+    # Intialise a dictionary to store the optical depths.
+    telluric_tau = {}
+
+    # Load transmission spectra (as optical depths) for all species
+    with fits.open(viper_fits) as vfits:
+        # Grab wavelength array and convert to um
+        wave = vfits[1].data["lambda"]
+
+        # [Optional] Convert to um
+        if convert_to_um:
+            wave /= 10000
+
+        for species in K_BAND_SPECIES:
+            # Import, clean
+            trans = vfits[1].data[species]
+            trans[np.isnan(trans)] = 1.0        # Set NaN values to 1.0
+            trans[trans == 0] = 1E-15           # Avoid infinity
+
+            telluric_tau[species] = -np.log(trans)
+    
+    # Create our combined transmission vector, (possibly) applying a different
+    # optical depth scaling term to the H2O and non-H2O terms.
+    trans = np.ones_like(wave)
+
+    for species in K_BAND_SPECIES:
+        if species == "H2O" and include_H2O:
+            trans *= 10**-(telluric_tau["H2O"]*tau_scale_H2O)
+        else:
+            trans *= 10**-(telluric_tau[species]*tau_scale_non_H2O)
+
+    # [Optional] Broaden to instrumental resolution
+    if do_broaden:
+        trans = instrBroadGaussFast(
+            wvl=wave,
+            flux=trans,
+            resolution=resolving_power,
+            edgeHandling="firstlast",
+            maxsig=5,
+            equid=True,)
+    
+    return wave, trans
 
 
 def prepare_cc_template(

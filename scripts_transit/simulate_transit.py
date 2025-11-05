@@ -73,6 +73,9 @@ flux_components = []
 telluric_components = []
 planet_components = []
 scale_components = []
+telluric_tau_2D_components = []
+tau_scale_H2O_components = []
+tau_scale_non_H2O_components = []
 
 line = "-"*80
 
@@ -102,6 +105,9 @@ print("\tSpecies\t\t\t{}".format(", ".join(ss.species_to_model)))
 print("\tBoost Fac\t\t{:0.0f}x".format(ss.planet_transmission_boost_fac))
 print("\tBlaze Corr\t\t{}".format(ss.correct_for_blaze))
 print("\tScale Vec\t\t{}".format(ss.scale_vector_method))
+print("\tTelluric template\t{}".format(ss.telluric_template_kind))
+print("\tTelluric H2O scale\t{}".format(ss.tau_scale_H2O_kind))
+print("\tTelluric non-H2O scale\t{}".format(ss.tau_scale_non_H2O_kind))
 print("\tVsys offset\t\t{} km/s".format(ss.vsys_offset))
 print("\tUniform stellar\t\t{}".format(ss.do_use_uniform_stellar_spec))
 print("\tUniform telluric\t{}".format(ss.do_use_uniform_telluric_spec))
@@ -142,6 +148,15 @@ for transit_i in range(ss.n_transit):
             scale_vector_method=ss.scale_vector_method,
             savgol_window_frac_size=ss.savgol_window_frac_size,
             savgol_poly_order=ss.savgol_poly_order,
+            telluric_template_kind=ss.telluric_template_kind,
+            per_species_template=ss.per_species_template,
+            tau_scale_H2O_kind=ss.tau_scale_H2O_kind,
+            tau_scale_H2O_random_limits=ss.tau_scale_H2O_random_limits,
+            tau_scale_H2O_savgol_window_frac_size=\
+                ss.tau_scale_H2O_savgol_window_frac_size,
+            tau_scale_H2O_savgol_poly_order=ss.tau_scale_H2O_savgol_poly_order,
+            tau_scale_non_H2O_kind=ss.tau_scale_non_H2O_kind,
+            tau_scale_non_H2O_random_limits=ss.tau_scale_non_H2O_random_limits,
             do_use_ingress_egress_templates=ss.do_use_ingress_egress_templates,
             planet_fits_ingress=ss.planet_fits_ingress,
             planet_fits_egress=ss.planet_fits_egress,)
@@ -155,6 +170,14 @@ for transit_i in range(ss.n_transit):
     telluric_components.append(component_vectors["telluric_tau"])
     planet_components.append(component_vectors["planet_trans"])
     scale_components.append(component_vectors["scale_vector"])
+
+    # [Optional] Save per-species telluric terms
+    # TODO: actually save these somewhere.
+    if ss.telluric_template_kind == "per_species":
+        telluric_tau_2D_components.append(component_vectors["telluric_tau_2D"])
+        tau_scale_H2O_components.append(component_vectors["tau_scale_H2O"])
+        tau_scale_non_H2O_components.append(
+            component_vectors["tau_scale_non_H2O"])
 
 # Convert to numpy arrays (not scale as n_phase isn't equal across transits)
 flux_components = np.array(flux_components)

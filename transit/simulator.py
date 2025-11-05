@@ -1666,6 +1666,14 @@ def simulate_transit_multiple_epochs(
     scale_vector_method,
     savgol_window_frac_size,
     savgol_poly_order,
+    telluric_template_kind,
+    per_species_template,
+    tau_scale_H2O_kind,
+    tau_scale_H2O_random_limits,
+    tau_scale_H2O_savgol_window_frac_size,
+    tau_scale_H2O_savgol_poly_order,
+    tau_scale_non_H2O_kind,
+    tau_scale_non_H2O_random_limits,
     do_use_ingress_egress_templates=False,
     planet_fits_ingress="",
     planet_fits_egress="",):
@@ -1785,7 +1793,40 @@ def simulate_transit_multiple_epochs(
         of scale vector generation.
 
     savgol_poly_order: int
-        Polynomial order to use for the Savitzky–Golay filter.
+        Polynomial order to use for the Savitzky–Golay filter used when
+        computing the scale vector.
+
+    telluric_template_kind: str
+        Kind of telluric template spectrum, either 'molecfit' or 'per_species'.
+
+    per_species_template: str
+        Filepath to the per-species fits template of telluric transmission.
+
+    tau_scale_H2O_kind: str
+        If using a per-species telluric template, how to treat H2O absorption,
+        either ['unity', 'humidity', smoothed_random'].
+
+    tau_scale_H2O_random_limits: float tuple
+        If using 'smoothed_random' tellurics, these are the [lower, upper]
+        limits on the fractional multiplier to H2O optical depth.
+
+    tau_scale_H2O_savgol_window_frac_size: float
+        Fractional size of the Savitzky–Golay window relative to n_phase to use
+        for smoothing random points generated for the 'smoothed_random' method
+        of H2O telluric absorption variability.
+
+    tau_scale_H2O_savgol_poly_order: int
+        Polynomial order to use for the Savitzky–Golay filter used when
+        computing variable H2O tellurics.
+    
+    tau_scale_non_H2O_kind: str
+        If using a per-species telluric template, how to treat non-H2O
+        absorption, either ['unity', 'random_per_night'].
+
+    tau_scale_non_H2O_random_limits: float tuple
+        If using 'random_per_night' non-H2O tellurics, these are the 
+        [lower, upper] limits on the fractional multiplier to non-H2O species
+        optical depth.
 
     do_use_ingress_egress_templates: bool, default: False
         Whether to use separate ingress, in-transit, and egress templates.
@@ -1919,19 +1960,77 @@ def simulate_transit_multiple_epochs(
             transit_info["phase_mid"].values > 0,)  # Positive phases
 
     # -------------------------------------------------------------------------
-    # Tellurics + scale vector
+    # Tellurics
     # -------------------------------------------------------------------------
-    # Load telluric spectrum
-    telluric_wave, telluric_tau, _ = tu.load_telluric_spectrum(
-        molecfit_fits=molecfit_fits,
-        tau_fill_value=tau_fill_value,)
-    
+    # Three options for telluric spectrum: unity, molecfit, per-phase. These
+    # are effectively 'constant in wavelength', 'constant in time', and 'time
+    # varying'.
+
+    # 1) Use a unity telluric spectrum for the whole night.
     if do_use_uniform_telluric_spec:
         telluric_tau = np.zeros_like(telluric_tau)
+
+    # 2) Use molecfit telluric template for the whole night.
+    elif telluric_template_kind == "molecfit":
+        telluric_wave, telluric_tau, _ = tu.load_telluric_spectrum(
+            molecfit_fits=molecfit_fits,
+            tau_fill_value=tau_fill_value,)
+    
+    # 3) Generate a per-species telluric spectrum for each phase
+    elif telluric_template_kind == "per_species":
+        # Create a list to store our per-phase telluric vectors
+        telluric_tau_2D = []
+
+        # Create the appropriate H2O tau scaling term.
+        if tau_scale_H2O_kind == "unity":
+            tau_scale_H2O = np.ones(n_phase)
+
+        elif tau_scale_H2O_kind == "humidity":
+            raise NotImplementedError
+        
+        elif tau_scale_H2O_kind == "smoothed_random":
+            wl = int(n_phase * tau_scale_H2O_savgol_window_frac_size)
+            rand_range = float(np.diff(tau_scale_H2O_random_limits))
+            rand_points = np.random.random_sample(n_phase) * rand_range \
+                + tau_scale_H2O_random_limits[0]
+            tau_scale_H2O = savgol_filter(
+                x=rand_points,
+                window_length=wl,
+                polyorder=tau_scale_H2O_savgol_poly_order,)
+        
+        # Create the appropriate non-H2O tau scaling term.
+        if tau_scale_non_H2O_kind == "unity":
+            tau_scale_non_H2O = np.ones(n_phase)
+
+        elif tau_scale_H2O_kind == "random_per_night":
+            rand_range = float(np.diff(tau_scale_non_H2O_random_limits))
+            tau_scale_non_H2O = np.ones(n_phase) * rand_range \
+                + tau_scale_non_H2O_random_limits[0]
+
+        # Create telluric spectra
+        desc = "Creating per-phase telluric templates"
+
+        for phase_i in tqdm(range(n_phase), desc=desc, leave=False):
+            telluric_wave, telluric_trans = tu.create_viper_telluric_spectrum(
+                viper_fits=per_species_template,
+                include_H2O=True,
+                tau_scale_H2O=tau_scale_H2O[phase_i],
+                tau_scale_non_H2O=tau_scale_non_H2O[phase_i],
+                do_broaden=True,
+                resolving_power=instr_resolving_power,)
+            
+            # Append
+            telluric_tau_2D.append(-np.log(telluric_trans))
+
+        # Convert to numpy array
+        telluric_tau_2D = np.stack(telluric_tau_2D )
 
     # TODO: Sanity check to make sure that all wavelength vectors overlap
     pass
 
+    # -------------------------------------------------------------------------
+    # Scale vector
+    # -------------------------------------------------------------------------
     # Initialise scale vector
     # TODO: NP mentioned that the scale vector also has some dependence on
     # seeing, so that could potentially also be factored in here.
@@ -1970,6 +2069,10 @@ def simulate_transit_multiple_epochs(
                 p_template_i = 1
         else:
             p_template_i = 0
+
+        # If we have per-phase telluric templates, select
+        if telluric_template_kind == "per_species":
+            telluric_tau = telluric_tau_2D[phase_i]
 
         # Simulate this epoch
         flux_counts, _ = simulate_transit_single_epoch(
@@ -2123,6 +2226,13 @@ def simulate_transit_multiple_epochs(
     # Add in scale vector
     component_vectors["scale_vector"] = scale_vector
 
+    # [Optional] add in specific terms used to construct tellurics, as well as
+    # the 2D telluric vector itself.
+    if telluric_template_kind == "per_species":
+        component_vectors["telluric_tau_2D"] = telluric_tau_2D
+        component_vectors["tau_scale_H2O"] = tau_scale_H2O
+        component_vectors["tau_scale_non_H2O"] = tau_scale_non_H2O
+
     return fluxes_model_all, sigma_model_all, component_vectors
 
 
@@ -2169,6 +2279,17 @@ def make_sim_info_df(sim_settings_obj,):
         ["marcs_fits", ss.marcs_fits],
         ["planet_spec", ss.planet_fits],
         ["species_modelled", species_str],
+        ["telluric_template_kind", ss.telluric_template_kind],
+        ["per_species_template", ss.per_species_template],
+        ["tau_scale_H2O_kind", ss.tau_scale_H2O_kind],
+        ["tau_scale_H2O_random_limits", str(ss.tau_scale_H2O_random_limits)],
+        ["tau_scale_H2O_savgol_window_frac_size", 
+            ss.tau_scale_H2O_savgol_window_frac_size],
+        ["tau_scale_H2O_savgol_poly_order",
+            ss.tau_scale_H2O_savgol_poly_order],
+        ["tau_scale_non_H2O_kind", ss.tau_scale_non_H2O_kind],
+        ["tau_scale_non_H2O_random_limits", 
+            str(ss.tau_scale_non_H2O_random_limits)],
         ["throughput_json_path", ss.throughput_json_path],
         ["instr_resolving_power", ss.instr_resolving_power],
         ["do_equid_lambda_resample", ss.do_equid_lambda_resample],

@@ -58,7 +58,7 @@ planet_properties_file: "scripts_transit/planet_data_wasp107.csv"
 do_consider_vsini: False
 
 #------------------------------------------------------------------------------
-# Templates
+# Star & Planet Templates
 #------------------------------------------------------------------------------
 # Model stellar spectrum--this should *not* be continuum normalised.
 #marcs_fits: "synth/template_wasp107_230623.fits"                     # non-mu sampled
@@ -91,7 +91,22 @@ species_to_model: ["H2O", "CH4", "NH3", "CO", "CO2", "SO2", "H2S"]
 # Dyrek+24 Species
 #species_to_model: ["H2O", "H2S", "NH3", "CO", "PH3", "SiO", "CH4", "CO2", "C2H2", "HCN"]
 
-# Molecfit modelled telluric spectra--one per night to be simulated
+#------------------------------------------------------------------------------
+# Telluric Templates
+#------------------------------------------------------------------------------
+# For modelling tellurics, we have two approaches. The first is the original
+# approach of using a unique molecfit template per simulated night. This is
+# conceptually simply, but brings with it the assumption that telluric
+# absorption does not change with time, only airmass--known to be incorrect for
+# H2O. The second approach is to construct our telluric template from a set of
+# transmission spectra from different molecular species. This allows for the
+# creation of 'time varying' tellurics to simulate changes in humidity, but
+# brings with it extra complexity and computation.
+
+# Approach to modelling tellurics, set to either 'molecfit' or 'per_species'
+telluric_template_kind: 'per_species'
+
+# If using a molecfit template, we need one template per night to be simulated.
 molecfit_fits:
 - "data_reduction/WASP107/220310_WASP107/molecfit_results/MODEL/BEST_FIT_MODEL.fits"
 - "data_reduction/wasp_107_n2/BEST_FIT_MODEL.fits"
@@ -103,6 +118,26 @@ molecfit_fits:
 - "templates/molecfit_AL/molecfit_BFM_A_230810_GJ1214.fits"
 - "templates/molecfit_AL/molecfit_BFM_A_240806_GJ1214.fits"
 #- "templates/molecfit_AL/molecfit_BFM_A_220311_GJ1214.fits"
+
+# Fits file for per-species transmission spectra
+per_species_template: "data/viper_stdAtmos_K.fits"
+
+# Scaling term for H2O. Set this to ['unity', 'humidity', smoothed_random'].
+tau_scale_H2O_kind: 'smoothed_random'
+
+# We'll handle 'smoothed_random' H2O variations in the same way we do with the
+# slit loss scale vector below, but sample 1.0 +/- 0.5 as the range of the
+# humidity changes. Per NP discussion, this is ballpark +/-50% change RH.
+tau_scale_H2O_random_limits: [0.5,1.5]
+tau_scale_H2O_savgol_window_frac_size: 0.5
+tau_scale_H2O_savgol_poly_order: 3
+
+# Scaling term for non-H2O species. Set this to ['unity', 'random_per_night'].
+tau_scale_non_H2O_kind: 'unity'
+
+# For 'random_per_night' non-H2O species variations, we'll just select a random
+# value between our limits.
+tau_scale_non_H2O_random_limits: [0.5,1.5]
 
 #------------------------------------------------------------------------------
 # Model specifics
