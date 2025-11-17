@@ -73,9 +73,16 @@ flux_components = []
 telluric_components = []
 planet_components = []
 scale_components = []
-telluric_tau_2D_components = []
-tau_scale_H2O_components = []
-tau_scale_non_H2O_components = []
+
+# [Optional] Telluric optical depth scaling terms
+if ss.telluric_template_kind == "per_species":
+    telluric_tau_2D_components = []
+    tau_scale_H2O_components = []
+    tau_scale_non_H2O_components = []
+else:
+    telluric_tau_2D_components = None
+    tau_scale_H2O_components = None
+    tau_scale_non_H2O_components = None
 
 line = "-"*80
 
@@ -208,12 +215,24 @@ date_str = date.strftime("%y%m%d")
 
 model_slit_losses = 1 if ss.scale_vector_method == "smoothed_random" else 0
 
+if ss.telluric_template_kind == "molecfit":
+    H2O_model_kind = "M"
+elif ss.tau_scale_H2O_kind == "unity":
+    H2O_model_kind = "U"
+elif ss.tau_scale_H2O_kind == "smoothed_random":
+    H2O_model_kind = "R"
+elif ss.tau_scale_H2O_kind == "humidity":
+    H2O_model_kind = "H"
+else:
+    raise NotImplementedError
+
 fn_label = "_".join([
     "{}".format(ss.label),
     date_str,
     "stellar_{:0.0f}".format(int(not ss.do_use_uniform_stellar_spec)),
     "telluric_{:0.0f}".format(int(not ss.do_use_uniform_telluric_spec)),
     "planet_{:0.0f}".format(int(not ss.do_use_uniform_planet_spec)),
+    "H2O_{}".format(H2O_model_kind),
     "boost_{:0.0f}".format(ss.planet_transmission_boost_fac),
     "slit_loss_{:0.0f}".format(model_slit_losses),
     "vsys_offset_{:0.0f}".format(ss.vsys_offset),
@@ -245,7 +264,9 @@ tu.save_simulated_transit_components_to_fits(
     flux=flux_components[0],
     tau=telluric_components,
     trans=planet_components[0],
-    scale=scale_components,)
+    scale=scale_components,
+    tau_scale_H2O=tau_scale_H2O_components,
+    tau_scale_non_H2O=tau_scale_non_H2O_components,)
 
 # -----------------------------------------------------------------------------
 # Diagnostic plots
@@ -266,4 +287,5 @@ for trans_i in range(ss.n_transit):
         planet_trans=planet_components[trans_i],
         scale_vector=scale_components[trans_i],
         transit_num=trans_i,
-        star_name=ss.star_name,)
+        star_name=ss.star_name,
+        tau_scale_H2O_components=tau_scale_H2O_components[trans_i],)

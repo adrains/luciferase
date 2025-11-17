@@ -1660,7 +1660,9 @@ def save_simulated_transit_components_to_fits(
     flux,
     tau,
     trans,
-    scale,):
+    scale,
+    tau_scale_H2O=None,
+    tau_scale_non_H2O=None,):
     """Function to save the component flux, telluric tau, planet transmission,
     and scale vectors to the same fits file as the individual epochs.
 
@@ -1689,6 +1691,10 @@ def save_simulated_transit_components_to_fits(
 
     scale: list of 1D float arrays
         List of shape n_transit of adopted scale/slit losses of shape [n_phase]
+
+    tau_scale_H2O, tau_scale_H2O: float array or None, default: None
+        Optical depth scaling terms for H2O and non-H2O species if using the
+        'per_species' mode of telluric generation, of shape [n_phase].
     """
     # Pair the extensions with their data
     extensions = {
@@ -1696,6 +1702,9 @@ def save_simulated_transit_components_to_fits(
         "COMPONENT_TAU":(tau, "Telluric tau component of simulated transit."),
         "COMPONENT_TRANS":(trans, "Planet component of simulated transit."),
         "COMPONENT_SCALE":(scale, "Adopted scale/slit loss vector."),
+        "COMPONENT_TAU_SCALE_H2O":(tau_scale_H2O,"Tau scaling for H2O."),
+        "COMPONENT_TAU_SCALE_NON_H2O":(
+            tau_scale_non_H2O, "Tau scaling for non-H2O species."),
     }
 
     # Load in the fits file
@@ -1716,10 +1725,17 @@ def save_simulated_transit_components_to_fits(
                 fits_file.append(hdu)
 
         # Components that vary from transit to transit
-        for extname in ["COMPONENT_TAU", "COMPONENT_SCALE"]:
+        if tau_scale_H2O is None or tau_scale_non_H2O is None:
+            per_transit_terms = ["COMPONENT_TAU", "COMPONENT_SCALE",]
+        else:
+            per_transit_terms = [
+                "COMPONENT_TAU", "COMPONENT_SCALE", "COMPONENT_TAU_SCALE_H2O",
+                "COMPONENT_TAU_SCALE_NON_H2O"]
+        
+        for extname in per_transit_terms:
             for trans_i in range(n_transit):
                 extname_i = "{}_{:0.0f}".format(extname, trans_i)
-
+                
                 # First check if the HDU already exists
                 if extname_i in fits_file:
                     fits_file[extname_i].data = extensions[extname][0][trans_i]

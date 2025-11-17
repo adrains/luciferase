@@ -114,6 +114,7 @@ def plot_component_spectra(
     scale_vector,
     transit_num,
     star_name,
+    tau_scale_H2O_components=None,
     ref_fluxes=None,
     ref_telluric_tau=None,
     ref_planet_trans=None,
@@ -147,6 +148,10 @@ def plot_component_spectra(
     star_name: str
         Name of the star.
 
+    tau_scale_H2O_components: float array or None, default: None
+        Optical depth scaling term for variable tellurics of shape [n_phase].
+        This will be None if we have static tellurics.
+
     ref_fluxes, ref_telluric_tau, ref_planet_trans, ref_scale_vector: 
     float array or None
         Reference vectors to plot against fluxes, tau, trans, and scale.
@@ -173,13 +178,20 @@ def plot_component_spectra(
             alpha=0.8,
             label="Stellar" if spec_i == 0 else None,)
         
-        ax_tell.plot(
-            waves[spec_i],
-            np.exp(-telluric_tau[spec_i]),
-            linewidth=linewidth,
-            color="b",
-            alpha=0.8,
-            label="Telluric" if spec_i == 0 else None,)
+        # Tellurics can be either [n_spec, n_px] or [n_phase, n_spec, n_px]
+        if len(telluric_tau.shape) == 2:
+            telluric_tau_3D = telluric_tau[None,:,:]
+        else:
+            telluric_tau_3D = telluric_tau
+
+        for tau_i, t_tau in enumerate(telluric_tau_3D):
+            ax_tell.plot(
+                waves[spec_i],
+                np.exp(-t_tau[spec_i]),
+                linewidth=linewidth,
+                color="b",
+                alpha=0.7,
+                label="Telluric" if spec_i == 0 and tau_i == 0 else None,)
         
         ax_trans.plot(
             waves[spec_i],
@@ -188,22 +200,6 @@ def plot_component_spectra(
             color="g",
             alpha=0.8,
             label="Planet" if spec_i == 0 else None)
-        
-        ax_scale.plot(
-            np.arange(len(scale_vector)),
-            scale_vector,
-            marker="o",
-            linewidth=linewidth,
-            color="c",
-            alpha=0.8,
-            label="Slit Loss (Norm)" if spec_i == 0 else None)
-        
-        ax_scale.hlines(
-            y=1,
-            xmin=0,
-            xmax=len(scale_vector),
-            colors="k",
-            linestyles="dotted",)
         
         # Plot reference vectors if we have them
         if (ref_fluxes is not None
@@ -242,6 +238,34 @@ def plot_component_spectra(
                 linewidth=linewidth,
                 color="c",
                 alpha=0.8,)
+    
+    # Scale vector
+    ax_scale.plot(
+        np.arange(len(scale_vector)),
+        scale_vector,
+        marker="o",
+        linewidth=linewidth,
+        color="c",
+        alpha=0.8,
+        label="Slit Loss (Norm)",)
+    
+    ax_scale.hlines(
+        y=1,
+        xmin=0,
+        xmax=len(scale_vector),
+        colors="k",
+        linestyles="dotted",)
+    
+    # [Optional] Plot H2O optical depth scaling term if we have it
+    if tau_scale_H2O_components is not None:
+        ax_scale.plot(
+            np.arange(len(scale_vector)),
+            tau_scale_H2O_components,
+            marker="^",
+            linewidth=linewidth,
+            color="m",
+            alpha=0.8,
+            label=r"H$_2$O optical depth scaling",)
 
     ax_flux.set_ylabel("Flux")
     ax_tell.set_ylabel("Transmission")
@@ -267,7 +291,7 @@ def plot_component_spectra(
     
     ax_trans.set_xlabel(r"Wavelength (${\rm \AA}$)")
     ax_scale.set_xlabel("Epoch #")
-    ax_scale.set_ylim(0.5, 1.5)
+    #ax_scale.set_ylim(0.5, 1.5)
 
     fig_name = "plots/{}_transit_{:0.0f}_components.pdf".format(
         star_name, transit_num)

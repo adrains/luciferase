@@ -2018,12 +2018,12 @@ def simulate_transit_multiple_epochs(
                 tau_scale_non_H2O=tau_scale_non_H2O[phase_i],
                 do_broaden=True,
                 resolving_power=instr_resolving_power,)
-            
+
             # Append
             telluric_tau_2D.append(-np.log(telluric_trans))
 
         # Convert to numpy array
-        telluric_tau_2D = np.stack(telluric_tau_2D )
+        telluric_tau_2D = np.stack(telluric_tau_2D)
 
     # TODO: Sanity check to make sure that all wavelength vectors overlap
     pass
@@ -2055,6 +2055,11 @@ def simulate_transit_multiple_epochs(
     fluxes_model_all = np.zeros(shape)
     sigma_model_all = np.zeros(shape)
     
+    # Initialise output for the component vectors that vary with time.
+    # Currently this is only the telluric tau vector in the case of time
+    # varying humidity.
+    tau_2D_components = []
+    
     # Loop over all phases and determine fluxes
     for epoch_i, transit_epoch in transit_info.iterrows():
         print("Simulating epoch {}/{}...".format(epoch_i+1, len(transit_info)))
@@ -2072,10 +2077,10 @@ def simulate_transit_multiple_epochs(
 
         # If we have per-phase telluric templates, select
         if telluric_template_kind == "per_species":
-            telluric_tau = telluric_tau_2D[phase_i]
+            telluric_tau = telluric_tau_2D[epoch_i]
 
         # Simulate this epoch
-        flux_counts, _ = simulate_transit_single_epoch(
+        flux_counts, component_vectors = simulate_transit_single_epoch(
             wave_observed=wave_observed,
             wave_marcs=wave_marcs,
             fluxes_marcs=fluxes_marcs,
@@ -2095,7 +2100,12 @@ def simulate_transit_multiple_epochs(
             fill_throughput_value=fill_throughput_value,
             planet_transmission_boost_fac=planet_transmission_boost_fac,)
 
+        # Store the model fluxes
         fluxes_model_all[epoch_i] = flux_counts
+
+        # [Optional] Store the telluric tau
+        if telluric_template_kind == "per_species":
+            tau_2D_components.append(component_vectors["telluric_tau"].copy())
 
     # -------------------------------------------------------------------------
     # Add noise [Optional], compute uncertainties
@@ -2227,11 +2237,15 @@ def simulate_transit_multiple_epochs(
     component_vectors["scale_vector"] = scale_vector
 
     # [Optional] add in specific terms used to construct tellurics, as well as
-    # the 2D telluric vector itself.
+    # the 2D telluric vector itself. Replace the existing 1D tau with the 2D
+    # adopted tau on the model wavelength scale.
     if telluric_template_kind == "per_species":
         component_vectors["telluric_tau_2D"] = telluric_tau_2D
         component_vectors["tau_scale_H2O"] = tau_scale_H2O
         component_vectors["tau_scale_non_H2O"] = tau_scale_non_H2O
+
+        # Replace existing tau
+        component_vectors["telluric_tau"] = np.stack(tau_2D_components)
 
     return fluxes_model_all, sigma_model_all, component_vectors
 
