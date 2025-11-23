@@ -1077,10 +1077,13 @@ def calc_Kp_vsys_map_snr(
     vsys_steps,
     Kp_steps,
     Kp_vsys_maps,
-    vsys_rv_exclude=(-30,30)):
+    vsys_rv_exclude=(-30,30),
+    Kp_rv_exclude=(-30,30),
+    kp_expected=100,):
     """Scales Kp-Vsys maps to be in units of SNR. Noise is computed from the 
-    standard deviation of the map excluding the central +/-vsys_rv_exclude in 
-    Vsys space (the x axis), as is the background level.
+    standard deviation of the map excluding the central region within 
+    +/-vsys_rv_exclude and kp_expected +/- Kp_rv_exclude  for the X and Y axes
+    respectively.
 
     SNR = (map - background) /  noise
 
@@ -1102,7 +1105,18 @@ def calc_Kp_vsys_map_snr(
 
     vsys_rv_exclude: int, default: (-30,30)
         Vsys (i.e. X axis) bounds in km/s outside of which we compute the noise
-        level.
+        level. If these bounds are less and greater than the X axis limits
+        respectively, no Vsys exclusion will be done when computing SNR.
+        vsys_rv_exclude[0] must be < vsys_rv_exclude[1]
+
+    Kp_rv_exclude: int, default: (-30,30)
+        Kp (i.e. Y axis) bounds in km/s (taken to be +/- kp_expected) outside
+        of which we compute the noise level. If these bounds are less and
+        greater than the Y axis limits respectively, no Kp exclusion will be
+        done when computing SNR. Kp_rv_exclude[0] must be < Kp_rv_exclude[1]
+
+    kp_expected: float, default: 100
+        Expected Kp (i.e. Y axis) value from which we reference Kp_rv_exclude.
 
     Returns
     -------
@@ -1122,6 +1136,13 @@ def calc_Kp_vsys_map_snr(
     else:
         (n_maps, n_sysrem_iter, n_Kp_steps, n_rv_step) = Kp_vsys_maps.shape
 
+    # Input checking
+    if vsys_rv_exclude[0] >= vsys_rv_exclude[1]:
+        raise ValueError("vsys_rv_exclude[0] >= vsys_rv_exclude[1]")
+    
+    if Kp_rv_exclude[0] >= Kp_rv_exclude[1]:
+        raise ValueError("Kp_rv_exclude[0] >= Kp_rv_exclude[1]")
+
     # Initialise return datastructures
     snr_maps = np.full_like(Kp_vsys_maps, np.nan)
     max_snr = np.full((n_maps, n_sysrem_iter), np.nan)
@@ -1133,17 +1154,27 @@ def calc_Kp_vsys_map_snr(
         # Loop over all SYSREM iterations
         for sr_iter_i in range(n_sysrem_iter):
             # Compute the SNR for this SYSREM iteration. To do this we compute
-            # the *noise* from the regions to the left/right of px_x_noise_lims
-            # (i.e. we mask out [px_x_noise_lims:-px_x_noise_lims] in x when 
-            # computing the noise). We then also need to subtract the median 
-            # value of the same region, which we can consider the 'background'.
+            # the *noise* from the regions outside the bounding box defined by
+            # vsys_rv_exclude and vsys_rv_exclude, centred in y on kp_expected.
+            # We then also need to subtract the median value of the same 
+            # region, which we can consider the 'background'.
             noise_map = Kp_vsys_maps[map_i, sr_iter_i].copy()
 
-            exclude_mask = np.logical_and(
-                vsys_steps > vsys_rv_exclude[0],
-                vsys_steps < vsys_rv_exclude[1])
+            # Create 2D indices for masking in both Vsys and Kp
+            xx_vsys, yy_Kp = np.meshgrid(vsys_steps, Kp_steps)
 
-            noise_map[:,exclude_mask] = np.nan
+            exclude_mask = np.all((
+                xx_vsys > vsys_rv_exclude[0],
+                xx_vsys < vsys_rv_exclude[1],
+                yy_Kp > (kp_expected + Kp_rv_exclude[0]),   # Note '+' sign
+                yy_Kp < (kp_expected + Kp_rv_exclude[1])),
+                axis=0)
+            
+            # Make sure we've excluded values
+            if np.sum(exclude_mask) == 0:
+                raise ValueError("Warning: masked region contains zero px.")
+
+            noise_map[exclude_mask] = np.nan
             noise_std = np.nanstd(noise_map)
             noise_med = np.nanmedian(noise_map)
             snr = (Kp_vsys_maps[map_i, sr_iter_i] - noise_med) / noise_std
@@ -1158,6 +1189,8 @@ def calc_Kp_vsys_map_snr(
             max_snr[map_i, sr_iter_i] = snr[kp_i, vsys_i]
             vsys_at_max_snr[map_i, sr_iter_i] = vsys_steps[vsys_i]
             kp_at_max_snr[map_i, sr_iter_i] = Kp_steps[kp_i]
+
+    print("Excluded box contains {} px".format(np.sum(exclude_mask)))
 
     return snr_maps, max_snr, vsys_at_max_snr, kp_at_max_snr
 

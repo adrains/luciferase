@@ -213,7 +213,9 @@ cc_rv_lims: [-200,200]
 #------------------------------------------------------------------------------
 # Kp-Vsys Settings
 #------------------------------------------------------------------------------
-# Expected Kp value (TODO: this should be in the planet data)
+# Expected Kp value. This is used when plotting the 'expected' planet position,
+# and when computing the SNR as the +/- KP limits are centred on this value.
+# TODO: this should be in the planet data
 kp_expected: 105.2
 
 # Step size for the Kp-Vsys map in km/s. Same caveats as for cc_rv_step above.
@@ -231,5 +233,8 @@ kp_vsys_x_range: [-120,120]
 # We exclude RVs within these bounds when computing the noise for our Kp-Vsys
 # maps. This range should be set to exclude the points around Vsys = 0, and
 # should be sufficiently smaller than kp_vsys_x_range to allow a reasonable
-# region from which to compute noise statistics for.
-kp_vsys_snr_rv_exclude: [-30, 30]
+# region from which to compute noise statistics for. Note that the first value
+# must always be smaller than the second. To not have limits in either X or Y,
+# simplying set to +/- greater than the actual Kp or Vsys range.
+kp_vsys_snr_rv_exclude: [-30, 30]     # x axis (Vsys)
+kp_vsys_snr_kp_exclude: [-30, 30]     # y axis (Kp, centred on kp_expected)

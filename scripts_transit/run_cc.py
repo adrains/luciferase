@@ -497,7 +497,9 @@ snr_maps, max_snr, vsys_at_max_snr, kp_at_max_snr = sr.calc_Kp_vsys_map_snr(
     vsys_steps=vsys_steps,
     Kp_steps=Kp_steps,
     Kp_vsys_maps=combined_maps,
-    vsys_rv_exclude=ss.kp_vsys_snr_rv_exclude)
+    vsys_rv_exclude=ss.kp_vsys_snr_rv_exclude,
+    Kp_rv_exclude=ss.kp_vsys_snr_kp_exclude,
+    kp_expected=ss.kp_expected,)
 
 # Make a plot of all the sequences/nights together
 tplt.plot_combined_kp_vsys_map_as_snr(
