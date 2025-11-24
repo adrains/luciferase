@@ -16,7 +16,7 @@ n_transit = 2
 label = "wasp107_np_corr"
 
 # New label for the file to avoid overwriting our existing file.
-new_label = "wasp107_np_corr_jun25"
+new_label = "wasp107_np_corr_251124"
 
 # If false, we always aim to have n_px = 2048 per what comes out of the CRIRES+
 # pipeline, regardless of any clipping that has happened in IDL. We accomplish
@@ -53,8 +53,8 @@ spec_list_new = []
 sigmas_list_new = []
 
 nightly_idl_sav_files = [
-    "simulations/wasp107_wave_corr_nn1_250604.sav",
-    "simulations/wasp107_wave_corr_nn2_250604.sav",]
+    "simulations/wasp107_wave_corr_n1_251124.sav",
+    "simulations/wasp107_wave_corr_n2_251124.sav",]
 
 # Loop over nights
 for night_i in range(n_transit):
@@ -139,8 +139,14 @@ if n_px_idl <= n_px_full and not accept_npx_difference:
         delta_lambda = np.median(np.diff(wave[-2*n_edge:last_idl_px]))
         lambda_edge = wave[last_idl_px] + (remaining_px+1)*delta_lambda
 
-        waves_new[spec_i, last_idl_px+1:] = \
-            np.arange(wave[last_idl_px], lambda_edge, delta_lambda)[1:]
+        # Interpolate wavelengths to the edge of the detector. Note that due to
+        # (presumably) how we've computed lambda_edge, we can end up with one
+        # more wavelength point than required if there are an odd number of px
+        # missing. As such, we do a HACK and slice to remaining_px+1 when
+        # assigning this new wavelength scale to waves_new.
+        edge_interp = np.arange(wave[last_idl_px], lambda_edge, delta_lambda)
+
+        waves_new[spec_i, last_idl_px+1:] = edge_interp[1:remaining_px+1]
 
         assert np.sum(np.isnan(waves_new[spec_i])) == 0
 
