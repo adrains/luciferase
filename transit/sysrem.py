@@ -1056,8 +1056,7 @@ def compute_Kp_vsys_map(
         Kp_vsys_map = Kp_vsys_map[:,:,:,vsys_mask]
 
         # And update cc_rvs
-        cc_rvs_subset = np.arange(
-            vsys_lims[0], vsys_lims[1]+1, np.diff(cc_rvs)[0])
+        cc_rvs_subset = cc_rvs[vsys_mask]
 
     # If we were given a combined set of CCVs, removed the combined set of
     # cross correlation values and return that as its own variable.
