@@ -16,7 +16,7 @@ n_transit = 2
 label = "wasp107_np_corr"
 
 # New label for the file to avoid overwriting our existing file.
-new_label = "wasp107_np_corr_251124"
+new_label = "wasp107_np_corr_251129"
 
 # If false, we always aim to have n_px = 2048 per what comes out of the CRIRES+
 # pipeline, regardless of any clipping that has happened in IDL. We accomplish
@@ -53,8 +53,8 @@ spec_list_new = []
 sigmas_list_new = []
 
 nightly_idl_sav_files = [
-    "simulations/wasp107_wave_corr_n1_251124.sav",
-    "simulations/wasp107_wave_corr_n2_251124.sav",]
+    "simulations/wasp107_wave_corr_n1_251129.sav",
+    "simulations/wasp107_wave_corr_n2_251129.sav",]
 
 # Loop over nights
 for night_i in range(n_transit):
@@ -115,7 +115,7 @@ for night_i in range(n_transit):
         raise Exception("Something has gone wrong.")
 
 # [Optional] Fix nans in the wavelength scale
-if n_px_idl <= n_px_full and not accept_npx_difference:
+if n_px_idl < n_px_full and not accept_npx_difference:
     # To avoid having nans in our wavelength scale, we need to extrapolate
     # a dummy wavelength scale for the edge pixels. While we can probably
     # do this in a nice vectorised way, we're just going to use a loop for
