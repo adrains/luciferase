@@ -16,7 +16,7 @@ n_transit = 2
 label = "wasp107_np_corr"
 
 # New label for the file to avoid overwriting our existing file.
-new_label = "wasp107_np_corr_251129"
+new_label = "wasp107_np_corr_251211"
 
 # If false, we always aim to have n_px = 2048 per what comes out of the CRIRES+
 # pipeline, regardless of any clipping that has happened in IDL. We accomplish
@@ -26,6 +26,9 @@ new_label = "wasp107_np_corr_251129"
 # TODO: currently setting this to true causes problems later with molecfit
 # templates which have n_px = 2048, so best to leave as False.
 accept_npx_difference = False
+
+# HACK for IDL-side error where order (but not detector) indexing is backwards.
+do_invert_wl_scale_order_indexing = True
 
 #------------------------------------------------------------------------------
 # Main Operation
@@ -53,8 +56,8 @@ spec_list_new = []
 sigmas_list_new = []
 
 nightly_idl_sav_files = [
-    "simulations/wasp107_wave_corr_n1_251129.sav",
-    "simulations/wasp107_wave_corr_n2_251129.sav",]
+    "simulations/wasp107_wave_corr_n1_251211.sav",
+    "simulations/wasp107_wave_corr_n2_251211.sav",]
 
 # Loop over nights
 for night_i in range(n_transit):
@@ -78,6 +81,12 @@ for night_i in range(n_transit):
     waves_night = waves_night[waves_ii]
     obs_night = obs_night[:,waves_ii,:]
     sigma_night = sigma_night[:,waves_ii,:]
+
+    # HACK for backwards order numbering on flux and sigma, but *not* detector
+    if do_invert_wl_scale_order_indexing:
+        ii = np.array([15,16,17,12,13,14,9,10,11,6,7,8,3,4,5,0,1,2])
+        obs_night = obs_night[:,ii,:]
+        sigma_night = sigma_night[:,ii,:]
 
     # If this night is >= 1, enforce that the wavelengths scale is the same
     if night_i >= 1:
