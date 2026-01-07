@@ -3348,11 +3348,15 @@ def continuum_normalise_spectrum_with_telluric_model(
     else:
         params_init = (1,1)
 
-    # Mask out nans and infs with default values
+    # Mask out nans, infs, and px <= 0 with default values
     flux = flux_sci.copy()
     sigma = sigma_sci.copy()
 
-    bad_px_mask = np.logical_or(np.isnan(flux_sci), np.isnan(sigma_sci))
+    bad_px_mask = np.any([
+        np.isnan(flux_sci),
+        np.isnan(sigma_sci),
+        flux_sci <= 0,
+        sigma_sci <= 0,], axis=0)
     
     # Mask out edge pixels
     bad_px_mask[:edge_px_to_exclude] = True
