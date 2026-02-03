@@ -1265,6 +1265,7 @@ def simulate_transit_single_epoch(
     r_tel_prim,
     r_tel_cen_ob,
     throughput_json_path,
+    do_disable_planet_transit=False,
     do_equid_lambda_resample=True,
     fill_throughput_value=0,
     planet_transmission_boost_fac=1,
@@ -1363,6 +1364,9 @@ def simulate_transit_single_epoch(
     r_tel_prim, r_tel_cen_ob: float
         Radii of telescope primary mirror and central obstruction in metres.
 
+    do_disable_planet_transit: bool, default: False
+        If True, we disable the planet transiting at all.
+
     throughput_json_path: string
         Filepath to the CRIRES+ JSON file containing instrument transfer
         functions as a function of wavelength.
@@ -1450,7 +1454,7 @@ def simulate_transit_single_epoch(
     # blocking fraction of the planet, which isn't necessarily the same as the
     # blocking fraction at the midpoint. Our current approach should be a good
     # enough approximation for now.
-    if transit_epoch["is_in_transit_mid"]:
+    if transit_epoch["is_in_transit_mid"] and not do_disable_planet_transit:
         # ---------------------------------------------------------------------
         # Planet flux
         # ---------------------------------------------------------------------
@@ -1662,6 +1666,7 @@ def simulate_transit_multiple_epochs(
     do_use_uniform_stellar_spec,
     do_use_uniform_telluric_spec,
     do_use_uniform_planet_spec,
+    do_disable_planet_transit,
     correct_for_blaze,
     scale_vector_method,
     savgol_window_frac_size,
@@ -1776,6 +1781,10 @@ def simulate_transit_multiple_epochs(
     do_use_uniform_planet_spec: boolean
         If True, the imported planet spectrum is set to have 100% 
         transmittance.
+
+    do_disable_planet_transit: boolean
+        If True, we never simulate the planet in transit and only the stellar
+        and telluric components contribute.
 
     correct_for_blaze: boolean
         Whether or not to correct for the effect of the blaze function once
@@ -1990,6 +1999,8 @@ def simulate_transit_multiple_epochs(
         
         elif tau_scale_H2O_kind == "smoothed_random":
             wl = int(n_phase * tau_scale_H2O_savgol_window_frac_size)
+            wl = wl if wl % 2 != 0 else wl+1
+
             rand_range = float(np.diff(tau_scale_H2O_random_limits))
             rand_points = np.random.random_sample(n_phase) * rand_range \
                 + tau_scale_H2O_random_limits[0]
@@ -2039,9 +2050,12 @@ def simulate_transit_multiple_epochs(
 
     elif scale_vector_method =="smoothed_random":
         rand_points = np.random.random_sample(n_phase) * 2.0
+        wl = int(n_phase * savgol_window_frac_size)
+        wl = wl if wl % 2 != 0 else wl+1
+
         scale_vector = savgol_filter(
             x=rand_points,
-            window_length=int(n_phase * savgol_window_frac_size),
+            window_length=wl,
             polyorder=savgol_poly_order,)
     else:
         raise ValueError("scale_vector_method must be in {}".format(
@@ -2096,6 +2110,7 @@ def simulate_transit_multiple_epochs(
             r_tel_prim=r_tel_prim,
             r_tel_cen_ob=r_tel_cen_ob,
             do_equid_lambda_resample=do_equid_lambda_resample,
+            do_disable_planet_transit=do_disable_planet_transit,
             throughput_json_path=throughput_json_path,
             fill_throughput_value=fill_throughput_value,
             planet_transmission_boost_fac=planet_transmission_boost_fac,)

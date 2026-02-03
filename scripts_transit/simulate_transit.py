@@ -35,6 +35,10 @@ waves, _, _, det, orders, transit_info_list, syst_info = \
         ss.base_fits_label,
         n_transit=ss.n_transit,)
 
+if ss.do_clear_observed_transits:
+    transit_info_list = []
+    ss.n_transit = 0
+
 # Add in any extra unobserved transits to be simulated, which increments
 # n_transit as stored in the YAML file. All that is needed to simulate these
 # unobserved transits is to append their transit_info DataFrames onto the end
@@ -98,12 +102,13 @@ else:
 print("\tsyst_info updated?\t{}".format(ss.do_update_syst_info))
 print("\tN transits\t\t{} ({}+{})".format(
     ss.n_transit, n_transit_observed, n_transit_unobserved))
+print("\tClear Obs. Transits\t{}".format(ss.do_clear_observed_transits))
 if ss.do_use_ingress_egress_templates:
     print("\tPlanet (ingress)\t{}".format(ss.planet_fits_ingress))
     print("\tPlanet (transit)\t{}".format(ss.planet_fits))
     print("\tPlanet (egress)\t\t{}".format(ss.planet_fits_egress))
 else:
-    print("\tPlanet template\t{}".format(ss.planet_fits))
+    print("\tPlanet template\t\t{}".format(ss.planet_fits))
 if ss.target_snr is None:
     print("\tSNR\t\t\tinf")
 else:
@@ -118,7 +123,8 @@ print("\tTelluric non-H2O scale\t{}".format(ss.tau_scale_non_H2O_kind))
 print("\tVsys offset\t\t{} km/s".format(ss.vsys_offset))
 print("\tUniform stellar\t\t{}".format(ss.do_use_uniform_stellar_spec))
 print("\tUniform telluric\t{}".format(ss.do_use_uniform_telluric_spec))
-print("\tUniform planet\t\t{}\n".format(ss.do_use_uniform_planet_spec))
+print("\tUniform planet\t\t{}".format(ss.do_use_uniform_planet_spec))
+print("\tTransit disabled\t{}\n".format(ss.do_disable_planet_transit))
 
 # [Optional] Offset Vsys
 if ss.vsys_offset != 0:
@@ -151,6 +157,7 @@ for transit_i in range(ss.n_transit):
             do_use_uniform_stellar_spec=ss.do_use_uniform_stellar_spec,
             do_use_uniform_telluric_spec=ss.do_use_uniform_telluric_spec,
             do_use_uniform_planet_spec=ss.do_use_uniform_planet_spec,
+            do_disable_planet_transit=ss.do_disable_planet_transit,
             correct_for_blaze=ss.correct_for_blaze,
             scale_vector_method=ss.scale_vector_method,
             savgol_window_frac_size=ss.savgol_window_frac_size,

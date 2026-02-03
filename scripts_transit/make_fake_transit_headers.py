@@ -12,13 +12,19 @@ import matplotlib.pyplot as plt
 import transit.utils as tu
 
 # Setup
-target_id = "WASP-107"
 observatory = "Paranal"
-n_phases = 52
-planet_properties_file = "scripts_transit/planet_data_wasp107.csv"
 save_path = "simulations/simulated_transit_df/"
 
 # Transit midpoints (sourced from NASA transit prediction service)
+#-----------------------------------------
+# WASP-107b
+#-----------------------------------------
+#target_id = "WASP-107"
+#n_phases = 52
+#planet_properties_file = "scripts_transit/planet_data_wasp107.csv"
+
+#exp_sec = 301.4352425
+
 # ----
 # 2022
 # ----
@@ -41,10 +47,42 @@ save_path = "simulations/simulated_transit_df/"
 #transit_midpoint_jd = 2460433.63164 # UT03/05/2024 03:10, bcor = -15 km/s
 transit_midpoint_jd = 2460456.51760 # UT26/25/2024 00:25, bcor = -23 km/s
 
+#-----------------------------------------
+# GJ 1214
+#-----------------------------------------
+target_id = "GJ1214"
+n_phases = 80
+planet_properties_file = "scripts_transit/planet_data_GJ1214.csv"
+
+exp_sec = 120
+
+# 220311 -- Mahajan et al. 2024
+#transit_midpoint_jd = 2459650.84409362
+
+# 220330 -- Mahajan et al. 2024
+#transit_midpoint_jd = 2459669.80894799
+
+# 220703 -- Mahajan et al. 2024
+#transit_midpoint_jd = 2459764.63321985
+
+# 220810 -- Mahajan et al. 2024
+#transit_midpoint_jd = 2459802.56292859
+
+# 230622 -- Mahajan et al. 2024
+#transit_midpoint_jd = 2460118.64382557
+
+# 230810 -- Schlawin et al. 2024
+#transit_midpoint_jd = 2460167.63636015
+
+# 240806 -- Mahajan et al. 2024
+#transit_midpoint_jd = 2460529.54901285
+
+# 240817 -- Mahajan et al. 2024
+transit_midpoint_jd = 2460540.61184457
+
 #------------------------------------------------------------------------------
 # Construct time mid-points
 #------------------------------------------------------------------------------
-exp_sec = 301.4352425
 exp_day = exp_sec / 24 / 3600
 
 # These are the overheads between exposures when repeating or changing between

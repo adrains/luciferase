@@ -13,8 +13,8 @@
 #   _vsys_offset_<N>_SNR_<N>
 # where each boolean, or number corresponds to the values set below.
 save_path: "simulations"
-star_name: "wasp107"
-label: "simulated_R100000_wasp107_W24_ingress_egress"
+star_name: "WASP-107b"
+label: "simulated_R100000_WASP107b_constant_H2O"
 
 # Number of transits to simulate, which *must* correspond to the number of
 # transits of real data in the base fits file of observed data.
@@ -24,6 +24,12 @@ n_transit: 2
 # pre-existing datacube made by scripts_transit/prepare_transit_model_fits.py
 base_fits_path: "simulations"
 base_fits_label: "wasp107"
+
+# If we want to simulate (almost) entirely independent from actually observed
+# transits, we can use a pre-imported fits file from an unrelated star to get
+# the wavelength scale + detector and order info, but then clear the 'observed'
+# transits for the unrelated star.
+do_clear_observed_transits: False
 
 # If True, we can also simulate transits that we didn't observe  by using 
 # scripts_transit/make_fake_transit_headers.py to generate the equivalent
@@ -41,6 +47,16 @@ unobserved_transit_dataframes:
 - "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-05-03.csv"
 - "simulations/simulated_transit_df/transit_info_df_WASP-107_2024-05-26.csv"
 
+# Below is for LN GJ1214 paper
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2022-03-12.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2022-03-31.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2022-07-04.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2022-08-11.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2023-06-23.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2023-08-11.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2024-08-07.csv"
+# - "simulations/simulated_transit_df/transit_info_df_GJ1214_2024-08-18.csv"
+
 # If this is true, then we reimport the syst_info data frame + update all the
 # previously computed values (e.g. positions, velocities) at each time step.
 # This is useful for quickly modifying aspects of the planet's orbit in a way
@@ -51,6 +67,9 @@ do_update_syst_info: True
 # Properties CSV with star, planet, and system info. Only applicable if 
 # do_update_syst_info is set to True.
 planet_properties_file: "scripts_transit/planet_data_wasp107.csv"
+
+# Below is for LN GJ1214 paper
+#planet_properties_file: "scripts_transit/planet_data_GJ1214.csv"
 
 # Whether to take stellar rotation into account when computing the Doppler
 # shift beta, otherwise gamma = beta. Only applicable if do_update_syst_info is
@@ -63,6 +82,9 @@ do_consider_vsini: False
 # Model stellar spectrum--this should *not* be continuum normalised.
 #marcs_fits: "synth/template_wasp107_230623.fits"                     # non-mu sampled
 marcs_fits: "templates/WASP107_MARCS_4420g4.61z+0.00m0.683mu49.fits"  # mu sampled
+
+# Below is for LN GJ1214 paper
+#marcs_fits: "templates/template_GJ1214_251119.fits" # non-mu sampled GJ1214
 
 # Model planet spectrum fits file containing planet Rp (R_jup) vs lambda (um).
 # This file is made by: scripts_transit/make_planet_transmission_grid_fits.py
@@ -198,7 +220,13 @@ stellar_template_fits: "data_reduction/WASP107/template_wasp_107.fits"
 # Set these to true to disable the respective component in the modelling
 do_use_uniform_stellar_spec: False
 do_use_uniform_telluric_spec: False
+
+# For the planet, we have two options. We can disable the planet *atmosphere*
+# (i.e. simulating a bare rock whose transit depth does not vary with 
+# wavelength), or we can simulate a non-transiting planet (i.e. the transit
+# itself never occurs).
 do_use_uniform_planet_spec: False
+do_disable_planet_transit: False
 
 # Set this to values > 1 to increase the planetary absorption. This value will
 # be *directly* multiplied the wavelength-dependent planet radius vector, so

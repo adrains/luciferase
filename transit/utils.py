@@ -22,6 +22,7 @@ from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 from numpy.polynomial.polynomial import Polynomial
 from PyAstronomy.pyasl import instrBroadGaussFast
+from scipy.interpolate import LinearNDInterpolator
 
 # -----------------------------------------------------------------------------
 # Kepler's laws
@@ -3175,6 +3176,76 @@ def generate_mock_flux_mu_grid(
         flux_grid[:, mu_i] = limb_darken_spectrum(flux, a_limb, mu)
 
     return flux_grid, mu_grid
+
+
+def interpolate_four_term_ldc(
+    teff,
+    logg,
+    feh,
+    filt="K",
+    xi=2.0,
+    filepath="data/claret_bloemen_ld_grid_4term.tsv"):
+    """Function to interpolate the four term limb darkening coefficients given 
+    values of stellar Teff, logg, [Fe/H], microturbulent velocity, and a 
+    photometric filter. The interpolated grid is from Claret and Bloemen 2011:
+     - http://adsabs.harvard.edu/abs/2011A%26A...529A..75C
+    
+    TODO: this does not appear to be used or tested properly?
+
+    Paremeters
+    ----------
+    teff: float or float array
+        Stellar effective temperature in Kelvin
+    
+    logg: float or float array
+        Stellar surface gravity.
+        
+    feh: float or float array
+        Stellar metallicity, [Fe/H].
+        
+    filt: string or string array
+        The filter bandpass to use.
+        
+    xi: float or float array
+        Microturbulent velocity (km/s)
+        
+    Returns
+    -------
+    u_lld: float or floar array
+        The wavelength dependent linear limb-darkening coefficient
+        
+    u_ld_err: float or float array
+        The error on u_lld
+    """
+    # Import
+    ldd_grid = pd.read_csv(
+        filepath,
+        delim_whitespace=True,
+        comment="#", 
+        header=0,
+        dtype={"logg":float, "Teff":float, "Z":float, "xi":float, "a1":float,
+               "a2":float, "a3":float, "a4":float, "Filt":str, "Met":str, 
+               "Mod":str},)
+    
+    # Interpolate only over the portion of the grid with the relevant filter
+    # and assumed microturbulent velocity
+    subset = ldd_grid[(ldd_grid["Filt"]==filt) & (ldd_grid["xi"]==xi)]
+    
+    # Interpolate along logg and Teff for all entries for filter
+    params = subset[["Teff", "logg", "Z"]]
+    calc_a1 = LinearNDInterpolator(params, subset["a1"])
+    calc_a2 = LinearNDInterpolator(params, subset["a2"])
+    calc_a3 = LinearNDInterpolator(params, subset["a3"])
+    calc_a4 = LinearNDInterpolator(params, subset["a4"])
+    
+    # Calculate and return
+    ldc = np.array([
+        calc_a1(teff, logg, feh),
+        calc_a2(teff, logg, feh),
+        calc_a3(teff, logg, feh),
+        calc_a4(teff, logg, feh),])
+    
+    return ldc
 
 # -----------------------------------------------------------------------------
 # Handling of settings files
