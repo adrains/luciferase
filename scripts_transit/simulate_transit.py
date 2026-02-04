@@ -195,8 +195,11 @@ for transit_i in range(ss.n_transit):
 
 # Convert to numpy arrays (not scale as n_phase isn't equal across transits)
 flux_components = np.array(flux_components)
-telluric_components = np.array(telluric_components)
 planet_components = np.array(planet_components)
+
+# Only convert telluric components if there isn't a phase dimension.
+if len(telluric_components[0].shape) == 2:
+    telluric_components = np.array(telluric_components)
 
 # -----------------------------------------------------------------------------
 # Save results to fits
