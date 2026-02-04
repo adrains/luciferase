@@ -1651,6 +1651,72 @@ def load_transit_info_from_fits(fits_load_dir, label, n_transit,):
         transit_info_list, syst_info
 
 
+def save_fits_image_hdu(
+    data,
+    extension,
+    label,
+    n_transit,
+    transit_i,
+    path="simulations",):
+    """Saves/updates the data from specified fits image HDU.
+
+    The existing file is <path>/transit_data_<label>_n<n_transit>.fits.
+
+    Parameters
+    ----------
+    data: numpy array
+        Data to update to fits image HDU. Currently supported:
+         - wave, the wavelength scale, [n_phase, n_px]
+         - spec, science spectra fluxes, [n_phase, n_spec, n_px]
+         - sigma, science spectra uncertainties, [n_phase, n_spec, n_px]
+
+    extension: string
+        Which fits image HDU to load. Currently one of [wave, spec, sigma].
+
+    label: string
+        Unique label for the resulting fits file.
+
+    n_transit: int
+        Total number of transits saved to this fits file.
+
+    transit_i: int
+        Specific transit fits image HDU we want to update.
+
+    path: string, default: 'simulations'
+        Path to save the fits file to.
+    """
+    # List of supported extensions
+    valid_ext = {
+        "wave":("WAVES", float),
+        "spec":("OBS_SPEC_", float),
+        "sigma":("SIGMAS_", float),
+    }
+
+    if extension not in valid_ext.keys():
+        raise ValueError("Invalid extension type. Must be in {}".format(
+            valid_ext.keys()))
+
+    # Construct the extension name, noting that 'wave' is common for all nights
+    if extension == "wave":
+        extname = valid_ext[extension][0]   # common wavelength scale
+    else:
+        extname = valid_ext[extension][0] + str(transit_i)
+
+    # Load in the fits file
+    fits_path = os.path.join(
+        path, "transit_data_{}_n{}.fits".format(label, n_transit))
+
+    with fits.open(fits_path, mode="update") as fits_file: 
+        # First check if the HDU already exists
+        if extname in fits_file:
+            fits_file[extname].data = data.astype(valid_ext[extension][1])
+        
+        # Not there
+        else:
+            print("Missing extension?")
+
+        fits_file.flush()
+
 # -----------------------------------------------------------------------------
 # Save/load transit components (flux, trans, tau, scale)
 # -----------------------------------------------------------------------------
